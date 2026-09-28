@@ -1,4 +1,5 @@
 import logging
+import re
 
 import requests
 
@@ -6,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 _CIRCL_URL = "https://vulnerability.circl.lu/api/cve/{}"
 _SSVC_EXPLOIT_MAP = {"active": "Weaponised", "poc": "PoC public", "none": "None known"}
+_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 
 def fetch_cve_info(cve_id: str) -> dict:
@@ -15,6 +17,11 @@ def fetch_cve_info(cve_id: str) -> dict:
     cvss_severity, cvss_vector, exploit_availability, cisa_kev, and references.
     Returns an empty dict on any failure so callers can treat it as optional enrichment.
     """
+    cve_id = (cve_id or "").strip()
+    if not _CVE_ID_RE.fullmatch(cve_id):
+        logger.debug("Rejected invalid CVE ID format: %r", cve_id)
+        return {}
+    cve_id = cve_id.upper()
     try:
         r = requests.get(_CIRCL_URL.format(cve_id), timeout=10, headers={"Accept": "application/json"})
         if r.status_code != 200:
