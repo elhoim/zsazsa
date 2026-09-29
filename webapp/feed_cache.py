@@ -109,6 +109,16 @@ _SCHEDULED_BY = "analyser"
 _MAX_REASON = 300
 
 
+def _safe_suffix(suffix):
+    """A cache file suffix that is safe to use on disk, or None when unknown."""
+    value = (suffix or "").strip().lower()
+    if value == _FAILURE_SUFFIX:
+        return value
+    if value in misp_store.INDICATOR_FORMATS:
+        return value
+    return None
+
+
 def _path(feed_uuid, suffix):
     """One cached file of one feed.
 
@@ -116,7 +126,10 @@ def _path(feed_uuid, suffix):
     the name is taken without any directory part: a feed id is a file in here,
     never a path out of here.
     """
-    return _CACHE_DIR / Path(f"{feed_uuid}.{suffix}").name
+    safe_suffix = _safe_suffix(suffix)
+    if safe_suffix is None:
+        raise ValueError("Unknown cache file suffix")
+    return _CACHE_DIR / Path(f"{feed_uuid}.{safe_suffix}").name
 
 
 def _files(feed_uuid):
@@ -171,7 +184,10 @@ def read(feed, fmt):
     """
     if not interval(feed):
         return None
-    path = _path(feed.uuid, fmt)
+    safe_fmt = _safe_suffix(fmt)
+    if safe_fmt is None:
+        return None
+    path = _path(feed.uuid, safe_fmt)
     try:
         if path.stat().st_mtime < _slot_at_or_before(datetime.now(), feed).timestamp():
             return None
@@ -189,7 +205,10 @@ def last_copy(feed, fmt):
     """
     if not interval(feed):
         return None
-    return _read(_path(feed.uuid, fmt))
+    safe_fmt = _safe_suffix(fmt)
+    if safe_fmt is None:
+        return None
+    return _read(_path(feed.uuid, safe_fmt))
 
 
 def _read(path):
