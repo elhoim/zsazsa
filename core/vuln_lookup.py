@@ -7,7 +7,11 @@ logger = logging.getLogger(__name__)
 
 _CIRCL_URL = "https://vulnerability.circl.lu/api/cve/{}"
 _SSVC_EXPLOIT_MAP = {"active": "Weaponised", "poc": "PoC public", "none": "None known"}
-_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+
+# What a CVE ID looks like, for pulling them out of an event title and for
+# checking one before it is put in a URL. The word boundaries let the same
+# pattern do both: they match at the ends of a string, so fullmatch() works.
+CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 
 
 def fetch_cve_info(cve_id: str) -> dict:
@@ -18,7 +22,7 @@ def fetch_cve_info(cve_id: str) -> dict:
     Returns an empty dict on any failure so callers can treat it as optional enrichment.
     """
     cve_id = (cve_id or "").strip()
-    if not _CVE_ID_RE.fullmatch(cve_id):
+    if not CVE_RE.fullmatch(cve_id):
         logger.debug("Rejected invalid CVE ID format: %r", cve_id)
         return {}
     cve_id = cve_id.upper()

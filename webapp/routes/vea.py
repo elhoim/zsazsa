@@ -1,11 +1,11 @@
 """Vulnerability Exploitation Advisory (VEA) routes."""
 
 import logging
-import re
 from types import SimpleNamespace
 
 import config as _cfg
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
+from core.vuln_lookup import CVE_RE
 from webapp.routes.source_event_utils import (
     flattened_references,
     lookup_source_event_meta,
@@ -13,9 +13,6 @@ from webapp.routes.source_event_utils import (
     parse_source_tokens,
     source_event_references,
 )
-
-_CVE_RE = re.compile(r'\bCVE-\d{4}-\d{4,}\b', re.IGNORECASE)
-
 from webapp import audit, branding, collection_cache, misp_session, misp_store, notify_jobs, product_log
 from webapp.utils import md_to_html, sort_products
 
@@ -321,7 +318,7 @@ def _build_seed_from_sources(source_uuids, source_pairs, source_events):
     ))
 
     for ev in source_events:
-        for m in _CVE_RE.findall(ev.get("info", "")):
+        for m in CVE_RE.findall(ev.get("info", "")):
             cve = m.upper()
             if cve not in cve_ids:
                 cve_ids.append(cve)
@@ -366,8 +363,12 @@ def _build_seed_from_sources(source_uuids, source_pairs, source_events):
     if not references:
         references = misp_store.source_event_urls(source_uuids, source_hints)
 
+    # Only the ones that really are CVE IDs: a MISP vulnerability attribute also
+    # carries GHSA and vendor identifiers, which have no page here, and its value
+    # is whatever was typed into it, which has no business in a URL unchecked.
     for cve in cve_ids:
-        references.append(f"https://vulnerability.circl.lu/vuln/{cve}")
+        if CVE_RE.fullmatch(cve):
+            references.append(f"https://vulnerability.circl.lu/vuln/{cve}")
     references = list(dict.fromkeys(references))
 
     return SimpleNamespace(

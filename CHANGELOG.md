@@ -8,6 +8,7 @@ Support for background jobs via AI in the daily briefing drafts.
 
 - A briefing story the model returned as a numbered list rendered unlike the
   others in the preview, the PDF and the mail, and lost its threat actor type.
+- A CVE ID went into the CIRCL lookup URL unchecked.
 
 ## 1.0.5
 

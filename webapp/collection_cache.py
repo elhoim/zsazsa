@@ -15,7 +15,6 @@ Usage:
 import datetime as _dt
 import json
 import logging
-import re
 import sqlite3
 import threading
 import time
@@ -25,6 +24,7 @@ import urllib3
 from pymisp import PyMISP
 
 import config
+from core.vuln_lookup import CVE_RE
 from webapp import job_store
 from webapp.utils import scraper_enabled
 
@@ -33,7 +33,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _DB_FILE = "data/collection_cache.db"
 _DEFAULT_INTERVAL_MIN = 15
-_CVE_RE = re.compile(r'\bCVE-\d{4}-\d{4,}\b', re.IGNORECASE)
 
 
 def interval_s() -> int:
@@ -245,7 +244,7 @@ def event_cves(event) -> list[str]:
             if getattr(attr, "type", "") == "vulnerability" and getattr(attr, "value", ""):
                 values.append(attr.value.strip().upper())
     if not values:
-        values = [m.upper() for m in _CVE_RE.findall(getattr(event, "info", "") or "")]
+        values = [m.upper() for m in CVE_RE.findall(getattr(event, "info", "") or "")]
     return list(dict.fromkeys(values))
 
 
