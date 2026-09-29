@@ -15,6 +15,8 @@ _WEAKNESS_OBJECT_TEMPLATE = {"uuid": "b8713fc0-d7a2-4b27-a182-38ed47966802", "na
 _CVSS_SCORE_RE = re.compile(r"\d+(?:\.\d+)?")
 # Matches CWE-style weakness ids (e.g. "CWE-77" out of "CWE-77, CWE-89").
 _CWE_ID_RE = re.compile(r"cwe-\d+", re.IGNORECASE)
+# Matches Flowintel template identifiers (numeric IDs or UUIDs).
+_TEMPLATE_ID_RE = re.compile(r"(?:\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")
 
 
 CHANNEL_PREFIX = "flowintel:"
@@ -267,6 +269,8 @@ def get_case_template_tasks(url: str, api_key: str, template_id: str, verify_tls
     or {"ok": False, "error": ...} on failure.
     """
     url = url.rstrip("/")
+    if not _TEMPLATE_ID_RE.fullmatch(template_id or ""):
+        return {"ok": False, "error": "Invalid template_id format."}
     try:
         r = requests.get(f"{url}/api/templating/case/{template_id}", headers={"X-API-KEY": api_key}, timeout=10, verify=verify_tls)
         r.raise_for_status()
