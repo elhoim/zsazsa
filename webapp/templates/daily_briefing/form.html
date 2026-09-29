@@ -58,8 +58,38 @@
     .wb-rail-body { max-height: 20rem; }
   }
 </style>
+{# No unsaved-changes prompt while the AI owns the briefing: leaving the page
+   is the point, and the form is read-only anyway. The attribute has to be gone
+   before base.html reads it, which is why this is not done in script. #}
 <form method="post" action="{{ form_action }}" id="compose-form"
-      data-unsaved-warning{% if starts_unsaved %} data-unsaved-initially{% endif %}>
+      {% if not ai_job %}data-unsaved-warning{% endif %}{% if starts_unsaved %} data-unsaved-initially{% endif %}>
+
+{% if ai_job %}
+  {# The job writes to the stored briefing, so the boxes below are read-only
+     while it runs. This is advisory only: it cannot stop a second tab, or
+     another analyst, from posting this form and overwriting the result. #}
+  <div class="alert alert-info d-flex align-items-start gap-2" id="ai-job-banner"
+       data-job-id="{{ ai_job.id }}" role="status">
+    <i class="fas fa-wand-magic-sparkles mt-1"></i>
+    <div>
+      <strong>The AI is drafting this briefing.</strong>
+      <span id="ai-job-message">{{ ai_job.message or 'Working...' }}</span>
+      <div class="small mt-1">
+        The stories are locked here until it finishes, and this page reloads by itself when it does.
+        You can close it and come back, the result is saved to the briefing either way.
+      </div>
+      <div class="small mt-1">
+        <i class="fas fa-triangle-exclamation me-1"></i>
+        This only locks <em>this</em> page. If you have the briefing open in another tab, or a
+        colleague is editing it, saving there will overwrite whatever the AI writes.
+      </div>
+      <div class="small text-muted mt-1">
+        If the job stops responding, clear it from the jobs list in the top bar and the
+        briefing unlocks.
+      </div>
+    </div>
+  </div>
+{% endif %}
 
   {# ── Command shell ────────────────────────────────────────────────────────
      What the briefing currently holds, and the actions that apply to all of
@@ -91,8 +121,16 @@
     <div class="action-panel-body">
       <div class="zs-toolbar">
         <span class="zs-toolbar-label">AI assistance</span>
-        <button type="button" class="zs-pill" id="btn-draft-all">
-          <i class="fas fa-wand-magic-sparkles"></i> Draft all
+        {# Both submit the form: the briefing is saved first, then a background
+           job drafts into the saved copy, which is what lets the analyst leave
+           the page. name/value tell the route which of the two was pressed. #}
+        <button type="submit" name="ai_draft" value="stories+summary" class="zs-pill" id="btn-draft-everything"
+                title="Save this briefing, then draft every story and the summary in the background. You can leave the page.">
+          <i class="fas fa-wand-magic-sparkles"></i> Draft everything
+        </button>
+        <button type="submit" name="ai_draft" value="stories" class="zs-pill" id="btn-draft-all"
+                title="Save this briefing, then draft the text of every story in the background. The summary is left alone.">
+          <i class="fas fa-align-left"></i> Draft all stories
         </button>
         <button type="button" class="zs-pill" id="btn-use-all-summaries"
                 title="Paste the existing MISP AI summary into every story that has one, skipping stories without an AI summary">
@@ -1500,33 +1538,45 @@ function includeAttributes(idx, eventUuid) {
   });
 }
 
-document.getElementById('btn-draft-all').addEventListener('click', function() {
-  var cards = document.querySelectorAll('.story-card');
-  if (!cards.length) return;
-  var statusEl = document.getElementById('draft-all-status');
-  var btn = this;
-  btn.disabled = true;
-  var total = cards.length;
-  statusEl.textContent = 'Drafting story 1 of ' + total + '...';
+/* While a drafting job owns this briefing the form is read-only, and the page
+   reloads itself when the job is done so the analyst sees what was written.
+   Only a guard rail: another tab can still post this form (the banner says so). */
+/* On DOMContentLoaded, not inline: zsazsaFollowJob is defined further down the
+   page than this block runs, and the counters and button-state helpers below
+   would re-enable what this disables. Last word wins, so this has to be last. */
+document.addEventListener('DOMContentLoaded', function() {
+  var banner = document.getElementById('ai-job-banner');
+  if (!banner) return;
 
-  function doNext(i) {
-    if (i >= cards.length) {
-      btn.disabled = false;
-      statusEl.textContent = 'All ' + total + ' stories drafted.';
-      updateOverlapButtonState();
-      return;
+  var form = document.getElementById('compose-form');
+  form.querySelectorAll('input, textarea, select, button').forEach(function(el) {
+    el.disabled = true;
+  });
+
+  var messageEl = document.getElementById('ai-job-message');
+  zsazsaFollowJob(banner.dataset.jobId,
+    function() { window.location.reload(); },
+    function(err) {
+      banner.classList.replace('alert-info', 'alert-warning');
+      messageEl.textContent = err + ' Reload the page to edit the briefing again.';
+    },
+    function(job) { messageEl.textContent = job.message || 'Working...'; });
+});
+
+/* The two "Draft" buttons above are plain submit buttons now: the form is
+   saved and a background job drafts into the saved briefing, so closing the
+   page no longer throws the work away. Refuse the click when there is nothing
+   to draft, rather than saving a briefing and starting a job over no stories. */
+['btn-draft-all', 'btn-draft-everything'].forEach(function(id) {
+  var btn = document.getElementById(id);
+  if (!btn) return;
+  btn.addEventListener('click', function(ev) {
+    if (!document.querySelectorAll('.story-card').length) {
+      ev.preventDefault();
+      var statusEl = document.getElementById('draft-all-status');
+      if (statusEl) statusEl.textContent = 'Add at least one story first.';
     }
-    var card = cards[i];
-    var draftBtn = card.querySelector('.btn-draft-story');
-    var idx = draftBtn ? draftBtn.dataset.idx : (i + 1);
-    var uuid = draftBtn ? draftBtn.dataset.eventUuid : '';
-    statusEl.textContent = 'Drafting story ' + (i + 1) + ' of ' + total + '...';
-    var p = draftStory(idx, uuid);
-    (p || Promise.resolve()).then(function() {
-      doNext(i + 1);
-    });
-  }
-  doNext(0);
+  });
 });
 
 document.getElementById('btn-use-all-summaries').addEventListener('click', function() {

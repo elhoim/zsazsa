@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_sort_header.html" import sort_th %}
-{% from "_macros.html" import story_scope %}
+{% from "_macros.html" import ai_job_badge, story_scope %}
 
 {% block title %}Daily briefings | zsazsa CTI{% endblock %}
 {% block page_title %}Daily threat briefings{% endblock %}
@@ -66,6 +66,7 @@
           <td>
             {% if b.review_state == 'published' %}<span class="badge bg-success">published</span>
             {% else %}<span class="badge bg-secondary">draft</span>{% endif %}
+            {{ ai_job_badge(ai_jobs.get(b.uuid)) }}
           </td>
           <td style="white-space:nowrap;">{{ b.published_at.strftime('%Y-%m-%d') if b.published_at else '-' }}</td>
           <td class="text-end">

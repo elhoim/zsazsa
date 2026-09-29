@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _focus_points() -> dict:
+    """What the organisation cares about, as the story prompt wants it."""
+    return {
+        "geographies": list(getattr(config, "FOCUS_POINTS_GEOGRAPHIES", []) or []),
+        "sectors": list(getattr(config, "FOCUS_POINTS_SECTORS", []) or []),
+        "technologies": list(getattr(config, "FOCUS_POINTS_TECHNOLOGIES", []) or []),
+        "threat_types": list(getattr(config, "FOCUS_POINTS_THREAT_TYPES", []) or []),
+        "threat_actors": list(getattr(config, "FOCUS_POINTS_THREAT_ACTORS", []) or []),
+    }
+
+
+def _threat_actor_types() -> list:
+    return list(getattr(config, "THREAT_ACTOR_TYPES", []) or [])
+
+
 def _get_event_content_and_scope(event_uuid: str, source_id: str = ""):
     """Fetch report content and scope tags from a source MISP event.
 
@@ -117,16 +132,8 @@ def draft_story():
     try:
         from analyser import llm
 
-        focus_points = {
-            "geographies": list(getattr(config, "FOCUS_POINTS_GEOGRAPHIES", []) or []),
-            "sectors": list(getattr(config, "FOCUS_POINTS_SECTORS", []) or []),
-            "technologies": list(getattr(config, "FOCUS_POINTS_TECHNOLOGIES", []) or []),
-            "threat_types": list(getattr(config, "FOCUS_POINTS_THREAT_TYPES", []) or []),
-            "threat_actors": list(getattr(config, "FOCUS_POINTS_THREAT_ACTORS", []) or []),
-        }
-
-        threat_actor_types = list(getattr(config, "THREAT_ACTOR_TYPES", []) or [])
-        story, suggested_actor_type = llm.draft_briefing_story(content or context_hint, focus_points, threat_actor_types)
+        story, suggested_actor_type = llm.draft_briefing_story(
+            content or context_hint, _focus_points(), _threat_actor_types())
         return jsonify({"story": story, "scope": scope, "threat_actor_type": suggested_actor_type, "error": None})
     except Exception as exc:
         logger.warning("draft_story LLM call failed: %s", exc)
@@ -309,6 +316,136 @@ def _run_briefing_summary_job(job_id: str, stories: list[dict], date: str) -> No
         job_store.update_job(job_id, status="failed", error=str(exc),
                              message=f"Failed: {exc}")
         logger.exception("Briefing summary job %s failed", job_id)
+
+
+# The briefing-level scope fields, which update_briefing expects to be handed
+# back whole. Kept in step with _parse_briefing_scope_from_form in the briefing
+# routes, which is where the form side of the same list lives.
+_BRIEFING_SCOPE_FIELDS = ("geographic_scope", "sectors", "threat_actors",
+                          "mitre_attack_techniques", "threat_types", "technology",
+                          "vendor", "incident", "campaign")
+
+
+def _run_briefing_draft_job(job_id: str, briefing_uuid: str, with_summary: bool, user: str) -> None:
+    """Draft every story on a saved briefing, and its summary when asked.
+
+    Runs against the briefing in MISP rather than the compose form, which is
+    what lets the analyst close the page: the stories are drafted one at a time
+    and written back in a single update at the end, so a briefing is never left
+    half rewritten if the job dies partway.
+    """
+    from analyser import llm
+
+    try:
+        briefing = misp_store.get_briefing(briefing_uuid)
+        if briefing is None:
+            gone = "The briefing could not be loaded."
+            job_store.update_job(job_id, status="failed", error=gone, message=gone)
+            return
+
+        stories = [dict(vars(s)) for s in briefing.stories]
+        total = len(stories)
+        job_store.update_job(job_id, status="running", message=f"Drafting {total} stories...")
+        focus_points, actor_types = _focus_points(), _threat_actor_types()
+        drafted = 0
+
+        with job_store.heartbeat(job_id, f"Drafting {total} stories"):
+            for index, story in enumerate(stories, 1):
+                job_store.update_job(job_id, message=f"Drafting story {index} of {total}...")
+                content, _scope = _get_event_content_and_scope(
+                    story.get("source_event_uuid", ""), story.get("source_id", ""))
+                if not content:
+                    job_store.append_log(job_id, f"Story {index}: no source content, left as it was.")
+                    continue
+                try:
+                    text, actor_type = llm.draft_briefing_story(content, focus_points, actor_types)
+                except Exception as exc:
+                    # One story per model call, so a call that fails costs that
+                    # story and not the seven already drafted. The story button
+                    # on the form treats a failure the same way.
+                    logger.warning("Briefing draft job %s: story %d failed: %s", job_id, index, exc)
+                    job_store.append_log(job_id, f"Story {index}: the model call failed ({exc}).")
+                    continue
+                if not text:
+                    job_store.append_log(job_id, f"Story {index}: the model returned nothing.")
+                    continue
+                story["content"] = text
+                story["drafted_by"] = "ai"
+                # Only when the analyst has not picked one: the suggestion is a
+                # starting point, and the story button leaves an existing choice
+                # alone for the same reason.
+                if actor_type and not story.get("threat_actor_types"):
+                    story["threat_actor_types"] = [actor_type]
+                drafted += 1
+
+            summary = briefing.summary
+            rewrote_summary = False
+            if with_summary:
+                job_store.update_job(job_id, message="Drafting the briefing summary...")
+                written = llm.draft_briefing_summary(
+                    stories, misp_store.briefing_scope_summary(stories), briefing.date or "")
+                if written:
+                    summary, rewrote_summary = written, True
+                else:
+                    job_store.append_log(job_id, "The model returned an empty summary.")
+
+        data = {
+            "date": briefing.date,
+            "title": briefing.title,
+            "author": briefing.author,
+            "tlp": briefing.tlp,
+            "escalations": briefing.escalations,
+            "notes": briefing.notes,
+            "detection_rules": briefing.detection_rules,
+            "summary": summary,
+            # A summary describes the stories it was written from, so redrafting
+            # them dates it unless this run wrote a new one. Asking for a summary
+            # and getting nothing back still leaves the old one out of date.
+            "summary_stale": (briefing.summary_stale or bool(drafted)) and not rewrote_summary,
+            "review_state": briefing.review_state,
+            "stories": stories,
+            # Scope is not touched by drafting, so it is carried across as it
+            # stands: update_briefing rewrites the whole object.
+            **{field: list(getattr(briefing, field)) for field in _BRIEFING_SCOPE_FIELDS},
+        }
+        misp_store.update_briefing(briefing_uuid, data)
+        audit.record("update", "daily-briefing", entity_id=briefing_uuid,
+                     entity_label=f"Daily briefing {briefing.date}",
+                     details=f"AI drafted {drafted} of {total} stories"
+                             + (" and the summary" if with_summary else ""),
+                     user=user)
+        done = f"Drafted {drafted} of {total} stories"
+        job_store.update_job(job_id, status="completed", message=done + ", saved to the briefing.",
+                             result={"briefing_uuid": briefing_uuid, "drafted": drafted, "total": total})
+    except Exception as exc:
+        job_store.update_job(job_id, status="failed", error=str(exc), message=f"Failed: {exc}")
+        logger.exception("Briefing draft job %s failed", job_id)
+
+
+# Two submits landing together would both pass the in-flight test and start a
+# job, and both would write the briefing. The same guard notify_jobs puts around
+# its own start, for the same reason.
+_start_lock = threading.Lock()
+
+
+def start_briefing_draft_job(briefing_uuid: str, label: str, with_summary: bool, user: str) -> dict:
+    """Start the drafting job for one briefing, or return the one already running.
+
+    Called from the briefing routes once the form has been saved, because the
+    job writes to the stored briefing rather than to the page.
+    """
+    with _start_lock:
+        running = job_store.in_flight_for(briefing_uuid)
+        if running is not None:
+            return running
+        job = job_store.create_job("briefing-draft", label=label)
+        job_store.update_job(job["id"], entity=briefing_uuid)
+    threading.Thread(
+        target=_run_briefing_draft_job,
+        args=(job["id"], briefing_uuid, with_summary, user),
+        daemon=True, name=job_store.thread_name(job["id"]),
+    ).start()
+    return job
 
 
 @bp.route("/draft-briefing-summary", methods=["POST"])

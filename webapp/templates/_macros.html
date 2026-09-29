@@ -1,3 +1,20 @@
+{% macro ai_job_badge(job) %}
+{# What the drafting job is doing to a briefing, for the list and the detail
+   page. Anything older than the job store's day is simply not shown. #}
+{% if job and job.action == 'briefing-draft' %}
+  {% if job.status in ('queued', 'running') %}
+    <span class="badge text-bg-info" title="{{ job.message }}">
+      <i class="fas fa-wand-magic-sparkles me-1"></i>AI drafting</span>
+  {% elif job.status == 'completed' %}
+    <span class="badge text-bg-light border" title="{{ job.message }}">
+      <i class="fas fa-wand-magic-sparkles me-1"></i>AI finished</span>
+  {% elif job.status == 'failed' %}
+    <span class="badge text-bg-warning" title="{{ job.error or job.message }}">
+      <i class="fas fa-wand-magic-sparkles me-1"></i>AI failed</span>
+  {% endif %}
+{% endif %}
+{% endmacro %}
+
 {% macro tag_input(field, values=[], datalist_id=None, placeholder="Type and press Enter to add") %}
 <div data-ti-field="{{ field }}">
   <div class="input-group input-group-sm">

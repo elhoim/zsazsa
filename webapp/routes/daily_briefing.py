@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 import config
 import weasyprint
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
-from webapp import (audit, branding, collection_cache, misp_session, misp_store,
-                    notify_jobs, product_log)
+from webapp import (audit, branding, collection_cache, job_store, misp_session,
+                    misp_store, notify_jobs, product_log)
 from webapp.collection_cache import AI_SUMMARY_PREFIX
 from webapp.utils import dedup_lower, md_to_html, mute_lead_labels, sort_products
 from webapp.routes.source_event_utils import parse_source_tokens, source_id_from_event_ref
@@ -53,8 +53,13 @@ def _render_briefing_form(
     campaign=None,
     created_at=None,
     starts_unsaved=False,
+    briefing_uuid: str = "",
 ):
     is_edit = mode == "edit"
+    # A drafting job writing to this briefing, if one is. The form locks the
+    # story boxes while it runs rather than let an analyst type into text the
+    # job is about to replace.
+    ai_job = job_store.in_flight_for(briefing_uuid)
     story_uuids = [
         (story.get("source_event_uuid") if isinstance(story, dict) else getattr(story, "source_event_uuid", ""))
         for story in stories
@@ -98,6 +103,8 @@ def _render_briefing_form(
     return render_template(
         "daily_briefing/form.html",
         stories=stories,
+        briefing_uuid=briefing_uuid,
+        ai_job=ai_job,
         briefing_date=date,
         briefing_title=title,
         briefing_author=author,
@@ -335,6 +342,7 @@ def list_briefings():
     return render_template(
         "daily_briefing/list.html",
         briefings=briefings,
+        ai_jobs=job_store.by_entity(),
         scope_summaries={b.uuid: misp_store.briefing_combined_scope_summary(b) for b in briefings},
         state_filter=state_filter or "",
         review_states=misp_store.BRIEFING_REVIEW_STATES,
@@ -404,6 +412,37 @@ def compose():
     )
 
 
+# The compose form's two AI buttons post under this name. Saving has to happen
+# before the job starts, because the job writes to the stored briefing rather
+# than to the page the analyst is looking at.
+_AI_DRAFT_CHOICES = {"stories": False, "stories+summary": True}
+
+
+def _start_ai_draft(uuid, label, choice):
+    """Kick off the drafting job for a briefing that has just been saved.
+
+    Returns True when a job is running for it, so the caller can send the
+    analyst to the page that says so rather than to the read-only view.
+    """
+    from webapp.routes.api import start_briefing_draft_job
+
+    if choice not in _AI_DRAFT_CHOICES:
+        return False
+    try:
+        start_briefing_draft_job(uuid, label, _AI_DRAFT_CHOICES[choice],
+                                 misp_session.current_user_email())
+    except Exception as exc:
+        # The briefing is saved by the time this runs, so a job that will not
+        # start is a smaller problem than the caller's except telling the
+        # analyst their briefing was lost.
+        logger.exception("Could not start the drafting job for briefing %s", uuid)
+        flash(f"The briefing was saved, but the AI could not be started: {exc}", "warning")
+        return False
+    flash("The AI is drafting this briefing. You can leave this page and come "
+          "back to it, the stories are saved when it finishes.", "info")
+    return True
+
+
 @bp.route("/save", methods=["POST"])
 def save():
     """Save the composed briefing draft to MISP."""
@@ -434,6 +473,8 @@ def save():
         label = data["title"] or f"Daily briefing {data['date']}"
         audit.record("create", "daily-briefing", entity_id=uuid, entity_label=label)
         flash(f"{label} saved as draft.", "success")
+        if _start_ai_draft(uuid, label, request.form.get("ai_draft", "")):
+            return redirect(url_for("daily_briefing.edit", id=uuid))
         return redirect(url_for("daily_briefing.detail", id=uuid))
     except Exception as exc:
         logger.exception("Could not save briefing")
@@ -467,6 +508,7 @@ def detail(id):
     return render_template(
         "daily_briefing/detail.html",
         briefing=briefing,
+        ai_job=job_store.by_entity().get(briefing.uuid),
         feedback=feedback,
         recipients=recipients,
         notify_status=notify_status,
@@ -546,11 +588,15 @@ def edit(id):
             audit.record("update", "daily-briefing", entity_id=id,
                          entity_label=f"Daily briefing {data['date']}")
             flash("Briefing updated.", "success")
+            if _start_ai_draft(id, f"Daily briefing {data['date']}",
+                               request.form.get("ai_draft", "")):
+                return redirect(url_for("daily_briefing.edit", id=id))
             return redirect(url_for("daily_briefing.detail", id=id))
         except Exception as exc:
             logger.exception("Could not update briefing %s", id)
             flash(f"Could not update briefing: {exc}", "warning")
     return _render_briefing_form(
+        briefing_uuid=id,
         stories=briefing.stories,
         date=briefing.date,
         title=briefing.title or "",

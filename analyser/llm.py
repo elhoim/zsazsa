@@ -68,6 +68,23 @@ def _strip_think_blocks(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+# A list marker opening a line: "1. ", "2) ", "- ", "* ".
+_LIST_MARKER_RE = re.compile(r"^[ \t]*(?:\d{1,2}[.)]|[-*+])[ \t]+", re.MULTILINE)
+
+
+def _strip_list_markers(text: str) -> str:
+    """Drop list markers a model put in front of lines that should be prose.
+
+    The briefing story prompt asks for five plain lines and spells out the five
+    points as a numbered list, which models mirror often enough to matter. The
+    markdown renderer then turns the story into an <ol>, so its "Label:" openings
+    never get set back the way every other story's do and one story in a briefing
+    looks unlike the rest. It also hides the "Threat actor type:" line from the
+    line-anchored regex that reads it.
+    """
+    return _LIST_MARKER_RE.sub("", text or "")
+
+
 def _is_reasoning_model(model: str) -> bool:
     """OpenAI reasoning models (o1, o3, o4-mini, ...) use a different token parameter."""
     return bool(re.match(r"^o\d", model.strip()))
@@ -269,6 +286,8 @@ def draft_briefing_story(article_content: str, focus_points: dict = None, threat
         "\n\n".join(extra_parts),
     )
     raw = _call(system, article_content[:10000], 512, feature="draft_briefing_story", cfg=fc)
+    # Before the actor-type line is read off, so a numbered one is still found.
+    raw = _strip_list_markers(raw)
 
     suggested_actor_type = ""
     match = _ACTOR_TYPE_LINE_RE.search(raw)

@@ -25,16 +25,6 @@ logger = logging.getLogger(__name__)
 # get past the in-flight test and mail every stakeholder twice.
 _start_lock = threading.Lock()
 
-_IN_FLIGHT = ("queued", "running")
-
-
-def _in_flight_for(entity_id: str):
-    """A delivery already running for this product, if there is one."""
-    for job in job_store.list_jobs():
-        if job.get("entity") == entity_id and job.get("status") in _IN_FLIGHT:
-            return job
-    return None
-
 
 def start(action: str, label: str, deliver, *, entity_type: str, entity_id: str,
           entity_label: str, user: str) -> dict:
@@ -48,7 +38,7 @@ def start(action: str, label: str, deliver, *, entity_type: str, entity_id: str,
     stakeholder twice.
     """
     with _start_lock:
-        running = _in_flight_for(entity_id)
+        running = job_store.in_flight_for(entity_id)
         if running is not None:
             logger.info("Delivery for %s already running; not starting a second", entity_label)
             return running

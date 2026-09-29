@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import story_scope %}
+{% from "_macros.html" import ai_job_badge, story_scope %}
 
 {% block title %}Briefing {{ briefing.date }} | zsazsa CTI{% endblock %}
 {% block page_title %}{{ briefing.title or ('Daily briefing - ' + (briefing.date or '(no date)')) }}{% endblock %}
@@ -171,6 +171,7 @@
           <dd class="col-7">
             {% if briefing.review_state == 'published' %}<span class="badge bg-success">published</span>
             {% else %}<span class="badge bg-secondary">draft</span>{% endif %}
+            {{ ai_job_badge(ai_job) }}
           </dd>
           {% if notify_status %}
           <dt class="col-5">Last notification</dt>

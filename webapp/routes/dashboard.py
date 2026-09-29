@@ -317,6 +317,9 @@ _AI_FEATURE_BY_ACTION = {
     "daily-briefing": "draft_briefing_story",
     "briefing-overlap": "detect_story_overlaps",
     "briefing-summary": "draft_briefing_summary",
+    # Drafting a whole briefing calls draft_briefing_story once per story, so
+    # that is the endpoint it spends its time on even when it writes a summary too.
+    "briefing-draft": "draft_briefing_story",
     "flash-intel": "generate_flash_intel",
     "vea": "draft_vea_sections",
     # The scheduled analyser calls check_relevance for every event before it
@@ -336,7 +339,7 @@ def pipeline_jobs():
     jobs = []
     for job in job_store.list_jobs():
         status = job.get("status", "")
-        unfinished = status in ("queued", "running")
+        unfinished = status in job_store.IN_FLIGHT
         # Age is measured here rather than in the browser: how long ago a job
         # was touched should not depend on how well a laptop keeps time.
         age = max(0, int(now - job.get("updated_at", 0)))
@@ -349,7 +352,7 @@ def pipeline_jobs():
             "stale": unfinished and age > _JOB_STALE_AFTER_SECONDS,
             "age": age,
         })
-    running = [j for j in jobs if j["status"] in ("queued", "running") and not j["stale"]]
+    running = [j for j in jobs if j["status"] in job_store.IN_FLIGHT and not j["stale"]]
     return jsonify({"ok": True, "jobs": jobs[:20], "running": len(running)})
 
 
@@ -367,7 +370,7 @@ def probe_job(job_id: str):
         return jsonify({"ok": False, "error": "No such job."}), 404
 
     alive = job_store.worker_alive(job_id)
-    unfinished = job.get("status") in ("queued", "running")
+    unfinished = job.get("status") in job_store.IN_FLIGHT
 
     if not unfinished:
         verdict = f"Finished {job.get('status')}, nothing to check."

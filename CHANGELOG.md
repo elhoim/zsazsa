@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.6 - in development
+
+Support for background jobs via AI in the daily briefing drafts. 
+
+### Fixed
+
+- A briefing story the model returned as a numbered list rendered unlike the
+  others in the preview, the PDF and the mail, and lost its threat actor type.
+
 ## 1.0.5
 
 Newsletters from a mailbox were read as if they had been pasted out of a mail

@@ -82,5 +82,44 @@ class EmptyAnswers(unittest.TestCase):
         misp_webapp.add_event_report.assert_not_called()
 
 
+class BriefingStoryFormatting(unittest.TestCase):
+    """A story the model numbered renders as an <ol>, which loses the label styling.
+
+    The prompt asks for five plain lines and lists the five points as 1..5, and
+    models mirror that often enough that one story in a briefing comes out
+    looking unlike the rest.
+    """
+
+    STORY = ("1. What happened: A GPO was abused.\n"
+             "2. Who is affected: A manufacturer.\n"
+             "3. Why it matters: We assess with high confidence.\n")
+
+    def test_numbered_lines_become_plain_lines(self):
+        self.assertEqual(
+            llm._strip_list_markers(self.STORY),
+            "What happened: A GPO was abused.\n"
+            "Who is affected: A manufacturer.\n"
+            "Why it matters: We assess with high confidence.\n")
+
+    def test_bullets_and_parenthesised_numbers_go_too(self):
+        self.assertEqual(llm._strip_list_markers("- a\n* b\n1) c"), "a\nb\nc")
+
+    def test_prose_that_merely_starts_with_a_number_is_left_alone(self):
+        for text in ("2026 saw more of this.", "3.5 times as many events.", "T1190 was used."):
+            self.assertEqual(llm._strip_list_markers(text), text)
+
+    def test_a_numbered_actor_type_line_is_still_read(self):
+        """The actor-type regex is line-anchored, so the marker hid it."""
+        raw = self.STORY + "6. Threat actor type: State-Nexus Actors\n"
+        with mock.patch.object(llm, "_call", return_value=raw), \
+             mock.patch.object(llm, "_build_system_prompt", return_value="sys"), \
+             mock.patch.object(llm, "_feature_cfg", return_value={}):
+            story, actor_type = llm.draft_briefing_story(
+                "article", threat_actor_types=[{"name": "State-Nexus Actors"}])
+        self.assertEqual(actor_type, "State-Nexus Actors")
+        self.assertNotIn("Threat actor type", story)
+        self.assertTrue(story.startswith("What happened:"))
+
+
 if __name__ == "__main__":
     unittest.main()

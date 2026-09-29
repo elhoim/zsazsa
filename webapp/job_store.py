@@ -159,6 +159,40 @@ def create_job(action: str, label: str = "", steps: list[dict] | None = None) ->
     return job
 
 
+# The statuses that mean a job is not done with its record yet.
+IN_FLIGHT = ("queued", "running")
+
+
+def in_flight_for(entity_id: str) -> dict | None:
+    """The unfinished job working on this record, if there is one.
+
+    Jobs that write to one product carry its uuid in `entity`, so a caller can
+    tell whether something is already running against it before starting a
+    second one, and a page can say so to whoever is looking at it.
+    """
+    if not entity_id:
+        return None
+    for job in list_jobs():
+        if job.get("entity") == entity_id and job.get("status") in IN_FLIGHT:
+            return job
+    return None
+
+
+def by_entity() -> dict:
+    """The most recent job per record, keyed by the uuid it carries.
+
+    Whatever its status, so a page can say the AI finished as well as that it
+    is working. One read serves a whole list: list_jobs() is capped and already
+    sorted newest first, so the first job seen for a record is the one to show.
+    """
+    latest = {}
+    for job in list_jobs():
+        entity = job.get("entity")
+        if entity and entity not in latest:
+            latest[entity] = job
+    return latest
+
+
 def get_job(job_id: str) -> dict | None:
     return _load(job_id)
 
@@ -299,7 +333,7 @@ def forget_abandoned(older_than_s: float) -> int:
     cutoff = time.time() - older_than_s
     gone = 0
     for job in list_jobs():
-        if job.get("status") in ("queued", "running") and job.get("updated_at", 0) < cutoff:
+        if job.get("status") in IN_FLIGHT and job.get("updated_at", 0) < cutoff:
             forget_job(job["id"])
             gone += 1
     return gone
