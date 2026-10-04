@@ -4,7 +4,7 @@ zsazsa is a **CTI program** management and production platform built around [MIS
 
 It is designed for teams that want to run threat intelligence as an operational capability, not as loose documents and disconnected scripts. In one workflow, analysts can move from source events to intelligence products, align output to PIR and GIR requirements, distribute the products to stakeholders, and collect feedback.
 
-If you are setting zsazsa up, start with [INSTALL.md](INSTALL.md). It covers what you need for installation, configuration and deployment. If you are upgrading, read [CHANGELOG.md](CHANGELOG.md) first: releases can carry a migration you need to run.
+If you are setting zsazsa up, start with [INSTALL.md](INSTALL.md). It covers what you need for installation, configuration and deployment. For the shortest path to a first delivered briefing, see the [quickstart](docs/quickstart.md). If you are upgrading, read [CHANGELOG.md](CHANGELOG.md) first: releases can carry a migration you need to run.
 
 Note that zsazsa is developed with the support of AI.
 
