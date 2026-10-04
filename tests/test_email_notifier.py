@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import config
-from notifier import email
+from notifier import email, product_email
 from webapp import branding
 
 
@@ -222,6 +222,76 @@ class ProductSenders(unittest.TestCase):
         self.assertNotIn("TLP:", send.call_args.args[1])
         self.assertNotIn("TLP:", send.call_args.kwargs["html_body"])
 
+
+
+class ThreatActorProfileMail(unittest.TestCase):
+    """The Diamond Model arrived as a separate diamond-model.png attachment
+    instead of in the body where the PDF shows it."""
+
+    MARKDOWN = ("# Actor X\n\n**ID:** TAP-1\n**Classification:** TLP:AMBER\n\n"
+                "## Summary\n\nWhat they do.\n\n## Threat actor details\n\n**Synonyms:** Bear\n\n"
+                "## Attribution\n\nWhy we think so.\n")
+
+    def setUp(self):
+        self._orig = {k: getattr(config, k, None) for k in
+                      ("SMTP_HOST", "SMTP_FROM", "NOTIFICATION_CHANNELS")}
+        config.SMTP_HOST = "smtp.x.test"
+        config.SMTP_FROM = "cti@x.test"
+        config.NOTIFICATION_CHANNELS = [
+            {"id": "em1", "name": "SOC", "type": "email", "recipient": "soc@x.test", "enabled": True},
+        ]
+
+    def tearDown(self):
+        for key, value in self._orig.items():
+            setattr(config, key, value)
+
+    def _sent(self, diamond_png):
+        tap = SimpleNamespace(tap_id="TAP-1", title="Actor X", tlp="amber")
+        with mock.patch("notifier.email.smtplib.SMTP") as smtp:
+            server = smtp.return_value.__enter__.return_value
+            self.assertTrue(email.send_threat_actor_profile_notification(
+                tap, self.MARKDOWN, diamond_png=diamond_png))
+        return server.send_message.call_args.args[0]
+
+    def test_the_diamond_model_is_inline_in_the_html(self):
+        msg = self._sent(b"\x89PNG diamond")
+        diamond = [p for p in msg.walk() if p.get("Content-ID") == "<diamondmodel>"]
+        self.assertEqual(len(diamond), 1)
+        self.assertEqual(diamond[0].get_content_type(), "image/png")
+        self.assertEqual(diamond[0].get_content_disposition(), "inline")
+        self.assertEqual(diamond[0].get_content(), b"\x89PNG diamond")
+        # It sits inside the multipart/related that wraps the HTML, not beside it.
+        related = [p for p in msg.walk() if p.get_content_type() == "multipart/related"]
+        self.assertEqual(len(related), 1)
+        self.assertIn(diamond[0], related[0].get_payload())
+        html = next(p for p in msg.walk() if p.get_content_type() == "text/html").get_content()
+        self.assertIn('src="cid:diamondmodel"', html)
+        self.assertFalse(any(p.get_filename() == "diamond-model.png" for p in msg.walk()))
+
+    def test_the_plaintext_alternative_is_kept_and_does_not_name_the_image(self):
+        msg = self._sent(b"\x89PNG diamond")
+        plain = next(p for p in msg.walk() if p.get_content_type() == "text/plain").get_content()
+        self.assertIn("What they do.", plain)
+        self.assertNotIn("cid:", plain)
+
+    def test_the_diamond_sits_where_the_pdf_puts_it(self):
+        html = product_email.threat_actor_profile_html(self.MARKDOWN, "amber", with_diamond=True)
+        details = html.index("Threat actor details")
+        diamond = html.index("Diamond Model")
+        self.assertLess(details, diamond)
+        self.assertLess(diamond, html.index("Attribution"))
+
+    def test_a_profile_without_those_sections_still_shows_the_diamond(self):
+        html = product_email.threat_actor_profile_html("# Actor X\n\n## Summary\n\nx",
+                                                       "amber", with_diamond=True)
+        self.assertLess(html.index("Summary"), html.index("cid:diamondmodel"))
+
+    def test_without_a_diamond_there_is_no_image_reference(self):
+        msg = self._sent(None)
+        self.assertFalse(any(p.get("Content-ID") == "<diamondmodel>" for p in msg.walk()))
+        html = next(p for p in msg.walk() if p.get_content_type() == "text/html").get_content()
+        self.assertNotIn("cid:diamondmodel", html)
+        self.assertIn("Threat Actor Profile", html)
 
 
 class DetectionEngineeringRequestMail(unittest.TestCase):

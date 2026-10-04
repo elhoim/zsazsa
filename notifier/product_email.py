@@ -5,11 +5,13 @@ a title block, a meta grid, then boxed sections. This module reproduces that
 layout in the subset of HTML that mail clients agree on (tables and inline
 styles), so a product reads the same whether it arrives as a PDF or in a mailbox.
 
-Two entry points:
+Entry points:
     briefing_html() is built from the briefing object, so stories keep the
     numbered badge and per-story scope rows the PDF shows.
     markdown_html() is built from rendered markdown for products that follow a
     title + metadata + section-body layout.
+    threat_actor_profile_html() is markdown_html() with the Diamond Model image
+    placed where the PDF shows it.
 """
 
 import html
@@ -315,6 +317,46 @@ def markdown_html(markdown: str, doc_label: str, fallback_tlp: str = "") -> str:
     sections = "".join(_section(h, _body_html(c, brand), brand)
                        for h, c in _sections(body))
     return _document(brand, doc_label, title or doc_label, tlp, rows, sections)
+
+
+# ── Threat actor profile ──────────────────────────────────────────────────────
+
+DIAMOND_CID = "diamondmodel"
+
+# The sections the PDF places after the Diamond Model.
+_AFTER_DIAMOND = ("Attribution", "Scope", "Recommendations", "References")
+
+
+def threat_actor_profile_html(markdown: str, tlp: str, with_diamond: bool = False) -> str:
+    """Render a threat actor profile as a branded HTML mail.
+
+    As markdown_html(), plus the Diamond Model where the PDF shows it, between
+    the actor details and the attribution. The image travels as a Content-ID
+    part next to the HTML (mail clients block data: URIs), so it reads inline
+    rather than as a separate attachment. The markdown never names it: the same
+    markdown is the plaintext alternative and the Mattermost post.
+    """
+    brand = branding.brand()
+    title, meta, body = _split_markdown(markdown)
+    tlp = _meta_tlp(meta) or tlp
+    rows = [(key, value) for key, value in meta if key.lower() not in _TLP_KEYS]
+    parts = _sections(body)
+    sections = [_section(h, _body_html(c, brand), brand) for h, c in parts]
+    if with_diamond:
+        diamond = _section(
+            "Diamond Model",
+            f'<div style="text-align:center;"><img src="cid:{DIAMOND_CID}" alt="Diamond Model" '
+            f'width="600" style="display:block;margin:0 auto;width:100%;max-width:600px;'
+            f'height:auto;border:0;"></div>',
+            brand,
+        )
+        # Before the first section the PDF puts after it (embedded feeds come
+        # last), or at the end when the profile has none of them.
+        after = [i for i, (h, _) in enumerate(parts)
+                 if h in _AFTER_DIAMOND or h.startswith("Indicator feed")]
+        sections.insert(after[0] if after else len(sections), diamond)
+    return _document(brand, "Threat Actor Profile", title or "Threat Actor Profile",
+                     tlp, rows, "".join(sections))
 
 
 # ── Daily threat briefing ─────────────────────────────────────────────────────
