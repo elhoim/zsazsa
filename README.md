@@ -216,6 +216,14 @@ https://zsazsa.example.org/products/indicator-feed/public/<token>?format=json
 https://zsazsa.example.org/products/indicator-feed/public/<token>?format=tsv&truncate=off
 ```
 
+Next to the formats, **PyMISP** downloads the feed's search as a standalone Python script, for a MISP server with no zsazsa in front of it. It runs the same `misp.search()` the feed runs and prints the values, each once, or every matching attribute as CSV with `--csv`. The server and key come from the environment, so the file holds no credential and no feed token:
+
+```
+MISP_URL=https://misp.example.org MISP_KEY=... python3 ports-terminals.py --csv
+```
+
+Set `MISP_VERIFY_CERT=false` to skip the TLS certificate check. The script asks the one server it is given, where the feed may read several.
+
 By default every request for a feed runs its query against MISP. A feed that is pulled often does not need that, so it can be cached: switch **Caching** on when you save the feed and pick hourly, daily or weekly. The first request after that runs the query once, writes the result in all four formats under `data/feed_cache`, and every request until the interval passes is served from those files. A cached feed refreshes on the clock of the moment you saved it: save it at 14:16 and it refreshes at :16 past every hour, or at 14:16 each day, or on that weekday at 14:16, so feeds do not all come due at once. The feed page and the list say when each one is next due. The analyser run refreshes the feeds that have come due, so a consumer arriving after that reads a file rather than waiting for the query, and the pipeline page counts how many were refreshed. Each refresh is written to the log under `/logs`, and a feed that could not be refreshed keeps serving what it has and says so on its page and in the list, so you can see that what goes out is older than the schedule promises. A feed that goes stale between runs is refreshed by the first request for it, exactly as an uncached feed is. If that request cannot reach MISP either, the feed hands out the copy it already has rather than an empty answer: a tool pulling the URL cannot tell an empty feed from an outage and would drop every indicator it holds. The feed page and the list say that the last refresh failed, so you can see what you are looking at. The feed page shows how old the cache is, the list shows which feeds are cached and how often they refresh, and the results table on a cached feed is marked **live** because it always queries MISP while the downloads and the feed URL serve the cache. Saving a feed drops its cache, so a changed query takes effect at once, and `truncate=off` always runs the query.
 
 ### Statistics

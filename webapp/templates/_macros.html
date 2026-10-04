@@ -137,4 +137,10 @@
    download class="btn btn-{{ size }} btn-outline-secondary text-nowrap" title="Download {{ label }}">
   <i class="fas {{ icon }} me-1"></i>{{ label }}</a>
 {% endfor %}
+{# Not a format of the result but the search itself, to run without zsazsa. #}
+<a href="{{ url_for('indicator_feed.pymisp_script_feed', id=feed.id) if feed and feed.id
+             else (url_for('indicator_feed.pymisp_script') ~ '?' ~ query_string) }}"
+   download class="btn btn-{{ size }} btn-outline-secondary text-nowrap"
+   title="Download the search as a PyMISP script, reading MISP_URL and MISP_KEY from the environment">
+  <i class="fab fa-python me-1"></i>PyMISP</a>
 {% endmacro %}

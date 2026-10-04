@@ -407,6 +407,15 @@ class RenderedPages(unittest.TestCase):
         self.assertNotIn("no query run", card.get_text())
         self.assertIsNotNone(card.select_one("#results-table"))
 
+    def test_a_saved_feed_offers_its_pymisp_script_with_the_downloads(self):
+        with mock.patch.object(misp_store, "get_indicator_feed", return_value=_feed()), \
+             mock.patch.object(misp_store, "get_pir", return_value=None):
+            html = self.client.get(f"/products/indicator-feed/{_UUID}").data
+        card = BeautifulSoup(html, "html.parser").select_one("#results .card")
+        link = card.select_one("a[href$='/pymisp.py']")
+        self.assertEqual(link["href"], f"/products/indicator-feed/{_UUID}/pymisp.py")
+        self.assertTrue(link.has_attr("download"))
+
     def test_the_query_fields_are_separated_from_the_feed_fields(self):
         """The script marks the results outdated when something inside a
         [data-query-part] region changes. A field on the wrong side of that line
