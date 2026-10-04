@@ -514,6 +514,28 @@ def download_feed(id, fmt):
     return _download(_feed_export(feed, fmt, request.args), fmt, stem)
 
 
+def _script(body, stem):
+    return Response(body, mimetype="text/x-python",
+                    headers={"Content-Disposition": f'attachment; filename="{stem}.py"'})
+
+
+@bp.route("/pymisp.py")
+def pymisp_script():
+    """The query in the form as a standalone PyMISP script."""
+    return _script(misp_store.pymisp_script(_filters_from(request.args)), "indicator-feed")
+
+
+@bp.route("/<string:id>/pymisp.py")
+def pymisp_script_feed(id):
+    """A saved feed as a standalone PyMISP script, to run the same search on a
+    MISP server that has no zsazsa in front of it. Nothing is searched here."""
+    feed = misp_store.get_indicator_feed(id)
+    if feed is None:
+        return "Indicator feed not found", 404
+    stem = _filename_stem(feed.name or feed.feed_id)
+    return _script(misp_store.pymisp_script(_merge_filters(feed.query), feed), stem)
+
+
 @bp.route("/<string:id>/notify", methods=["POST"])
 def notify(id):
     feed = misp_store.get_indicator_feed(id)

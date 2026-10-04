@@ -2788,18 +2788,119 @@ def _indicator_search_kwargs(filters):
     return kwargs
 
 
+# The order the search arguments are written out in, for the card and the script.
+_PYMISP_ARG_ORDER = ["controller", "type_attribute", "to_ids", "published", "enforce_warninglist",
+                     "org", "tags", "eventid", "timestamp", "date_from", "date_to",
+                     "limit", "include_context", "pythonify"]
+
+
 def pymisp_query_string(filters):
     """A copy-pasteable representation of the PyMISP call the feed will run."""
     kwargs = _indicator_search_kwargs(filters)
-    order = ["controller", "type_attribute", "to_ids", "published", "enforce_warninglist",
-             "org", "tags", "eventid", "timestamp", "date_from", "date_to",
-             "limit", "include_context", "pythonify"]
     lines = ["misp.search("]
-    for key in order:
+    for key in _PYMISP_ARG_ORDER:
         if key in kwargs:
             lines.append(f"    {key}={kwargs[key]!r},")
     lines.append(")")
     return "\n".join(lines)
+
+
+_PYMISP_SCRIPT_HEAD = '''#!/usr/bin/env python3
+"""Run an indicator feed exported from zsazsa against a MISP server.
+
+The search below is the one the feed runs in zsazsa. Which server to ask and
+the key to ask it with come from the environment, so this file holds neither:
+
+    MISP_URL          the MISP server, e.g. https://misp.example.org
+    MISP_KEY          an API key on that server
+    MISP_VERIFY_CERT  "false" to skip the TLS certificate check (default: true)
+
+    python3 this-script.py          one value per line, each value once
+    python3 this-script.py --csv    every matching attribute, as CSV
+
+Needs PyMISP: pip install pymisp
+"""
+
+import argparse
+import csv
+import os
+import sys
+from datetime import date, timedelta  # noqa: F401  (used by relative date ranges)
+
+from pymisp import PyMISP
+
+# The feed as it stood in zsazsa when this script was written.
+'''
+
+_PYMISP_SCRIPT_TAIL = '''
+
+def attributes(raw):
+    """The attribute list out of a PyMISP attribute search response."""
+    if isinstance(raw, dict) and raw.get("errors"):
+        sys.exit(f"MISP refused the search: {raw['errors']}")
+    if isinstance(raw, dict):
+        raw = raw.get("Attribute", (raw.get("response") or {}).get("Attribute", []))
+    return [a.get("Attribute", a) for a in raw or []]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=f"Indicator feed {FEED['id']}: {FEED['name']}")
+    parser.add_argument("--csv", action="store_true", help="every matching attribute, as CSV")
+    args = parser.parse_args()
+    url, key = os.environ.get("MISP_URL"), os.environ.get("MISP_KEY")
+    if not url or not key:
+        sys.exit("Set MISP_URL and MISP_KEY to the MISP server and an API key on it.")
+    verify = os.environ.get("MISP_VERIFY_CERT", "true").strip().lower() not in ("0", "false", "no", "off")
+    attrs = attributes(search(PyMISP(url, key, ssl=verify)))
+    # Newest first, as the feed lists them: MISP does not sort an attribute search.
+    attrs.sort(key=lambda a: int(a.get("timestamp") or 0), reverse=True)
+    if args.csv:
+        writer = csv.writer(sys.stdout)
+        writer.writerow(["Event ID", "Event title", "Creator org", "Event date",
+                         "Attribute timestamp", "Type", "Value", "to_ids"])
+        for a in attrs:
+            event = a.get("Event") or {}
+            writer.writerow([a.get("event_id") or event.get("id", ""), event.get("info", ""),
+                             (event.get("Orgc") or {}).get("name", ""), event.get("date", ""),
+                             a.get("timestamp", ""), a.get("type", ""), a.get("value", ""),
+                             str(a.get("to_ids")).lower() in ("1", "true")])
+    else:
+        for value in dict.fromkeys(str(a.get("value", "")) for a in attrs):
+            print(value)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def pymisp_script(filters, feed=None) -> str:
+    """The feed as a standalone PyMISP script, to run where zsazsa is not.
+
+    The search is the one pymisp_query_string shows. Everything a user typed,
+    the feed name as much as the query values, goes in as a repr() literal and
+    never into a comment or docstring, so no value can end the string it sits
+    in. The relative date ranges are written as expressions rather than the
+    dates they mean today, so the script stays "the last 7 days" when it runs.
+    No server, key or feed token goes in: the script reads those at run time.
+    """
+    kwargs = _indicator_search_kwargs(filters)
+    code = {key: repr(value) for key, value in kwargs.items()}
+    if filters.get("attr_last") == "today":
+        code["timestamp"] = "date.today().isoformat()"
+    try:
+        days = int(filters.get("event_last") or "")
+        code["date_from"] = f"(date.today() - timedelta(days={days})).isoformat()"
+    except (TypeError, ValueError):
+        pass
+    info = {"id": getattr(feed, "feed_id", "") or "", "name": getattr(feed, "name", "") or "",
+            "tlp": getattr(feed, "tlp", "") or ""}
+    lines = [f"FEED = {info!r}",
+             f"GENERATED_AT = {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')!r}",
+             "", "", "def search(misp):", "    return misp.search("]
+    lines += [f"        {key}={code[key]}," for key in _PYMISP_ARG_ORDER if key in code]
+    lines.append("    )")
+    return _PYMISP_SCRIPT_HEAD + "\n".join(lines) + "\n" + _PYMISP_SCRIPT_TAIL
 
 
 def _parse_attribute_rows(raw, server_id, server_label, server_url, filters):

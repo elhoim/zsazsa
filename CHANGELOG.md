@@ -4,6 +4,12 @@
 
 Support for background jobs via AI in the daily briefing drafts. 
 
+### Added
+
+- An indicator feed downloads as a standalone PyMISP script, to run its search
+  on a MISP server without zsazsa. It reads the server and key from the
+  environment.
+
 ### Fixed
 
 - A briefing story the model returned as a numbered list rendered unlike the
