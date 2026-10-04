@@ -4,6 +4,12 @@
 
 Support for background jobs via AI in the daily briefing drafts. 
 
+### Upgrading
+
+Pull and restart, nothing to migrate. A threat actor profile mail shows the
+Diamond Model inline, there is no longer a `diamond-model.png`
+attachment.
+
 ### Added
 
 - An indicator feed downloads as a standalone PyMISP script, to run its search
@@ -15,6 +21,8 @@ Support for background jobs via AI in the daily briefing drafts.
 - A briefing story the model returned as a numbered list rendered unlike the
   others in the preview, the PDF and the mail, and lost its threat actor type.
 - A CVE ID went into the CIRCL lookup URL unchecked.
+- A threat actor profile sent by mail or Mattermost had only part of the
+  PDF. It now has the same metadata, actor details, scope and references.
 
 ## 1.0.5
 
