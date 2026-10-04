@@ -307,7 +307,8 @@ def notify(id):
             PRODUCT_NAME, profile.tlp, profile.audience)
             if r["status"] == "green" and r.get("uuid")}
         recipients = [s for s in misp_store.list_stakeholders() if s.uuid in green]
-        markdown = _markdown(profile) + _linked_feeds_markdown(profile)
+        pir = misp_store.get_pir(profile.linked_pir_uuid) if profile.linked_pir_uuid else None
+        markdown = _markdown(profile, pir) + _linked_feeds_markdown(profile)
         # Last, so it sits below any embedded feed rather than in front of one.
         markdown += f"\n[Open profile]({preview_url})\n"
         log(f"{len(recipients)} eligible recipient(s).")
@@ -392,16 +393,78 @@ def note_delete(id, report_id):
     return redirect(url_for("threat_actor_profile.edit", id=id))
 
 
-def _markdown(tap):
-    """Build the notification body for a threat actor profile."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"# {tap.title}", "", f"*{tap.tap_id} - TLP:{tap.tlp.upper()} - as of {now}*", ""]
-    if tap.threat_actors:
-        lines += ["**Threat actors:** " + ", ".join(tap.threat_actors), ""]
+def _one_line(value):
+    """Collapse a value onto one line, as a metadata row must stay on its own."""
+    return " ".join(str(value or "").split())
+
+
+def _markdown(tap, pir=None):
+    """Build the notification body for a threat actor profile.
+
+    The PDF is the reference: the same metadata, sections and order, so a
+    stakeholder reading the mail misses nothing the PDF would have told them.
+    The metadata rows run without a break under the title, which is what lets the
+    e-mail renderer lift them into its meta grid. Empty fields are left out rather
+    than printed blank. The Diamond Model is not in here: each channel carries the
+    image its own way."""
+    def get(name, default=""):
+        return getattr(tap, name, default) or default
+
+    created = get("created_at", None)
+    review = get("review_date", None)
+    meta = [
+        ("ID", tap.tap_id),
+        ("Date", (created or datetime.now(timezone.utc)).strftime("%Y-%m-%d")),
+        ("Author", get("author")),
+        ("Classification", f"TLP:{tap.tlp.upper()}"),
+        ("Assessment confidence", get("assessment_confidence").capitalize()),
+        ("Review date", review.strftime("%Y-%m-%d") if review else ""),
+        ("Threat actors", ", ".join(get("threat_actors", []))),
+        ("Audience", get("audience")),
+        ("Linked PIR", f"{pir.pir_id}: {pir.question or ''}" if pir else ""),
+    ]
+    lines = [f"# {tap.title}", ""]
+    lines += [f"**{label}:** {_one_line(value)}" for label, value in meta if _one_line(value)]
+    lines.append("")
     if tap.summary:
         lines += ["## Summary", "", tap.summary, ""]
+
+    origin = get("suspected_origin")
+    if origin and get("origin_confidence"):
+        origin += f" ({get('origin_confidence').capitalize()} confidence)"
+    rows = [(label, value) for label, value in
+            (("Type", ", ".join(get("actor_types", []))),
+             ("Synonyms", get("synonyms")),
+             ("Suspected origin", origin),
+             ("Motivation", get("motivation")),
+             ("Sponsorship", get("sponsorship"))) if value]
+    blocks = [(label, value) for label, value in
+              (("Capabilities", get("capabilities")),
+               ("Mode of operation", get("mode_of_operation")),
+               ("Infrastructure", get("infrastructure"))) if value]
+    if rows or blocks:
+        lines += ["## Threat actor details", ""]
+        for label, value in rows:
+            lines += [f"**{label}:** {value}", ""]
+        for label, value in blocks:
+            lines += [f"**{label}:**", "", value, ""]
+
     if tap.attribution_rationale:
         lines += ["## Attribution", "", tap.attribution_rationale, ""]
+
+    scope = [(label, ", ".join(values)) for label, values in
+             (("Geographic scope", get("geographic_scope", [])),
+              ("Sector", get("sectors", [])),
+              ("Techniques", misp_store.mitre_technique_labels(get("mitre_attack_techniques", []))),
+              ("Threat types", get("threat_types", [])),
+              ("Time frame", [get("time_frame")] if get("time_frame") else []),
+              ("Technology", get("technology", [])),
+              ("Vendor", get("vendor", []))) if values]
+    if scope:
+        lines += ["## Scope", ""]
+        for label, value in scope:
+            lines += [f"**{label}:** {value}", ""]
+
     # The part a reader is meant to act on, and the only route by which a
     # detection rule attached to the profile reaches them.
     written = [(label, value) for label, value in
@@ -412,6 +475,10 @@ def _markdown(tap):
         lines += ["## Recommendations", ""]
         for label, value in written:
             lines += [f"**{label}:**", "", value, ""]
+
+    references = [r for r in get("external_references", []) if r.strip()]
+    if references:
+        lines += ["## References", ""] + [f"- {r}" for r in references] + [""]
     return "\n".join(lines)
 
 

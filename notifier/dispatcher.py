@@ -231,8 +231,8 @@ def send_threat_actor_profile(tap, markdown: str, stakeholders: list,
                               diamond_png: bytes | None = None, diamond_url: str | None = None) -> dict:
     """Deliver a threat actor profile to stakeholder channels across all channel types.
 
-    The Diamond Model travels as an email attachment (`diamond_png`) and a
-    Mattermost image attachment (`diamond_url`)."""
+    The Diamond Model travels as an inline image in the email body (`diamond_png`)
+    and a Mattermost image attachment (`diamond_url`)."""
     senders = {
         "mattermost": lambda channel_ids: bool(
             mattermost.send_threat_actor_profile_notification(tap, markdown, channel_ids=channel_ids,

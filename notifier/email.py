@@ -105,7 +105,8 @@ def _subject(tlp: str, rest: str) -> str:
 
 
 def send_email(recipients: list[str], subject: str, markdown: str, label: str,
-               attachments: list[tuple] | None = None, html_body: str | None = None) -> bool:
+               attachments: list[tuple] | None = None, html_body: str | None = None,
+               related: list[tuple] | None = None) -> bool:
     """Send one multipart (plaintext + HTML) email to the given recipients.
 
     `markdown` is the plaintext alternative; `html_body` is the branded HTML the
@@ -113,6 +114,8 @@ def send_email(recipients: list[str], subject: str, markdown: str, label: str,
     callers that have none (the config page's channel test).
     `attachments` is an optional list of (filename, bytes, maintype, subtype)
     tuples, e.g. ("feed.csv", b"...", "text", "csv") or ("d.png", b"...", "image", "png").
+    `related` is an optional list of (cid, bytes, maintype, subtype) tuples for
+    images the HTML body shows inline through "cid:" references.
     """
     if not recipients:
         logger.debug("No email recipients for %s", label)
@@ -132,6 +135,9 @@ def send_email(recipients: list[str], subject: str, markdown: str, label: str,
     body_html = html_body or product_email.markdown_html(markdown, "Notification")
     msg.add_alternative(body_html, subtype="html")
     _attach_logo(msg, body_html)
+    for cid, data, maintype, subtype in related or []:
+        msg.get_payload()[-1].add_related(data, maintype=maintype, subtype=subtype,
+                                          cid=f"<{cid}>", disposition="inline")
     for filename, data, maintype, subtype in attachments or []:
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
 
@@ -202,10 +208,12 @@ def send_threat_actor_profile_notification(tap, markdown: str, channel_ids: list
     title = getattr(tap, "title", "")
     tlp = getattr(tap, "tlp", "")
     subject = _subject(tlp, f"{tap_id}: {title}" if title else tap_id)
-    html = product_email.markdown_html(markdown, "Threat Actor Profile", tlp)
-    attachments = [("diamond-model.png", diamond_png, "image", "png")] if diamond_png else None
+    # The Diamond Model shows inline, where the PDF places it, rather than
+    # arriving as a separate attachment.
+    html = product_email.threat_actor_profile_html(markdown, tlp, with_diamond=bool(diamond_png))
+    related = [(product_email.DIAMOND_CID, diamond_png, "image", "png")] if diamond_png else None
     return send_email(_recipients(channel_ids), subject, markdown,
-                      f"threat actor profile {tap_id}", attachments, html_body=html)
+                      f"threat actor profile {tap_id}", html_body=html, related=related)
 
 
 def send_flash_intel_alert(fia, content: str, channel_ids: list[str] | None = None,
