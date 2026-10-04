@@ -110,14 +110,15 @@ class Script(unittest.TestCase):
         self.assertEqual(misp.searched["date_from"], (date.today() - timedelta(days=7)).isoformat())
         self.assertEqual(misp.searched["timestamp"], date.today().isoformat())
 
-    def _main(self, *argv, env=None):
-        ns = _load(misp_store.pymisp_script({"types": ["ip-dst"]}, _feed()))
+    def _main(self, *argv, env=None, feed=_feed()):
+        ns = _load(misp_store.pymisp_script({"types": ["ip-dst"]}, feed))
         made = []
         ns["PyMISP"] = lambda *a, **k: made.append(_FakeMISP(*a, **k)) or made[-1]
-        out = io.StringIO()
+        out, self.err = io.StringIO(), io.StringIO()
         env = {"MISP_URL": "https://misp.example", "MISP_KEY": "key"} if env is None else env
         with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch("sys.argv", ["feed.py", *argv]), contextlib.redirect_stdout(out):
+                mock.patch("sys.argv", ["feed.py", *argv]), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(self.err):
             ns["main"]()
         return out.getvalue(), made
 
@@ -136,6 +137,19 @@ class Script(unittest.TestCase):
     def test_the_certificate_check_can_be_turned_off(self):
         _, made = self._main(env={"MISP_URL": "u", "MISP_KEY": "k", "MISP_VERIFY_CERT": "false"})
         self.assertEqual(made[0].kwargs, {"ssl": False})
+
+    def test_it_states_the_feed_tlp_on_stderr(self):
+        """The marking goes to stderr so the value list and the CSV on stdout
+        stay parseable by whatever reads them."""
+        for argv in ((), ("--csv",)):
+            with self.subTest(argv=argv):
+                out, _ = self._main(*argv, feed=_feed(tlp="amber+strict"))
+                self.assertIn("TLP:AMBER+STRICT", self.err.getvalue())
+                self.assertNotIn("TLP", out)
+
+    def test_an_unsaved_query_carries_no_tlp(self):
+        self._main(feed=None)
+        self.assertEqual(self.err.getvalue(), "")
 
     def test_it_refuses_to_run_without_a_server_and_key(self):
         with self.assertRaises(SystemExit):

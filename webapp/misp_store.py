@@ -2818,6 +2818,8 @@ the key to ask it with come from the environment, so this file holds neither:
     python3 this-script.py          one value per line, each value once
     python3 this-script.py --csv    every matching attribute, as CSV
 
+A saved feed's TLP is printed on stderr when the script runs.
+
 Needs PyMISP: pip install pymisp
 """
 
@@ -2851,6 +2853,10 @@ def main():
     if not url or not key:
         sys.exit("Set MISP_URL and MISP_KEY to the MISP server and an API key on it.")
     verify = os.environ.get("MISP_VERIFY_CERT", "true").strip().lower() not in ("0", "false", "no", "off")
+    # On stderr, so the values and the CSV on stdout stay clean for whatever reads them.
+    if FEED["tlp"]:
+        print(f"TLP:{FEED['tlp'].upper()} - handle the output of {FEED['id']} according to "
+              "this classification.", file=sys.stderr)
     attrs = attributes(search(PyMISP(url, key, ssl=verify)))
     # Newest first, as the feed lists them: MISP does not sort an attribute search.
     attrs.sort(key=lambda a: int(a.get("timestamp") or 0), reverse=True)

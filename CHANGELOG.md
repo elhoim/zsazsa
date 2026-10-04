@@ -8,7 +8,7 @@ Support for background jobs via AI in the daily briefing drafts.
 
 - An indicator feed downloads as a standalone PyMISP script, to run its search
   on a MISP server without zsazsa. It reads the server and key from the
-  environment.
+  environment, and prints the feed's TLP on stderr when it runs.
 
 ### Fixed
 
