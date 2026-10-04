@@ -349,7 +349,7 @@ const muteLeadLabels = html => html.replace(LEAD_LABEL, '$1$2<span class="pretex
 document.querySelectorAll('.report-md-body').forEach(el => {
   const raw = el.getAttribute('data-md') || '';
   if (!raw.trim()) { el.innerHTML = '<em class="text-muted">(no content)</em>'; }
-  else if (typeof marked !== 'undefined') el.innerHTML = muteLeadLabels(typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(marked.parse(raw)) : marked.parse(raw));
+  else if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') el.innerHTML = muteLeadLabels(DOMPurify.sanitize(marked.parse(raw)));
   else el.textContent = raw;
 });
 </script>

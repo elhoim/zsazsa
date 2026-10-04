@@ -23,8 +23,10 @@ attachment.
 - A CVE ID went into the CIRCL lookup URL unchecked.
 - A threat actor profile sent by mail or Mattermost had only part of the
   PDF. It now has the same metadata, actor details, scope and references.
-- A briefing published while the AI was drafting it sent no notifications: the
-  delivery took the drafting job for one already under way.
+- A briefing published while the AI was drafting it sent no notifications.
+- The AI could leave a profile's assessment confidence blank while saying it
+  had filled it in.
+- Markdown was shown unsanitised if DOMPurify failed to load.
 
 ## 1.0.5
 

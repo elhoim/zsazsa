@@ -1439,8 +1439,9 @@ function reportAccordion(reports) {
 
     var content = document.createElement('div');
     content.className = 'accordion-body report-md-body';
-    var html = marked.parse(report.content || '');
-    content.innerHTML = window.DOMPurify ? DOMPurify.sanitize(html) : html;
+    // Report text comes from outside, so without DOMPurify it is shown as text.
+    if (window.DOMPurify) content.innerHTML = DOMPurify.sanitize(marked.parse(report.content || ''));
+    else content.textContent = report.content || '';
 
     var panel = document.createElement('div');
     panel.id = 'misp-report-' + i;

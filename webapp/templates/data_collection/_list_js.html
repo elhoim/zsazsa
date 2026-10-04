@@ -1397,7 +1397,10 @@ if (window.marked) { marked.setOptions({ breaks: true, gfm: true }); }
     previewContent.innerHTML = html;
     previewContent.querySelectorAll('.report-md-body[data-md]').forEach(function(el) {
       var raw = el.getAttribute('data-md') || '';
-      el.innerHTML = raw.trim() ? (window.DOMPurify ? DOMPurify.sanitize(marked.parse(raw)) : marked.parse(raw)) : '<em class="text-muted">No content.</em>';
+      // Report text comes from outside, so without DOMPurify it is shown as text.
+      if (!raw.trim()) el.innerHTML = '<em class="text-muted">No content.</em>';
+      else if (window.DOMPurify) el.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+      else el.textContent = raw;
       el.removeAttribute('data-md');
     });
   }

@@ -577,6 +577,10 @@ def draft_tap():
         sections = llm.draft_tap_sections(actors, context)
         if not sections:
             return jsonify({"sections": {}, "error": "The model returned no usable draft. Check the LLM settings and the analyser log."}), 502
+        # It lands in a select, which takes only the values it offers.
+        confidence = str(sections.get("assessment_confidence") or "").strip().lower()
+        offered = {value for value, _label, _help in misp_store.ESTIMATIVE_CONFIDENCE}
+        sections["assessment_confidence"] = confidence if confidence in offered else ""
         return jsonify({"sections": sections, "error": None})
     except Exception as exc:
         logger.warning("draft_tap LLM call failed: %s", exc)
