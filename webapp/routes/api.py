@@ -408,7 +408,15 @@ def _run_briefing_draft_job(job_id: str, briefing_uuid: str, with_summary: bool,
             # stands: update_briefing rewrites the whole object.
             **{field: list(getattr(briefing, field)) for field in _BRIEFING_SCOPE_FIELDS},
         }
-        misp_store.update_briefing(briefing_uuid, data)
+        try:
+            # Only if it is still in the state it was read in: publishing it while
+            # the model was drafting must not be undone by this write.
+            misp_store.update_briefing(briefing_uuid, data, expected_state=briefing.review_state)
+        except misp_store.BriefingStateChanged:
+            moved = ("The briefing was published while the stories were being drafted, "
+                     "so the drafts were not saved over it.")
+            job_store.update_job(job_id, status="failed", error=moved, message=moved)
+            return
         audit.record("update", "daily-briefing", entity_id=briefing_uuid,
                      entity_label=f"Daily briefing {briefing.date}",
                      details=f"AI drafted {drafted} of {total} stories"

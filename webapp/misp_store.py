@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 import urllib3
 import re
@@ -6558,13 +6559,40 @@ def create_briefing(data):
     return uuid
 
 
-def update_briefing(uuid, data):
+# update_briefing and publish_briefing both rebuild the briefing object by
+# deleting it and adding a new one. Two of them overlapping (the drafting job
+# saving while an analyst publishes) would otherwise leave the event with two
+# briefing objects, or with neither. zsazsa runs as one process (INSTALL.md), so
+# a process lock is enough.
+_briefing_write_lock = threading.RLock()
+
+
+class BriefingStateChanged(RuntimeError):
+    """The briefing's review state moved on since the caller read it."""
+
+
+def update_briefing(uuid, data, expected_state=None):
+    """Rewrite a briefing from ``data``.
+
+    ``expected_state`` is the review state the caller based ``data`` on. When it
+    is given and the stored briefing has moved on (published while the drafting
+    job was waiting on the model), nothing is written and BriefingStateChanged
+    is raised, so a stale copy cannot put a published briefing back to draft.
+    """
+    with _briefing_write_lock:
+        return _update_briefing(uuid, data, expected_state)
+
+
+def _update_briefing(uuid, data, expected_state):
     misp = _misp()
     event = misp.get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None:
         raise RuntimeError(f"Briefing event {uuid} not found")
 
     existing = _briefing_ns(event)
+    if expected_state is not None and existing.review_state != expected_state:
+        raise BriefingStateChanged(
+            f"Briefing {uuid} is {existing.review_state or 'unset'} now, not {expected_state}")
     existing_sources = {
         getattr(s, "source_event_uuid", "") for s in existing.stories
         if getattr(s, "source_event_uuid", "")
@@ -6600,6 +6628,11 @@ def update_briefing(uuid, data):
 
 
 def publish_briefing(uuid):
+    with _briefing_write_lock:
+        _publish_briefing(uuid)
+
+
+def _publish_briefing(uuid):
     misp = _misp()
     event = misp.get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None:

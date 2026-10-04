@@ -57,7 +57,7 @@ class TheJobWritesOnce(unittest.TestCase):
         saved = []
         with mock.patch.object(api.misp_store, "get_briefing", return_value=briefing), \
              mock.patch.object(api.misp_store, "update_briefing",
-                               side_effect=lambda u, d: saved.append((u, d))), \
+                               side_effect=lambda u, d, **kw: saved.append((u, d, kw))), \
              mock.patch.object(api.misp_store, "briefing_scope_summary", return_value=[]), \
              mock.patch.object(api, "_get_event_content_and_scope",
                                return_value=(content, {})), \
@@ -165,6 +165,62 @@ class TheJobWritesOnce(unittest.TestCase):
             api._run_briefing_draft_job(job["id"], "gone", False, "koen@example.org")
         self.assertEqual(job_store.get_job(job["id"])["status"], "failed")
 
+
+class APublishWhileDraftingIsNotUndone(unittest.TestCase):
+    """The job reads the briefing, then spends minutes on the model.
+
+    If an analyst publishes in that time, writing the copy it read back would
+    put the briefing back to draft under the approval just given, with stories
+    nobody approved. The save is conditional on the state the job read.
+    """
+
+    def test_the_save_names_the_state_it_was_based_on(self):
+        saved, _ = TheJobWritesOnce.run_job(self, _briefing())
+        self.assertEqual(saved[0][2], {"expected_state": "draft"})
+
+    def test_a_briefing_published_meanwhile_fails_the_job_and_is_left_alone(self):
+        def published_meanwhile(uuid, data, expected_state=None):
+            raise api.misp_store.BriefingStateChanged("published")
+
+        with mock.patch.object(api.misp_store, "get_briefing", return_value=_briefing()), \
+             mock.patch.object(api.misp_store, "update_briefing", side_effect=published_meanwhile), \
+             mock.patch.object(api, "_get_event_content_and_scope", return_value=("text", {})), \
+             mock.patch.object(api, "_focus_points", return_value={}), \
+             mock.patch.object(api, "_threat_actor_types", return_value=[]), \
+             mock.patch.object(api.audit, "record") as record, \
+             mock.patch("analyser.llm.draft_briefing_story", return_value=("Drafted.", "")):
+            job = job_store.create_job("briefing-draft")
+            api._run_briefing_draft_job(job["id"], "b" * 36, False, "koen@example.org")
+        job = job_store.get_job(job["id"])
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("published while", job["message"])
+        record.assert_not_called()
+
+
+class TheStoreRefusesAStaleCopy(unittest.TestCase):
+    def test_update_with_an_expected_state_that_moved_on_writes_nothing(self):
+        from webapp import misp_store
+        misp = mock.MagicMock()
+        misp.get_event.return_value = SimpleNamespace(uuid="b" * 36, objects=[])
+        with mock.patch.object(misp_store, "_misp", return_value=misp), \
+             mock.patch.object(misp_store, "_briefing_ns",
+                               return_value=SimpleNamespace(review_state="published", stories=[])):
+            with self.assertRaises(misp_store.BriefingStateChanged):
+                misp_store.update_briefing("b" * 36, {"stories": []}, expected_state="draft")
+        misp.delete_object.assert_not_called()
+        misp.add_object.assert_not_called()
+
+    def test_publish_waits_for_an_update_in_progress(self):
+        import threading
+        from webapp import misp_store
+        ran = threading.Event()
+        with mock.patch.object(misp_store, "_publish_briefing", side_effect=lambda u: ran.set()):
+            with misp_store._briefing_write_lock:
+                worker = threading.Thread(target=misp_store.publish_briefing, args=("b" * 36,))
+                worker.start()
+                self.assertFalse(ran.wait(0.3), "publish ran while an update held the lock")
+            worker.join(2)
+        self.assertTrue(ran.is_set())
 
 class OnlyOneJobPerBriefing(unittest.TestCase):
     def test_a_second_start_returns_the_job_already_running(self):
