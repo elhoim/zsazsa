@@ -110,8 +110,8 @@ class Script(unittest.TestCase):
         self.assertEqual(misp.searched["date_from"], (date.today() - timedelta(days=7)).isoformat())
         self.assertEqual(misp.searched["timestamp"], date.today().isoformat())
 
-    def _main(self, *argv, env=None, feed=_feed()):
-        ns = _load(misp_store.pymisp_script({"types": ["ip-dst"]}, feed))
+    def _main(self, *argv, env=None, tlp="amber"):
+        ns = _load(misp_store.pymisp_script({"types": ["ip-dst"]}, _feed(tlp=tlp)))
         made = []
         ns["PyMISP"] = lambda *a, **k: made.append(_FakeMISP(*a, **k)) or made[-1]
         out, self.err = io.StringIO(), io.StringIO()
@@ -139,16 +139,14 @@ class Script(unittest.TestCase):
         self.assertEqual(made[0].kwargs, {"ssl": False})
 
     def test_it_states_the_feed_tlp_on_stderr(self):
-        """The marking goes to stderr so the value list and the CSV on stdout
-        stay parseable by whatever reads them."""
         for argv in ((), ("--csv",)):
             with self.subTest(argv=argv):
-                out, _ = self._main(*argv, feed=_feed(tlp="amber+strict"))
+                out, _ = self._main(*argv, tlp="amber+strict")
                 self.assertIn("TLP:AMBER+STRICT", self.err.getvalue())
                 self.assertNotIn("TLP", out)
 
-    def test_an_unsaved_query_carries_no_tlp(self):
-        self._main(feed=None)
+    def test_a_feed_without_a_tlp_prints_no_marking(self):
+        self._main(tlp="")
         self.assertEqual(self.err.getvalue(), "")
 
     def test_it_refuses_to_run_without_a_server_and_key(self):

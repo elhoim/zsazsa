@@ -125,6 +125,13 @@ class DoubleSubmit(JobTestCase):
         again = self.start(lambda log: (True, "ok"), entity_id="product-c")
         self.assertNotEqual(first["id"], again["id"])
 
+    def test_another_kind_of_job_on_the_product_does_not_stand_in_for_it(self):
+        """A briefing being drafted carries the same uuid as its delivery."""
+        drafting = job_store.create_job("briefing-draft")
+        job_store.update_job(drafting["id"], entity="product-d", status="running")
+        job = self.start(lambda log: (True, "ok"), entity_id="product-d")
+        self.assertNotEqual(job["id"], drafting["id"])
+
 
 class AuditTrail(JobTestCase):
     def test_the_permanent_record_keeps_the_per_channel_detail(self):

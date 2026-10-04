@@ -38,7 +38,7 @@ def start(action: str, label: str, deliver, *, entity_type: str, entity_id: str,
     stakeholder twice.
     """
     with _start_lock:
-        running = job_store.in_flight_for(entity_id)
+        running = job_store.in_flight_for(entity_id, action)
         if running is not None:
             logger.info("Delivery for %s already running; not starting a second", entity_label)
             return running

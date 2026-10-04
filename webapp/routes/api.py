@@ -318,14 +318,6 @@ def _run_briefing_summary_job(job_id: str, stories: list[dict], date: str) -> No
         logger.exception("Briefing summary job %s failed", job_id)
 
 
-# The briefing-level scope fields, which update_briefing expects to be handed
-# back whole. Kept in step with _parse_briefing_scope_from_form in the briefing
-# routes, which is where the form side of the same list lives.
-_BRIEFING_SCOPE_FIELDS = ("geographic_scope", "sectors", "threat_actors",
-                          "mitre_attack_techniques", "threat_types", "technology",
-                          "vendor", "incident", "campaign")
-
-
 def _run_briefing_draft_job(job_id: str, briefing_uuid: str, with_summary: bool, user: str) -> None:
     """Draft every story on a saved briefing, and its summary when asked.
 
@@ -389,25 +381,16 @@ def _run_briefing_draft_job(job_id: str, briefing_uuid: str, with_summary: bool,
                 else:
                     job_store.append_log(job_id, "The model returned an empty summary.")
 
-        data = {
-            "date": briefing.date,
-            "title": briefing.title,
-            "author": briefing.author,
-            "tlp": briefing.tlp,
-            "escalations": briefing.escalations,
-            "notes": briefing.notes,
-            "detection_rules": briefing.detection_rules,
-            "summary": summary,
-            # A summary describes the stories it was written from, so redrafting
-            # them dates it unless this run wrote a new one. Asking for a summary
-            # and getting nothing back still leaves the old one out of date.
-            "summary_stale": (briefing.summary_stale or bool(drafted)) and not rewrote_summary,
-            "review_state": briefing.review_state,
-            "stories": stories,
-            # Scope is not touched by drafting, so it is carried across as it
-            # stands: update_briefing rewrites the whole object.
-            **{field: list(getattr(briefing, field)) for field in _BRIEFING_SCOPE_FIELDS},
-        }
+        # update_briefing rebuilds the whole object, so start from everything it
+        # holds and replace what the job wrote.
+        data = {field: getattr(briefing, field) for field in misp_store.BRIEFING_FIELDS}
+        data["stories"] = stories
+        data["story_count"] = len(stories)
+        data["summary"] = summary
+        # A summary describes the stories it was written from, so redrafting
+        # them dates it unless this run wrote a new one. Asking for a summary
+        # and getting nothing back still leaves the old one out of date.
+        data["summary_stale"] = (briefing.summary_stale or bool(drafted)) and not rewrote_summary
         try:
             # Only if it is still in the state it was read in: publishing it while
             # the model was drafting must not be undone by this write.
@@ -443,7 +426,7 @@ def start_briefing_draft_job(briefing_uuid: str, label: str, with_summary: bool,
     job writes to the stored briefing rather than to the page.
     """
     with _start_lock:
-        running = job_store.in_flight_for(briefing_uuid)
+        running = job_store.in_flight_for(briefing_uuid, "briefing-draft")
         if running is not None:
             return running
         job = job_store.create_job("briefing-draft", label=label)

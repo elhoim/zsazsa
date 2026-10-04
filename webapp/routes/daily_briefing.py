@@ -59,7 +59,7 @@ def _render_briefing_form(
     # A drafting job writing to this briefing, if one is. The form locks the
     # story boxes while it runs rather than let an analyst type into text the
     # job is about to replace.
-    ai_job = job_store.in_flight_for(briefing_uuid)
+    ai_job = job_store.in_flight_for(briefing_uuid, "briefing-draft")
     story_uuids = [
         (story.get("source_event_uuid") if isinstance(story, dict) else getattr(story, "source_event_uuid", ""))
         for story in stories
@@ -567,6 +567,12 @@ def edit(id):
     briefing = misp_store.get_briefing(id)
     if briefing is None:
         return "Briefing not found", 404
+    if request.method == "POST" and job_store.in_flight_for(id, "briefing-draft"):
+        # The form locks itself while the job runs, but another tab can still
+        # post it, and the job would then write its older copy over this save.
+        flash("The AI is still drafting this briefing, so your changes were not saved. "
+              "Make them again once it has finished.", "warning")
+        return redirect(url_for("daily_briefing.edit", id=id))
     if request.method == "POST":
         stories = _parse_stories_from_form(request.form)
         data = {

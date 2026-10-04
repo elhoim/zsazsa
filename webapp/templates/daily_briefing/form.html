@@ -66,8 +66,8 @@
 
 {% if ai_job %}
   {# The job writes to the stored briefing, so the boxes below are read-only
-     while it runs. This is advisory only: it cannot stop a second tab, or
-     another analyst, from posting this form and overwriting the result. #}
+     while it runs. A second tab or another analyst posting this form anyway is
+     turned away by the edit route. #}
   <div class="alert alert-info d-flex align-items-start gap-2" id="ai-job-banner"
        data-job-id="{{ ai_job.id }}" role="status">
     <i class="fas fa-wand-magic-sparkles mt-1"></i>
@@ -1540,7 +1540,7 @@ function includeAttributes(idx, eventUuid) {
 
 /* While a drafting job owns this briefing the form is read-only, and the page
    reloads itself when the job is done so the analyst sees what was written.
-   Only a guard rail: another tab can still post this form (the banner says so). */
+   Another tab posting this form anyway is turned away by the edit route. */
 /* On DOMContentLoaded, not inline: zsazsaFollowJob is defined further down the
    page than this block runs, and the counters and button-state helpers below
    would re-enable what this disables. Last word wins, so this has to be last. */

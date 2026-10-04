@@ -6242,9 +6242,10 @@ def _briefing_obj(data):
 
 # Everything the briefing object carries, under the same name on the write dict
 # _briefing_obj() takes and on the namespace _briefing_ns() reads back. Changing
-# the object means changing all three, so publishing a briefing rebuilds its
-# write dict from this rather than listing the fields again.
-_BRIEFING_FIELDS = (
+# the object means changing all three, so publishing a briefing and the AI
+# drafting job rebuild their write dict from this rather than listing the fields
+# again.
+BRIEFING_FIELDS = (
     "date", "title", "author", "tlp", "review_state", "story_count",
     "escalations", "notes", "detection_rules", "summary", "summary_stale",
     "geographic_scope", "sectors", "threat_actors", "mitre_attack_techniques",
@@ -6751,7 +6752,7 @@ def _publish_briefing(uuid):
         misp.delete_object(old.id)
     # The object is rebuilt from scratch, so everything it held has to be
     # carried across; only the review state and the approver change here.
-    data = {field: getattr(briefing, field) for field in _BRIEFING_FIELDS}
+    data = {field: getattr(briefing, field) for field in BRIEFING_FIELDS}
     data["review_state"] = BRIEFING_REVIEW_PUBLISHED
     data["approved_by"] = misp_session.current_user_email()
     _check(misp.add_object(_event_ref(event), _briefing_obj(data)), "publish briefing object")

@@ -10,12 +10,13 @@ briefing one is already working on.
     python -m unittest tests.test_briefing_draft_job
 """
 
-import re
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from webapp import job_store
+from flask import Flask
+
+from webapp import job_store, misp_store
 from webapp.routes import api
 from webapp.routes import daily_briefing as briefing_routes
 
@@ -24,7 +25,8 @@ def _briefing(**over):
     base = dict(
         uuid="b" * 36, date="2026-09-25", title="Daily briefing", author="koen",
         tlp="amber", escalations="", notes="", detection_rules="", summary="",
-        summary_stale=False, review_state="draft",
+        summary_stale=False, review_state="draft", story_count=1,
+        creator="koen", approved_by="",
         stories=[SimpleNamespace(title="One", content="", source_event_uuid="e1",
                                  source_id="scraper", drafted_by="",
                                  threat_actor_types=[])],
@@ -34,21 +36,6 @@ def _briefing(**over):
     )
     base.update(over)
     return SimpleNamespace(**base)
-
-
-class ScopeFieldsStayInStep(unittest.TestCase):
-    """The job hands update_briefing the scope back whole, from its own list.
-
-    The form builds the same set from the posted values. Two lists of nine
-    field names in different modules drift, and the symptom would be a briefing
-    quietly losing its sectors the first time the AI drafted it.
-    """
-
-    def test_the_job_and_the_form_agree_on_the_field_names(self):
-        import inspect
-        src = inspect.getsource(briefing_routes._parse_briefing_scope_from_form)
-        from_form = set(re.findall(r'"(\w+)":', src))
-        self.assertEqual(from_form, set(api._BRIEFING_SCOPE_FIELDS))
 
 
 class TheJobWritesOnce(unittest.TestCase):
@@ -83,13 +70,22 @@ class TheJobWritesOnce(unittest.TestCase):
         self.assertEqual(story["threat_actor_types"], ["State-Nexus Actors"])
         self.assertEqual(story["drafted_by"], "ai")
 
-    def test_scope_the_job_never_touched_survives(self):
-        saved, _ = self.run_job(_briefing())
+    def test_every_field_it_does_not_draft_is_carried_across(self):
+        """update_briefing rebuilds the object from what it is handed, so a field
+        missing here would be wiped by every AI draft."""
+        briefing = _briefing()
+        saved, _ = self.run_job(briefing)
         data = saved[0][1]
-        self.assertEqual(data["geographic_scope"], ["Belgium"])
-        self.assertEqual(data["sectors"], ["Energy"])
-        self.assertEqual(data["mitre_attack_techniques"], ["T1190"])
-        self.assertEqual(data["review_state"], "draft")
+        for field in misp_store.BRIEFING_FIELDS:
+            if field not in ("summary", "summary_stale"):
+                self.assertEqual(data[field], getattr(briefing, field), field)
+
+    def test_the_story_count_is_taken_from_the_stories(self):
+        """A count the stored object has wrong, or lacks and reads back as 0,
+        must not be written back over the stories it describes."""
+        saved, _ = self.run_job(_briefing(story_count=0))
+        written = misp_store._briefing_obj(saved[0][1])
+        self.assertEqual(misp_store._obj_attr(written, "story-count"), "1")
 
     def test_an_actor_type_the_analyst_picked_is_not_replaced(self):
         """The story button only fills this in when nothing is ticked yet.
@@ -222,7 +218,41 @@ class TheStoreRefusesAStaleCopy(unittest.TestCase):
             worker.join(2)
         self.assertTrue(ran.is_set())
 
+
+class AnEditWaitsForTheDraftingJob(unittest.TestCase):
+    """The form locks itself while the job runs, but a second tab or another
+    analyst can still post it, and the job would then write its older copy over
+    whatever they saved."""
+
+    def test_a_save_while_the_job_runs_writes_nothing(self):
+        briefing = _briefing()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        app.register_blueprint(briefing_routes.bp)
+        job = job_store.create_job("briefing-draft")
+        job_store.update_job(job["id"], entity=briefing.uuid, status="running")
+        self.addCleanup(job_store.forget_job, job["id"])
+        with mock.patch.object(briefing_routes.misp_store, "get_briefing", return_value=briefing), \
+             mock.patch.object(briefing_routes.misp_store, "update_briefing") as update, \
+             mock.patch.object(briefing_routes.audit, "record"):
+            reply = app.test_client().post(f"/briefing/{briefing.uuid}/edit",
+                                           data={"title": "Edited meanwhile"})
+        update.assert_not_called()
+        self.assertEqual(reply.status_code, 302)
+
+
 class OnlyOneJobPerBriefing(unittest.TestCase):
+    def test_a_delivery_in_flight_does_not_stand_in_for_the_draft(self):
+        uuid = "d" * 36
+        delivery = job_store.create_job("notify-briefing")
+        job_store.update_job(delivery["id"], entity=uuid, status="running")
+        self.addCleanup(job_store.forget_job, delivery["id"])
+        with mock.patch.object(api.threading, "Thread") as thread:
+            job = api.start_briefing_draft_job(uuid, "label", False, "koen@example.org")
+        self.addCleanup(job_store.forget_job, job["id"])
+        self.assertNotEqual(job["id"], delivery["id"])
+        thread.assert_called_once()
+
     def test_a_second_start_returns_the_job_already_running(self):
         uuid = "c" * 36
         first = job_store.create_job("briefing-draft")

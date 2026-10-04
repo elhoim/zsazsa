@@ -163,17 +163,19 @@ def create_job(action: str, label: str = "", steps: list[dict] | None = None) ->
 IN_FLIGHT = ("queued", "running")
 
 
-def in_flight_for(entity_id: str) -> dict | None:
-    """The unfinished job working on this record, if there is one.
+def in_flight_for(entity_id: str, action: str) -> dict | None:
+    """The unfinished `action` job working on this record, if there is one.
 
     Jobs that write to one product carry its uuid in `entity`, so a caller can
     tell whether something is already running against it before starting a
-    second one, and a page can say so to whoever is looking at it.
+    second one, and a page can say so to whoever is looking at it. The action
+    matters: a briefing being drafted is not a briefing being delivered.
     """
     if not entity_id:
         return None
     for job in list_jobs():
-        if job.get("entity") == entity_id and job.get("status") in IN_FLIGHT:
+        if (job.get("entity") == entity_id and job.get("action") == action
+                and job.get("status") in IN_FLIGHT):
             return job
     return None
 

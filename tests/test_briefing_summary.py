@@ -291,13 +291,13 @@ def _stored_briefing():
 
 
 class BriefingFieldList(unittest.TestCase):
-    """_BRIEFING_FIELDS is what publishing rebuilds the object from, so it has to
+    """BRIEFING_FIELDS is what publishing rebuilds the object from, so it has to
     stay level with what the object actually holds. An attribute added to
     _briefing_obj() and left out of the list is dropped the moment a briefing is
     published, which is how the summary was lost."""
 
     def _relations(self):
-        return {f.replace("_", "-") for f in misp_store._BRIEFING_FIELDS}
+        return {f.replace("_", "-") for f in misp_store.BRIEFING_FIELDS}
 
     def test_it_names_exactly_what_the_object_is_written_with(self):
         written = {
@@ -339,7 +339,7 @@ class PublishKeepsTheStoredFields(unittest.TestCase):
 
     def test_nothing_else_is_dropped_either(self):
         obj = self._published_object()
-        for field in misp_store._BRIEFING_FIELDS:
+        for field in misp_store.BRIEFING_FIELDS:
             relation = field.replace("_", "-")
             self.assertIsNotNone(misp_store._obj_attr(obj, relation),
                                  f"publishing dropped {relation}")
