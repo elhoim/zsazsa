@@ -69,17 +69,30 @@ def get_new_scraper_events(misp) -> list:
 
     # MISP REST treats multi-tag filters as OR. Search by the marker only,
     # then keep events that also carry workflow:state="incomplete".
-    events = misp.search(
-        tags=[config.SCRAPER_MARKER_TAG],
-        timestamp=since,
-        limit=getattr(config, "MISP_SCRAPER_LIMIT", 500),
-        page=1,
-        pythonify=True,
-    )
-
-    if isinstance(events, dict) and "errors" in events:
-        logger.error("MISP search failed: %s", events["errors"])
-        return []
+    #
+    # Every page, not just the first: the run moves the watermark past
+    # everything changed before it started, so an event left on page two is
+    # never asked for again. Events already complete still carry the marker
+    # and fill pages too.
+    limit = getattr(config, "MISP_SCRAPER_LIMIT", 500)
+    events, page = [], 1
+    while True:
+        batch = misp.search(
+            tags=[config.SCRAPER_MARKER_TAG],
+            timestamp=since,
+            limit=limit,
+            page=page,
+            pythonify=True,
+        )
+        if isinstance(batch, dict) and "errors" in batch:
+            # Raised rather than read as "nothing new": an empty result lets
+            # the run advance the watermark over a window it never read.
+            raise RuntimeError(f"MISP search failed: {batch['errors']}")
+        batch = batch or []
+        events.extend(batch)
+        if not limit or len(batch) < limit:
+            break
+        page += 1
 
     needed = 'workflow:state="incomplete"'
     filtered = [
