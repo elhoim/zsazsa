@@ -639,7 +639,10 @@ document.querySelectorAll('.actor-type-pill').forEach(function(pill) {
   }
 
   btn.addEventListener('click', function() {
-    var actors = Array.from(document.querySelectorAll('input[name="threat_actors"]:checked')).map(function(c){ return c.value; });
+    // Ticked galaxy actors, or the ones typed in when the galaxy could not be read.
+    var actors = Array.from(document.querySelectorAll(
+      'input[name="threat_actors"]:checked, input[type="hidden"][name="threat_actors"]'
+    )).map(function(c){ return c.value; });
     var context = {};
     Object.keys(fields).forEach(function(name) {
       var el = field(name);

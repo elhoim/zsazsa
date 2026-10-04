@@ -1,14 +1,19 @@
-"""The /api/draft-tap route behind "Draft with AI" on the threat actor profile form.
+"""The "Draft with AI" button on the threat actor profile form, and /api/draft-tap.
 
 What the model returns goes into the form as it is, and the assessment
 confidence lands in a select that only offers "low", "moderate" and "high". A
 "High" or a "medium" selected nothing there while the page reported the field
 as drafted. The model is patched out.
 
+When MISP's galaxy cannot be read, the actor picker falls back to a tag input of
+hidden fields, and the button sent no actors at all. There is no JavaScript test
+runner here, so that is pinned on the template source.
+
     python -m unittest tests.test_tap_draft_api
 """
 
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from flask import Flask
@@ -40,6 +45,14 @@ class AssessmentConfidence(unittest.TestCase):
 
     def test_the_other_sections_are_untouched(self):
         self.assertEqual(self.draft("low")["summary"], "An actor.")
+
+
+class TypedActors(unittest.TestCase):
+    def test_the_draft_sends_actors_typed_into_the_fallback_picker(self):
+        form = (Path(api.__file__).resolve().parent.parent / "templates"
+                / "threat_actor_profile" / "form.html").read_text(encoding="utf-8")
+        handler = form[form.index("var btn = document.getElementById('tap-draft-btn');"):]
+        self.assertIn('input[type="hidden"][name="threat_actors"]', handler)
 
 
 if __name__ == "__main__":

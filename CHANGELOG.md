@@ -27,6 +27,8 @@ attachment.
 - The AI could leave a profile's assessment confidence blank while saying it
   had filled it in.
 - Markdown was shown unsanitised if DOMPurify failed to load.
+- Drafting a profile with AI ignored actors typed in while the MISP galaxy
+  was unavailable.
 
 ## 1.0.5
 
