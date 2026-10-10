@@ -37,7 +37,10 @@ def _imap_connect(host: str, port: int, use_ssl: bool) -> imaplib.IMAP4:
 # or reprocessed.
 PROCESSED_KEYWORD = "zsazsaProcessed"
 
-_FORWARD_RE = re.compile(r"^\s*-+\s*Forwarded message\s*-+\s*$", re.IGNORECASE | re.MULTILINE)
+# [ \t] rather than \s: under re.MULTILINE, \s also matches newlines, so every
+# position in a long run of blank lines becomes a ^ anchor whose \s* rescans the
+# run -- quadratic on attacker-mailed text. A forward marker sits on one line.
+_FORWARD_RE = re.compile(r"^[ \t]*-+[ \t]*Forwarded message[ \t]*-+[ \t]*$", re.IGNORECASE | re.MULTILINE)
 _FORWARD_HEADER_RE = re.compile(r"^(From|Date|Subject|To|Sent|Cc|Reply-To):", re.IGNORECASE)
 _BODY_FROM_RE = re.compile(r"^\s*From:\s*(.+)$", re.IGNORECASE)
 # Leading e-mail quote marker, as Apple Mail and others add when forwarding ("> ").

@@ -151,8 +151,16 @@ def _unfence(text: str) -> str:
     that refusing it would mean check_relevance quietly rejecting every article
     and the draft features returning nothing at all.
     """
-    match = re.match(r"\s*```(?:json)?\s*(.*?)\s*```\s*$", text or "", flags=re.DOTALL)
-    return match.group(1) if match else text
+    # String slicing rather than a lazy DOTALL group between two whitespace
+    # quantifiers, which backtracks cubically on a long unterminated whitespace
+    # run in model output (which scraped content can steer).
+    stripped = (text or "").strip()
+    if len(stripped) < 6 or not (stripped.startswith("```") and stripped.endswith("```")):
+        return text
+    inner = stripped[3:-3]
+    if inner[:4].lower() == "json":
+        inner = inner[4:]
+    return inner.strip()
 
 
 def _json_object(text: str, feature: str) -> dict | None:
