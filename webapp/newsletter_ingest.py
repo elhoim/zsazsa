@@ -8,6 +8,7 @@ newsletter itself stays in misp_store.create_newsletter_event.
 
 import logging
 
+from core.net_safety import is_safe_public_url
 from webapp import misp_store, scraper_queue
 from webapp.redis_client import RedisError
 
@@ -41,7 +42,17 @@ def publish_articles(source: str, articles: list[dict]) -> dict:
     """
     published = failed = no_subscriber = 0
     for article in articles:
-        if not (article.get("url") or "").strip():
+        url = (article.get("url") or "").strip()
+        if not url:
+            continue
+        # The URLs come from newsletter text, which on the auto IMAP path an
+        # unauthenticated sender controls. Only public web addresses go to the
+        # scraper, so a crafted mail cannot make it fetch an internal host
+        # (SSRF). A dropped URL counts as a failure rather than being silent,
+        # since this count is how the ingest paths report delivery.
+        if not is_safe_public_url(url):
+            failed += 1
+            logger.warning("scraper publish skipped non-public URL: %s", url)
             continue
         try:
             receivers = scraper_queue.publish(_message(source, article))

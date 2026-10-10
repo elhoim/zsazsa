@@ -579,7 +579,11 @@ def _test_connection(url, key, verify):
             return {"ok": True, "version": resp["version"], "url": url}
         return {"ok": False, "url": url, "error": "Unexpected response from server"}
     except Exception as exc:
-        return {"ok": False, "url": url, "error": str(exc)}
+        # A fixed message rather than str(exc): the exception text can carry the
+        # upstream response body, which would turn a failed connection test into
+        # a read of whatever the given URL returned. The detail goes to the log.
+        logger.warning("MISP connection test to %s failed: %s", url, exc)
+        return {"ok": False, "url": url, "error": "Could not connect to the MISP server."}
 
 
 def test_scraper_misp():

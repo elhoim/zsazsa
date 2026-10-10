@@ -1285,6 +1285,23 @@ def _stored_misp_keys():
     return pairs
 
 
+def _stored_verify_for(url):
+    """The stored TLS-verification setting for a configured MISP URL, or None.
+
+    Lets a lookup against a server zsazsa already knows reuse that server's
+    verify_tls, rather than silently contacting it with verification turned off.
+    """
+    if not (url or "").strip():
+        return None
+    candidates = [
+        (getattr(_config, "MISP_WEBAPP_URL", ""), getattr(_config, "MISP_WEBAPP_VERIFYCERT", True)),
+        (getattr(_config, "MISP_URL", ""), getattr(_config, "MISP_VERIFYCERT", True)),
+    ]
+    candidates += [(s.get("url"), s.get("verify_tls", True))
+                   for s in getattr(_config, "MISP_SERVERS", []) or []]
+    return next((v for addr, v in candidates if addr and _same_address(addr, url)), None)
+
+
 @bp.route("/config/sources/pull-estimate", methods=["POST"])
 @rate_limited("config_pull_estimate", limit=20, window_s=60)
 def pull_estimate():
@@ -1373,7 +1390,12 @@ def lookup_org():
 
     servers = []
     if misp_url and misp_key:
-        servers.append((misp_url, misp_key, False))
+        # Reuse the stored verify_tls for a known server; never hard-code it off
+        # (that both disabled TLS verification, CWE-295, and let the lookup reach
+        # any client-supplied host). An unknown URL is contacted with
+        # verification on.
+        stored_verify = _stored_verify_for(misp_url)
+        servers.append((misp_url, misp_key, True if stored_verify is None else stored_verify))
     servers.append((_config.MISP_WEBAPP_URL, _config.MISP_WEBAPP_KEY, _config.MISP_WEBAPP_VERIFYCERT))
     if scraper_enabled() and _config.MISP_URL != _config.MISP_WEBAPP_URL:
         servers.append((_config.MISP_URL, _config.MISP_KEY, _config.MISP_VERIFYCERT))
