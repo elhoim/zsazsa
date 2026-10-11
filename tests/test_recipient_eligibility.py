@@ -96,7 +96,8 @@ class BriefingRecipients(unittest.TestCase):
 
 class Clearance(unittest.TestCase):
     """TLP ranks run least to most restrictive, and clearance covers everything at
-    or below it. Both sides fall back to amber."""
+    or below it. Unset is amber on both sides; a value that names no level fails
+    closed, red for a product and clear for a clearance."""
 
     def test_a_clearance_covers_its_own_level_and_below(self):
         self.assertTrue(misp_store._tlp_cleared("red", "amber"))
@@ -109,10 +110,35 @@ class Clearance(unittest.TestCase):
         self.assertTrue(misp_store._tlp_cleared("amber+strict", "amber"))
         self.assertFalse(misp_store._tlp_cleared("amber+strict", "red"))
 
-    def test_unset_and_unknown_levels_are_treated_as_amber(self):
+    def test_unset_levels_are_treated_as_amber(self):
         self.assertTrue(misp_store._tlp_cleared("", ""))
+        self.assertTrue(misp_store._tlp_cleared(None, "amber"))
         self.assertTrue(misp_store._tlp_cleared("AMBER", "amber"))
+
+    def test_spellings_from_misp_and_older_data_are_read(self):
+        # Read as amber before, each of these reached amber-cleared stakeholders.
+        for red in ("tlp:red", "TLP:RED", "red ", " Red"):
+            with self.subTest(tlp=red):
+                self.assertFalse(misp_store._tlp_cleared("amber", red))
+                self.assertTrue(misp_store._tlp_cleared("red", red))
+        for strict in ("amber-strict", "amber_strict", "tlp:amber+strict", "AMBER+STRICT"):
+            with self.subTest(tlp=strict):
+                self.assertFalse(misp_store._tlp_cleared("amber", strict))
+                self.assertTrue(misp_store._tlp_cleared("amber+strict", strict))
+
+    def test_white_is_clear(self):
+        self.assertTrue(misp_store._tlp_cleared("white", "clear"))
+        self.assertFalse(misp_store._tlp_cleared("white", "green"))
+        self.assertTrue(misp_store._tlp_cleared("green", "tlp:white"))
+
+    def test_a_product_level_that_names_nothing_reaches_only_red(self):
+        self.assertFalse(misp_store._tlp_cleared("amber+strict", "secret"))
+        self.assertTrue(misp_store._tlp_cleared("red", "secret"))
+
+    def test_a_clearance_that_names_nothing_covers_only_clear(self):
         self.assertFalse(misp_store._tlp_cleared("nonsense", "red"))
+        self.assertFalse(misp_store._tlp_cleared("nonsense", "green"))
+        self.assertTrue(misp_store._tlp_cleared("nonsense", "clear"))
 
 
 if __name__ == "__main__":
