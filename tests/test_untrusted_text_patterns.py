@@ -4,8 +4,10 @@ Anyone who can mail a monitored mailbox decides what the IMAP collector and the
 ETDA parser read, and scraped text can steer what a model answers. A pattern
 that backtracks over a long run of whitespace let one such mail hold the
 collector for hours on every cron run, and the web app with it when the mail
-was opened for review. Each check below took seconds to hours before the fix;
-the parsing itself is pinned as it was, edge cases included.
+was opened for review. Each timed check below took seconds to hours before
+the fix. The parsing itself is pinned as it was, edge cases included, and so
+are the CRLF line endings and non-breaking spaces of real mail, which a pattern
+narrowed to [ \t] stops recognising.
 
     python -m unittest tests.test_untrusted_text_patterns
 """
@@ -25,21 +27,23 @@ RUN = 50_000
 
 
 class Linear(unittest.TestCase):
+    """What tests/test_redos_untrusted_text.py does not already time."""
+
     def assertQuick(self, func, text):
         started = time.perf_counter()
         func(text)
         self.assertLess(time.perf_counter() - started, 1, repr(text)[:60])
 
-    def test_the_etda_parser(self):
-        blank = " " * RUN
-        for text in (f"# a{blank}b", f"* {blank}*x", f"Priority: 1 - a{blank}b",
-                     f"Priority: 1 - a\nRelevance: a{blank}b", f"Quick overview\na{blank}b",
-                     f"Quick overview\na{blank}<x> 1 2 3", "Quick overview\n" + "<" * RUN + " 1 2 3"):
+    def test_the_bullet_rule_and_overview_patterns(self):
+        # Many lines, each under the parser's length cap, as a mail can carry
+        # without any of them being cut short.
+        blank = " " * 19_000
+        for text in ("".join(f"* {blank}*x\n" for _ in range(20)),
+                     "Quick overview\n" + "".join(f"a{blank}b\n" for _ in range(20)),
+                     "Quick overview\n" + "".join(f"a{blank}<x> 1 2 3\n" for _ in range(20)),
+                     "Quick overview\n" + "<" * 19_000 + " 1 2 3"):
             with self.subTest(text=text[:30]):
                 self.assertQuick(newsletter_parsers.parse_etda, text)
-
-    def test_the_forward_marker(self):
-        self.assertQuick(imap_collector._strip_forward_preamble, "-" + "\n" * RUN + "x")
 
     def test_the_collector_gets_through_the_reported_mail(self):
         """The advisory's reproduction: one base64 line of a heading and a long
@@ -49,16 +53,13 @@ class Linear(unittest.TestCase):
         msg = email.message_from_string(
             "Subject: ETDA CTI\nContent-Type: text/plain\nContent-Transfer-Encoding: base64\n\n" + body)
         mailbox = {"name": "inbox", "sources": [
-            {"name": "ETDA", "parser": "ETDA CTI Robot", "subjects": ["etda"], "mode": "review"}]}
+            {"name": "ETDA", "parser": "ETDA CTI Robot", "subjects": ["etda"], "mode": "manual"}]}
         with mock.patch.object(imap_collector, "fetch_unprocessed", return_value=[("conn", b"7", msg)]), \
              mock.patch.object(imap_collector, "mark_processed", return_value=True) as processed, \
              mock.patch.object(run_imap_collector.misp_store, "create_newsletter_event", return_value="uuid"), \
              mock.patch.object(run_imap_collector.misp_store, "mark_newsletter_pending"):
             self.assertQuick(run_imap_collector._poll_mailbox, mailbox)
         processed.assert_called_once_with("conn", b"7")
-
-    def test_an_unclosed_fence_in_a_model_answer(self):
-        self.assertQuick(llm._unfence, "```" + " " * RUN)
 
 
 class SameParsing(unittest.TestCase):
@@ -99,6 +100,21 @@ class SameParsing(unittest.TestCase):
         # only because the old pattern let \s* cross lines.
         text = "-\n\nForwarded message --\nFrom: a\nBody"
         self.assertEqual(strip(text), text)
+
+    def test_a_forward_from_the_mailbox_loses_its_header_block(self):
+        """IMAP hands over CRLF line endings, so the marker line ends in \r."""
+        raw = ("Subject: Fwd: CTI\r\nContent-Type: text/plain\r\n\r\n"
+               "---------- Forwarded message ---------\r\nFrom: ETDA <r@etda.or.th>\r\n"
+               "Subject: CTI\r\n\r\n[FIRST] ETDA Cyber Threat Intelligence\r\n").encode()
+        self.assertEqual(imap_collector.extract_body(email.message_from_bytes(raw)),
+                         "[FIRST] ETDA Cyber Threat Intelligence")
+
+    def test_non_breaking_spaces_from_converted_html(self):
+        """markdownify turns &nbsp; into \xa0, which sits where a space would."""
+        self.assertEqual(imap_collector._strip_forward_preamble(
+            "----------\xa0Forwarded message\xa0---------\nFrom: x\n\nBody"), "Body")
+        [article] = newsletter_parsers.parse_etda("###\xa0Title\nPriority:\xa01\xa0-\xa0Critical")["articles"]
+        self.assertEqual((article["title"], article["priority_label"]), ("Title", "Critical"))
 
     def test_a_fenced_answer_is_unwrapped(self):
         self.assertEqual(llm._unfence('```json\n{"a": 1}\n```'), '{"a": 1}')

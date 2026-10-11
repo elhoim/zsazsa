@@ -13,11 +13,28 @@ writing a parser and registering it in PARSERS.
 
 import re
 
-# A newsletter can be mailed in by anyone, so no pattern here may backtrack
-# over a long run of whitespace: a group that has to start or end on a
-# non-space character, rather than one followed by \s*$, keeps every match
-# linear in the length of the line. The lines are stripped before matching, so
-# a group running to the end of the line has no trailing whitespace to drop.
+# Untrusted newsletter text (pasted into the importer or mailed to a monitored
+# box) is bounded before any line-by-line regex work. The patterns below are
+# linear, so this only caps the pathological case; a real edition is far
+# smaller than either limit.
+_MAX_TEXT_LEN = 2_000_000
+_MAX_LINE_LEN = 20_000
+
+
+def _bounded(text: str) -> str:
+    """Cap total and per-line length of untrusted newsletter text."""
+    if len(text) > _MAX_TEXT_LEN:
+        text = text[:_MAX_TEXT_LEN]
+    if any(len(line) > _MAX_LINE_LEN for line in text.split("\n")):
+        text = "\n".join(line[:_MAX_LINE_LEN] for line in text.split("\n"))
+    return text
+
+
+# These run per line on untrusted text, so none may backtrack over a long run of
+# whitespace: a group that has to start or end on a non-space character, rather
+# than a lazy group followed by \s*$, keeps every match linear. They keep \s
+# rather than [ \t] between the parts, since an edition converted from HTML has
+# non-breaking spaces there. The caller strips the groups.
 _PRIORITY_RE = re.compile(r'^Priority:\s*(\d)\s*-\s*(\S.*)', re.IGNORECASE)
 _RELEVANCE_RE = re.compile(r'^Relevance:\s*(\S.*)', re.IGNORECASE)
 _URL_RE = re.compile(r'https?://\S+')
@@ -37,15 +54,24 @@ _FWD_HEADER_RE = re.compile(
 # Markdown decoration, as it arrives when a message carried no plain-text part and
 # the collector converted its HTML instead: headings, bullets, table rows, emphasis
 # around a field label, and backslash-escaped punctuation.
-# The heading text still carries any closing hashes; see _etda_kinds.
-_ATX_RE = re.compile(r'^(#{1,6})\s+(.*)')
+_ATX_RE = re.compile(r'^(#{1,6})\s+(.*)$')
 _RULE_RE = re.compile(r'^(=+|-+)$')
-_BULLET_RE = re.compile(r'^[*+-]\s+(\S.*)')
+_BULLET_RE = re.compile(r'^[*+-]\s+([^\s*+-].*)$')
 _TABLE_ROW_RE = re.compile(r'^\|.*\|$')
 _EMPHASIS_RE = re.compile(r'^([*_]{1,2})(.+?)\1$')
 _MD_ESCAPE_RE = re.compile(r'\\([\\`*_{}\[\]()#+.!-])')
 # Back-to-top arrow: bare in the list mail, a link in converted HTML.
 _ARROW_RE = re.compile(r'^(↑|\[↑\].*)$')
+
+
+def _atx_text(match: re.Match) -> str:
+    """The heading text of an ATX match, with any closing '#' run removed.
+
+    The pattern captures the rest of the line greedily (linear); the optional
+    closing hashes of '## Heading ##' are stripped here instead of in a regex
+    group that would backtrack on trailing whitespace.
+    """
+    return match.group(2).rstrip().rstrip('#').rstrip()
 
 
 def _parsed_tlp(match: re.Match | None) -> str:
@@ -123,13 +149,6 @@ def _etda_section_names(lines: list[str]) -> list[str]:
     return names
 
 
-def _bullet(line: str) -> str:
-    """The text of a '* Title' bullet, or "". A row of markers such as
-    '* * *' is a rule, not a bullet."""
-    match = _BULLET_RE.match(line)
-    return match.group(1) if match and match.group(1)[0] not in "*+-" else ""
-
-
 def _opens_section(lines: list[str], idx: int) -> bool:
     """Whether the line at idx is a section heading in the mailing list's layout.
 
@@ -141,7 +160,7 @@ def _opens_section(lines: list[str], idx: int) -> bool:
     prev = lines[idx - 1].strip() if idx else ""
     nxt = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
     after = lines[idx + 2].strip() if idx + 2 < len(lines) else ""
-    if prev or nxt or not _bullet(after):
+    if prev or nxt or not _BULLET_RE.match(after):
         return False
     return not (_URL_RE.search(line) or _PRIORITY_RE.match(line)
                 or _RELEVANCE_RE.match(line))
@@ -160,7 +179,7 @@ def _etda_kinds(lines: list[str]) -> list[tuple[str, str]]:
         line = _strip_emphasis(raw)
         nxt = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
         atx = _ATX_RE.match(line)
-        bullet = _bullet(line)
+        bullet = _BULLET_RE.match(line)
         if not line or _RULE_RE.match(line) or _TABLE_ROW_RE.match(line):
             kinds.append(("skip", ""))
         elif _ARROW_RE.match(line):
@@ -170,11 +189,9 @@ def _etda_kinds(lines: list[str]) -> list[tuple[str, str]]:
             # under the report title in the list mail is wider than the title.
             kinds.append(("title" if nxt[0] == "=" else "section", line))
         elif atx:
-            # A closing run of hashes is optional in Markdown.
-            heading = atx.group(2).rstrip("#").rstrip()
-            kinds.append(("section" if len(atx.group(1)) <= 2 else "title", heading))
+            kinds.append(("section" if len(atx.group(1)) <= 2 else "title", _atx_text(atx)))
         elif bullet:
-            kinds.append(("title", bullet.strip()))
+            kinds.append(("title", bullet.group(1).strip()))
         elif _opens_section(lines, idx):
             kinds.append(("section", line))
         else:
@@ -241,6 +258,7 @@ def parse_etda(text: str) -> dict:
     An article starts at its 'Priority: N - Label' line, which every edition has
     for every article, whatever shape it arrived in.
     """
+    text = _bounded(text)
     text = _dequote(text.replace("\r\n", "\n").replace("\r", "\n"))
     lines = text.split("\n")
     kinds = _etda_kinds(lines)
@@ -346,6 +364,7 @@ def parse_itisac(text: str) -> dict:
     IT-ISAC grades nothing, so the priority and section fields the ETDA parser
     fills stay empty rather than being invented here.
     """
+    text = _bounded(text)
     text = _dequote(text.replace("\r\n", "\n").replace("\r", "\n"))
     lines = text.split("\n")
 
