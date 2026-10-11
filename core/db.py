@@ -116,6 +116,12 @@ def init_db() -> None:
         ])
 
 
+# Sequence ids are small, three-digit counters. A seed past this ceiling can
+# only come from a malformed source (an event title scanned for its highest id),
+# and writing it to the counter would block all future ids, so it is ignored.
+_MAX_SEQUENCE_SEED = 10_000_000
+
+
 def next_sequence_value(name: str, at_least: int = 0) -> int:
     """Hand out the next value of the named counter, never below `at_least`.
 
@@ -123,12 +129,25 @@ def next_sequence_value(name: str, at_least: int = 0) -> int:
     callers (threads, or several workers sharing the database) each get their
     own number. It is consumed straight away: if whatever it was allocated for
     then fails, the number is skipped rather than handed out twice.
+
+    `at_least` is seeded from data outside our control (the highest id scanned
+    out of MISP event titles), so an unusable value - not an int, negative, or
+    absurdly large - is ignored and the stored counter is used on its own,
+    rather than poisoning the sequence for every later create.
     """
+    try:
+        seed = int(at_least)
+    except (TypeError, ValueError):
+        seed = 0
+    if not 0 <= seed <= _MAX_SEQUENCE_SEED:
+        logger.warning("sequence %r seeded with out-of-range value %r; ignoring the seed",
+                       name, at_least)
+        seed = 0
     conn = sqlite3.connect(config.DB_FILE, timeout=30, isolation_level=None)
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT value FROM sequence_counter WHERE name = ?", (name,)).fetchone()
-        value = max(int(row[0]) if row else 0, at_least) + 1
+        value = max(int(row[0]) if row else 0, seed) + 1
         conn.execute(
             "INSERT INTO sequence_counter (name, value) VALUES (?, ?)"
             " ON CONFLICT(name) DO UPDATE SET value = excluded.value",

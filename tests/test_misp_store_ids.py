@@ -93,6 +93,20 @@ class ReservedId(unittest.TestCase):
         self.assertEqual(misp_store._reserve_sequence_id(misp, "tag", "PIR", "PIR-002"), "PIR-002")
         self.assertEqual(misp_store._reserve_sequence_id(misp, "tag", "PIR", ""), "PIR-005")
 
+    def test_a_malformed_title_number_does_not_block_allocation(self):
+        # A title with an absurdly large id would seed the counter past the
+        # ceiling; the seed is ignored so creates keep working from the counter.
+        huge = "9" * 40
+        misp = FakeMisp([f"[zsazsa:pir] PIR-{huge}"])
+        self.assertEqual(misp_store._reserve_sequence_id(misp, "tag", "PIR", ""), "PIR-001")
+        self.assertEqual(misp_store._reserve_sequence_id(FakeMisp([]), "tag", "PIR", ""), "PIR-002")
+
+    def test_out_of_range_seed_is_ignored(self):
+        self.assertEqual(db.next_sequence_value("gir", at_least=db._MAX_SEQUENCE_SEED + 1), 1)
+        self.assertEqual(db.next_sequence_value("gir", at_least=-5), 2)
+        # A valid seed is still honoured.
+        self.assertEqual(db.next_sequence_value("gir", at_least=10), 11)
+
 
 class SearchAll(unittest.TestCase):
     def test_every_page_is_fetched_until_a_short_one(self):
