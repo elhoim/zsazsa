@@ -62,6 +62,23 @@ class StoreCase(unittest.TestCase):
         return misp
 
 
+class NotAnEventId(StoreCase):
+    def test_a_word_from_the_url_is_not_looked_up(self):
+        """/products/vea/review reached MISP as an event id, and PyMISP logged
+        the 404 as an error."""
+        misp = self.misp_returning(_event())
+        self.assertIsNone(misp_store.get_vea("review"))
+        self.assertIsNone(misp_store.get_stakeholder("review"))
+        misp.get_event.assert_not_called()
+
+    def test_a_uuid_or_a_numeric_id_still_is(self):
+        misp = self.misp_returning(_event("zsazsa-vea"))
+        for event_id in (UUID, "42"):
+            with self.subTest(event_id=event_id):
+                self.assertIsNotNone(misp_store.get_vea(event_id))
+        self.assertEqual(misp.get_event.call_count, 2)
+
+
 class Getters(StoreCase):
     def test_an_event_that_is_not_a_record_is_not_found(self):
         self.misp_returning(_event())
@@ -130,6 +147,7 @@ class Writes(StoreCase):
         ("update_briefing", (UUID, {})),
         ("update_tlr", (UUID, {})),
         ("update_collection_source", (UUID, {})),
+        ("toggle_collection_source", (UUID, False)),
         ("update_pir_intake", (UUID, "approved")),
         ("set_fia_review_state", (UUID, misp_store.FIA_REVIEW_APPROVED)),
         ("set_vea_review_state", (UUID, misp_store.VEA_REVIEW_APPROVED)),

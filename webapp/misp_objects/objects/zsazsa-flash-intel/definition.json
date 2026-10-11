@@ -3,7 +3,7 @@
   "meta-category": "intelligence",
   "description": "Flash Intel Alert (FIA) draft fields managed by the zsazsa CTI program",
   "uuid": "9b1c2d3e-4f5a-4b6c-9d7e-8f9a0b1c2d3e",
-  "version": 3,
+  "version": 4,
   "attributes": {
     "fia-id": {
       "misp-attribute": "text",
@@ -231,6 +231,24 @@
       "misp-attribute": "text",
       "ui-priority": 24,
       "description": "User who approved/published this alert",
+      "disable_correlation": true
+    },
+    "source-event-hints": {
+      "misp-attribute": "text",
+      "ui-priority": 25,
+      "description": "Source event UUIDs mapped to the collection source they came from, as JSON",
+      "disable_correlation": true
+    },
+    "context-tags": {
+      "misp-attribute": "text",
+      "ui-priority": 26,
+      "description": "Tags of the source events kept on the alert as context, as a JSON list",
+      "disable_correlation": true
+    },
+    "linked-pir-uuid": {
+      "misp-attribute": "text",
+      "ui-priority": 27,
+      "description": "UUID of a linked PIR",
       "disable_correlation": true
     }
   }

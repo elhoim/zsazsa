@@ -3,14 +3,18 @@
     python -m unittest tests.test_tlr_actor_categories
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from bs4 import BeautifulSoup
 from flask import render_template
 from werkzeug.datastructures import MultiDict
 
-from webapp import create_app, misp_store
+import config
+from webapp import collection_cache, create_app, misp_store
 from webapp.routes import threat_landscape
 
 
@@ -46,8 +50,12 @@ class ActorCategories(unittest.TestCase):
         self.assertNotIn("### Cybercrime", md)
 
     def test_wizard_offers_a_three_line_box_per_category(self):
-        app = create_app()
-        with app.test_request_context():
+        # Not this install's database, log or collection cache worker.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(config, "DB_FILE", str(Path(tmp) / "test.db"), create=True), \
+             mock.patch.object(config, "LOG_FILE", str(Path(tmp) / "test.log"), create=True), \
+             mock.patch.object(collection_cache, "start_worker"), \
+             create_app().test_request_context():
             page = render_template(
                 "threat_landscape/wizard.html", tlr=_report(actors_cybercrime="LockBit"),
                 tlp_levels=misp_store.TLR_TLP_LEVELS, is_edit=True, queued=[], audiences=[],

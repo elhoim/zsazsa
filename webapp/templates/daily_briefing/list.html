@@ -237,11 +237,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
-if (typeof marked !== 'undefined') marked.setOptions({ breaks: true, gfm: true });
-
 /* Same story-label muting as the briefing detail page. */
 var LEAD_LABEL = /(<p>|<br\s*\/?>)(\s*)([A-Za-z][A-Za-z ]{1,33}:)(?=\s)/g;
 function muteLeadLabels(html) {
@@ -249,10 +246,9 @@ function muteLeadLabels(html) {
 }
 
 document.querySelectorAll('.report-md-body').forEach(function(el) {
-  var raw = el.getAttribute('data-md') || '';
-  if (!raw.trim()) { el.innerHTML = '<em class="text-muted">(no content)</em>'; }
-  else if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') el.innerHTML = muteLeadLabels(DOMPurify.sanitize(marked.parse(raw)));
-  else el.textContent = raw;
+  if (zsazsaRenderMarkdown(el, el.getAttribute('data-md'), '<em class="text-muted">(no content)</em>')) {
+    el.innerHTML = muteLeadLabels(el.innerHTML);
+  }
 });
 
 /* ── Preview toggle ── */

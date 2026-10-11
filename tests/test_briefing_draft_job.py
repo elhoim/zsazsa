@@ -10,11 +10,13 @@ briefing one is already working on.
     python -m unittest tests.test_briefing_draft_job
 """
 
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
 from flask import Flask
+from pymisp import PyMISP
 
 from webapp import job_store, misp_store
 from webapp.routes import api
@@ -36,6 +38,16 @@ def _briefing(**over):
     )
     base.update(over)
     return SimpleNamespace(**base)
+
+
+def setUpModule():
+    # Answering None for every Redis command keeps the jobs these tests create
+    # in job_store's in-memory fallback. Without this they land in the Redis the
+    # app is using and show up in its Background jobs panel.
+    patcher = mock.patch.object(job_store, "_command", return_value=None)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+    unittest.addModuleCleanup(job_store._memory.clear)
 
 
 class TheJobWritesOnce(unittest.TestCase):
@@ -202,8 +214,7 @@ class APublishWhileDraftingIsNotUndone(unittest.TestCase):
 
 class TheStoreRefusesAStaleCopy(unittest.TestCase):
     def test_update_with_an_expected_state_that_moved_on_writes_nothing(self):
-        from webapp import misp_store
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         event = SimpleNamespace(uuid="b" * 36, objects=[])
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
              mock.patch.object(misp_store, "_zsazsa_event", return_value=event), \
@@ -211,12 +222,10 @@ class TheStoreRefusesAStaleCopy(unittest.TestCase):
                                return_value=SimpleNamespace(review_state="published", stories=[])):
             with self.assertRaises(misp_store.BriefingStateChanged):
                 misp_store.update_briefing("b" * 36, {"stories": []}, expected_state="draft")
-        misp.delete_object.assert_not_called()
+        misp.update_object.assert_not_called()
         misp.add_object.assert_not_called()
 
     def test_publish_waits_for_an_update_in_progress(self):
-        import threading
-        from webapp import misp_store
         ran = threading.Event()
         with mock.patch.object(misp_store, "_publish_briefing", side_effect=lambda u: ran.set()):
             with misp_store._briefing_write_lock:

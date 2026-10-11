@@ -214,6 +214,10 @@
               </span>
               <span class="vr"></span>
               <span class="d-inline-flex flex-nowrap gap-1">
+                {% if d.review_state == 'approved' %}
+                <span class="btn btn-xs btn-outline-secondary btn-ghost" aria-hidden="true"><i class="fas fa-pen"></i></span>
+                <span class="btn btn-xs btn-outline-danger btn-ghost" aria-hidden="true"><i class="fas fa-trash"></i></span>
+                {% else %}
                 <a href="{{ url_for('detection_eng.wizard_edit', id=d.uuid) }}" class="btn btn-xs btn-outline-secondary" title="Edit">
                   <i class="fas fa-pen"></i>
                 </a>
@@ -225,6 +229,7 @@
                     <i class="fas fa-trash"></i>
                   </button>
                 </form>
+                {% endif %}
               </span>
             </div>
           </td>

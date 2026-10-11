@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from flask import Flask
+from pymisp import PyMISP
 
 from analyser import llm
 from notifier import product_email
@@ -317,12 +318,12 @@ class BriefingFieldList(unittest.TestCase):
 
 
 class PublishKeepsTheStoredFields(unittest.TestCase):
-    """Publishing deletes the briefing object and writes it again, so a field the
-    rewrite does not carry across is lost at the moment the briefing goes out."""
+    """Publishing writes the briefing object whole, so a field the rewrite does
+    not carry across is lost at the moment the briefing goes out."""
 
     def _published_object(self):
         briefing = _stored_briefing()
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
              mock.patch.object(misp_store, "_zsazsa_event", return_value=mock.MagicMock()), \
              mock.patch.object(misp_store, "_briefing_ns", return_value=briefing), \

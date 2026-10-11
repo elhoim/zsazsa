@@ -1,0 +1,29 @@
+{# marked and DOMPurify, for a page that renders Markdown in the browser. They
+   are pinned by version and by hash: they come from a CDN and run with the
+   analyst's MISP session, so a file changed there must not load. Changing a
+   version means changing its hash, taken from cdnjs. #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" integrity="sha512-pmjEJQ7CveksANaAKdCJZMig7eAcCFFzE1b5XnlnxdB/vU3AOStJ5SF7w4tFuqskuU31ETnAaWTYRQOYg2WHKw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+(function() {
+  var ready = typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined';
+  if (ready) marked.setOptions({ breaks: true, gfm: true });
+
+  /* Fill el with raw as sanitised HTML, or with `empty` (markup of the page's
+     own) when raw is blank. Without either library, from a blocked CDN or a
+     failed hash check, raw goes in as the text it was written as. Returns
+     whether raw went in as HTML, for a page that reworks it. */
+  window.zsazsaRenderMarkdown = function(el, raw, empty) {
+    if (!raw || !raw.trim()) {
+      el.innerHTML = empty || '';
+      return false;
+    }
+    if (!ready) {
+      el.textContent = raw;
+      return false;
+    }
+    el.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+    return true;
+  };
+})();
+</script>

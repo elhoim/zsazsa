@@ -382,12 +382,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
-marked.setOptions({ breaks: true, gfm: true });
-document.querySelectorAll('.report-md-body').forEach(el => {
-  el.innerHTML = DOMPurify.sanitize(marked.parse(el.getAttribute('data-md') || ''));
-});
+document.querySelectorAll('.report-md-body').forEach(el => zsazsaRenderMarkdown(el, el.getAttribute('data-md')));
 </script>
 {% endblock %}

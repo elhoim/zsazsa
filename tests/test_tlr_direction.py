@@ -9,7 +9,9 @@ neither edited nor deleted. MISP is patched out.
     python -m unittest tests.test_tlr_direction
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -18,7 +20,8 @@ from flask import Flask, render_template
 from pymisp import PyMISP
 from werkzeug.datastructures import MultiDict
 
-from webapp import create_app, matching, misp_store
+import config
+from webapp import collection_cache, create_app, matching, misp_store
 from webapp.routes import threat_landscape
 
 UUID = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
@@ -163,6 +166,16 @@ class Markdown(unittest.TestCase):
 
 
 class RenderedPage(unittest.TestCase):
+    def setUp(self):
+        # Not this install's database, log or collection cache worker.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for patcher in (mock.patch.object(config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True),
+                        mock.patch.object(config, "LOG_FILE", str(Path(tmp.name) / "test.log"), create=True),
+                        mock.patch.object(collection_cache, "start_worker")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_every_text_field_is_handed_to_the_markdown_renderer(self):
         report = _report(purpose="**Why**", top_threats="- one", key_incidents="x", recommendations="y",
                          outlook="z", methodology="m", trending_actors="t", actors_cybercrime="c",

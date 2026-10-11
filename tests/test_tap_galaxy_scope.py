@@ -59,7 +59,9 @@ class GalaxyEnrichmentScope(unittest.TestCase):
         self.assertEqual(data["sectors"], ["Government, Administration"])
 
     def test_an_actor_the_galaxy_knows_nothing_about_adds_no_scope(self):
-        with mock.patch.object(misp_store, "threat_actor_galaxy_meta", return_value={}):
+        with mock.patch.object(misp_store, "threat_actor_galaxy_meta", return_value={}), \
+             mock.patch.object(misp_store, "galaxy_geography", return_value=["Belgium"]), \
+             mock.patch.object(misp_store, "galaxy_sectors", return_value=["Military"]):
             data = misp_store.galaxy_enrichment(["Made up"])
         self.assertEqual(data["geographic_scope"], [])
         self.assertEqual(data["sectors"], [])

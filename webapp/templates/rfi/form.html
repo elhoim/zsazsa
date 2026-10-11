@@ -248,17 +248,13 @@
 {% block scripts %}
 {% include "rfi/_response_fields_js.html" %}
 {% if is_edit %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
 (function() {
-  marked.setOptions({ breaks: true, gfm: true });
-
   // Render Markdown note bodies inside the given root.
   function renderMarkdown(root) {
     (root || document).querySelectorAll('.report-md-body[data-md]').forEach(function(el) {
-      var raw = el.getAttribute('data-md') || '';
-      el.innerHTML = raw.trim() ? DOMPurify.sanitize(marked.parse(raw)) : '';
+      zsazsaRenderMarkdown(el, el.getAttribute('data-md'));
       el.removeAttribute('data-md');
     });
   }

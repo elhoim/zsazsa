@@ -187,8 +187,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
 function tiRender(field) {
   var display = document.getElementById('ti-display-' + field);
@@ -235,8 +234,6 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <script>
 (function() {
-  marked.setOptions({ breaks: true, gfm: true });
-
   // Markdown editor tabs
   var editTab     = document.getElementById('md-tab-edit');
   var previewTab  = document.getElementById('md-tab-preview');
@@ -248,7 +245,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function renderPreview() {
     var raw = descTA.value;
-    previewPane.innerHTML = raw.trim() ? DOMPurify.sanitize(marked.parse(raw)) : '<em class="text-muted">Nothing to preview.</em>';
+    zsazsaRenderMarkdown(previewPane, raw, '<em class="text-muted">Nothing to preview.</em>');
   }
 
   function setTab(mode) {

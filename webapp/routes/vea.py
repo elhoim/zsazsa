@@ -434,6 +434,9 @@ def reject(id):
 def delete(id):
     vea = misp_store.get_vea(id)
     label = vea.vea_id if vea else id
+    if vea and vea.review_state == misp_store.VEA_REVIEW_APPROVED:
+        flash("Published advisories cannot be deleted.", "warning")
+        return redirect(url_for("vea.detail", id=id))
     try:
         misp_store.delete_vea(id)
         audit.record("delete", "vea", entity_id=id, entity_label=label)

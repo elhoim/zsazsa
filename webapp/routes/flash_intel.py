@@ -373,6 +373,9 @@ def reject(id):
 def delete(id):
     fia = misp_store.get_fia(id)
     label = fia.fia_id if fia else id
+    if fia and fia.review_state == misp_store.FIA_REVIEW_APPROVED:
+        flash("Published alerts cannot be deleted.", "warning")
+        return redirect(url_for("flash_intel.detail", id=id))
     try:
         misp_store.delete_fia(id)
         audit.record("delete", "fia", entity_id=id, entity_label=label)

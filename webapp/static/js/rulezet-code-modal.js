@@ -74,6 +74,7 @@
     hljsReady = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js';
+      s.integrity = 'sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ==';
       s.crossOrigin = 'anonymous';
       s.referrerPolicy = 'no-referrer';
       s.onload = () => registerExtraLanguages(window.hljs).then(() => resolve(window.hljs));

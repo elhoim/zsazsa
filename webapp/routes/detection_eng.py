@@ -461,6 +461,9 @@ def status_update(id):
 def delete(id):
     der = misp_store.get_der(id)
     label = der.der_id if der else id
+    if der and der.review_state == misp_store.DER_REVIEW_APPROVED:
+        flash("Published requests cannot be deleted.", "warning")
+        return redirect(url_for("detection_eng.detail", id=id))
     try:
         misp_store.delete_der(id)
         audit.record("delete", "detection_eng", entity_id=id, entity_label=label)

@@ -3,7 +3,7 @@
   "meta-category": "intelligence",
   "description": "Vulnerability Exploitation Advisory (VEA) managed by the zsazsa CTI program",
   "uuid": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
-  "version": 1,
+  "version": 2,
   "attributes": {
     "vea-id": {
       "misp-attribute": "text",
@@ -219,6 +219,24 @@
       "misp-attribute": "text",
       "ui-priority": 35,
       "description": "Date by which feedback should be returned (ISO 8601)",
+      "disable_correlation": true
+    },
+    "summary": {
+      "misp-attribute": "text",
+      "ui-priority": 36,
+      "description": "Brief description of the vulnerability",
+      "disable_correlation": true
+    },
+    "cvss": {
+      "misp-attribute": "text",
+      "ui-priority": 37,
+      "description": "CVSS score and severity (e.g. 9.8 (CRITICAL))",
+      "disable_correlation": true
+    },
+    "cwe": {
+      "misp-attribute": "text",
+      "ui-priority": 38,
+      "description": "Weakness identifiers (e.g. CWE-77)",
       "disable_correlation": true
     }
   }

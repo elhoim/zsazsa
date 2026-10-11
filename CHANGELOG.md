@@ -41,6 +41,8 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
   threat landscape report, threat actor profile or indicator feed no longer
   fails on that product's pages. A missing tag setting gets the default until
   the Settings page is saved.
+- A page that cannot load marked or DOMPurify shows Markdown as plain text
+  instead of nothing.
 
 ### Security
 
@@ -70,6 +72,8 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
   unclosed code fence (GHSA-v4mq-r4g8-g35w). Parsing now takes time linear in
   the length of the text and reads every edition as before. / reported by
   @elhoim
+- The scripts and stylesheets zsazsa loads from cdnjs carry an integrity hash,
+  so the browser refuses a file that was changed there.
 
 ## 1.0.6
 

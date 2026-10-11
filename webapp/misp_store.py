@@ -953,7 +953,19 @@ def _event_has_tag(event, tag_name: str) -> bool:
     }
 
 
+def _is_event_id(value) -> bool:
+    """Whether a value from a URL can name a MISP event: a UUID or a numeric id.
+
+    Anything else, such as "review" from /products/vea/review, is no event, and
+    asking MISP for it only puts its 404 in the log as an error.
+    """
+    value = str(value or "")
+    return bool(_UUID_RE.fullmatch(value)) or value.isdigit()
+
+
 def _stakeholder_event(uuid):
+    if not _is_event_id(uuid):
+        return None
     misp = _misp()
     event = misp.get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None:
@@ -982,6 +994,8 @@ def _zsazsa_event(uuid, object_name, tag):
     so nothing may show, change or delete an event with zsazsa's service key
     before it is known to be a record of the type asked for.
     """
+    if not _is_event_id(uuid):
+        return None
     event = _misp().get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None or not _is_record(event, object_name, tag):
         return None
@@ -4001,19 +4015,16 @@ def create_collection_source(data: dict) -> str:
 
 
 def update_collection_source(uuid, data: dict):
-    """Update a collection source: replace the MISP object with new field values."""
+    """Update a collection source with new field values."""
     misp = _misp()
     ev = _zsazsa_event(uuid, "zsazsa-collection-source", TAG_COLLECTION_SOURCE)
     if ev is None:
         raise ValueError(f"Collection source {uuid} not found")
-    old_enabled = True
     old_obj = _get_obj(ev, "zsazsa-collection-source")
-    if old_obj is not None:
-        old_enabled = _obj_attr(old_obj, "enabled") != "false"
-        misp.delete_object(old_obj.id)
+    old_enabled = old_obj is None or _obj_attr(old_obj, "enabled") != "false"
     new_enabled = data["enabled"] if "enabled" in data else old_enabled
-    _check(misp.add_object(uuid, _collection_source_obj(data, enabled=new_enabled),
-                            pythonify=True), "update collection source object")
+    _sync_object_attributes(misp, ev, "zsazsa-collection-source",
+                            _collection_source_obj(data, enabled=new_enabled), "collection source")
     new_info = f"Collection source: {(data.get('name') or '').strip()}"
     misp.update_event({"Event": {"id": ev.id, "info": new_info}})
     _apply_admiralty_tag(misp, uuid, data.get("source_reliability", ""))
@@ -4022,8 +4033,8 @@ def update_collection_source(uuid, data: dict):
 def toggle_collection_source(uuid, enabled: bool):
     """Enable or disable a collection source."""
     misp = _misp()
-    ev = misp.get_event(uuid, pythonify=True)
-    if not ev or isinstance(ev, dict):
+    ev = _zsazsa_event(uuid, "zsazsa-collection-source", TAG_COLLECTION_SOURCE)
+    if ev is None:
         raise ValueError(f"Collection source {uuid} not found")
     old_obj = _get_obj(ev, "zsazsa-collection-source")
     if old_obj is None:
@@ -4035,9 +4046,8 @@ def toggle_collection_source(uuid, enabled: bool):
         "description": _obj_attr(old_obj, "description"),
         "source_reliability": _obj_attr(old_obj, "source-reliability"),
     }
-    misp.delete_object(old_obj.id)
-    _check(misp.add_object(uuid, _collection_source_obj(data, enabled=enabled),
-                            pythonify=True), "toggle collection source")
+    _sync_object_attributes(misp, ev, "zsazsa-collection-source",
+                            _collection_source_obj(data, enabled=enabled), "collection source")
 
 
 def delete_collection_source(uuid):
@@ -4898,7 +4908,7 @@ def create_fia(data):
 
 
 def update_fia(uuid, data):
-    """Replace the FIA object on the event and re-render the report."""
+    """Update the FIA object on the event and re-render the report."""
     misp = _misp()
     event = _zsazsa_event(uuid, "zsazsa-flash-intel", config.TAG_FLASH_INTEL)
     if event is None:
@@ -4916,8 +4926,7 @@ def update_fia(uuid, data):
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _fia_obj(data)), "update FIA object")
+    _sync_object_attributes(misp, event, "zsazsa-flash-intel", _fia_obj(data), "FIA")
 
     title = (data.get("title") or "").strip() or "Untitled"
     misp.update_event({"Event": {"id": event.id, "info": f"[zsazsa:fia] {title}"}})
@@ -5737,8 +5746,7 @@ def update_vea(uuid, data):
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _vea_obj(data)), "update VEA object")
+    _sync_object_attributes(misp, event, "zsazsa-vea", _vea_obj(data), "VEA")
 
     cve = (data.get("cve_id") or "").strip()
     title = (data.get("title") or cve or "Untitled").strip()
@@ -6165,8 +6173,7 @@ def update_der(uuid, data):
     data.setdefault("status", (_obj_attr(old, "status") if old else "") or DER_STATUS_PENDING)
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _der_obj(data)), "update DER object")
+    _sync_object_attributes(misp, event, "zsazsa-detection-eng-request", _der_obj(data), "DER")
 
     title = (data.get("title") or "Untitled").strip()
     misp.update_event({"Event": {"id": event.id, "info": f"[zsazsa:der] {title}"}})
@@ -6709,11 +6716,10 @@ def create_briefing(data):
     return uuid
 
 
-# update_briefing and publish_briefing both rebuild the briefing object by
-# deleting it and adding a new one. Two of them overlapping (the drafting job
-# saving while an analyst publishes) would otherwise leave the event with two
-# briefing objects, or with neither. zsazsa runs as one process (INSTALL.md), so
-# a process lock is enough.
+# update_briefing and publish_briefing each read the briefing, decide, and
+# write it back. Two of them overlapping (the drafting job saving while an
+# analyst publishes) would otherwise let the later write undo the earlier one.
+# zsazsa runs as one process (INSTALL.md), so a process lock is enough.
 _briefing_write_lock = threading.RLock()
 
 
@@ -6759,8 +6765,7 @@ def _update_briefing(uuid, data, expected_state):
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _briefing_obj(data)), "update briefing object")
+    _sync_object_attributes(misp, event, "zsazsa-daily-briefing", _briefing_obj(data), "briefing")
 
     _delete_briefing_reports(misp, event)
     for i, story in enumerate(data.get("stories", []), 1):
@@ -6789,15 +6794,12 @@ def _publish_briefing(uuid):
         raise RuntimeError(f"Briefing event {uuid} not found")
     briefing = _briefing_ns(event)
 
-    old = _get_obj(event, "zsazsa-daily-briefing")
-    if old:
-        misp.delete_object(old.id)
-    # The object is rebuilt from scratch, so everything it held has to be
-    # carried across; only the review state and the approver change here.
+    # The object is written whole, so everything it holds has to be carried
+    # across; only the review state and the approver change here.
     data = {field: getattr(briefing, field) for field in BRIEFING_FIELDS}
     data["review_state"] = BRIEFING_REVIEW_PUBLISHED
     data["approved_by"] = misp_session.current_user_email()
-    _check(misp.add_object(_event_ref(event), _briefing_obj(data)), "publish briefing object")
+    _sync_object_attributes(misp, event, "zsazsa-daily-briefing", _briefing_obj(data), "briefing")
     for tag in list(getattr(event, "tags", []) or []):
         if tag.name.startswith("workflow:state="):
             try:

@@ -89,7 +89,8 @@ class BuildFiaReportMode(unittest.TestCase):
         with mock.patch.object(misp_store, "fetch_source_events", return_value=[_event([RAW, SUMMARY])]), \
              mock.patch.object(misp_store, "galaxy_sectors", return_value=[]), \
              mock.patch.object(misp_store, "galaxy_geography", return_value=[]), \
-             mock.patch("analyser.llm.generate_fia_draft", return_value="## Summary\nText") as llm:
+             mock.patch("analyser.llm.generate_fia_draft", return_value="## Summary\nText") as llm, \
+             mock.patch.object(api.audit, "record"):
             self.client.post("/api/build-fia", json={"source_uuids": [UUID], "report_mode": mode})
         return llm.call_args[0][0]
 

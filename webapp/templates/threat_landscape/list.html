@@ -287,11 +287,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
-marked.setOptions({ breaks: true, gfm: true });
-
 // The preview renders its Markdown the first time it opens.
 document.querySelectorAll('.preview-toggle-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
@@ -300,7 +297,7 @@ document.querySelectorAll('.preview-toggle-btn').forEach(function(btn) {
     row.style.display = open ? 'none' : '';
     btn.querySelector('i').className = open ? 'fas fa-eye' : 'fas fa-eye-slash';
     row.querySelectorAll('.report-md-body[data-md]').forEach(function(el) {
-      el.innerHTML = DOMPurify.sanitize(marked.parse(el.getAttribute('data-md')));
+      zsazsaRenderMarkdown(el, el.getAttribute('data-md'));
       el.removeAttribute('data-md');
     });
   });
