@@ -4,6 +4,7 @@ All endpoints require the CSRF token (POST methods are covered by the global
 before_request hook). Results are returned as JSON.
 """
 
+import ipaddress
 import logging
 import re
 import threading
@@ -11,7 +12,7 @@ import threading
 import config
 from flask import Blueprint, jsonify, url_for
 
-from core.net_safety import is_safe_public_url
+from core.net_safety import resolve_public_url
 from core.rulezet_lookup import (get_rule, search_rules_by_attack, search_rules_by_cve,
                                  validate_rule)
 from core.vuln_lookup import fetch_cve_info
@@ -740,20 +741,33 @@ def fetch_url():
     url = (body.get("url") or "").strip()
     if not url:
         return jsonify({"title": "", "content": "", "error": "URL required."})
-    if not is_safe_public_url(url):
+    resolved = resolve_public_url(url)
+    if resolved is None:
         logger.warning("fetch_url rejected non-public or invalid URL: %s", url)
         return jsonify({
             "title": "", "content": "",
             "error": "URL must be a public http(s) address.",
         }), 400
+    host, port, ips = resolved
     try:
+        from curl_cffi import CurlOpt
         from curl_cffi import requests as cf_requests
         from bs4 import BeautifulSoup
         from markdownify import markdownify as md
 
+        # Pin the connection to the addresses just validated, so the client's own
+        # DNS resolution cannot rebind the host to an internal address between the
+        # check above and the fetch (CWE-367). An IP-literal host has no name to
+        # rebind, so it is fetched as-is.
+        try:
+            ipaddress.ip_address(host)
+            pinned = {}
+        except ValueError:
+            pinned = {CurlOpt.RESOLVE: [f"{host}:{port}:{','.join(ips)}"]}
         # allow_redirects=False so a public URL cannot 30x-redirect the fetch
         # to an internal target that bypasses the pre-fetch validation above.
-        response = cf_requests.get(url, impersonate="chrome124", timeout=20, allow_redirects=False)
+        with cf_requests.Session(curl_options=pinned) as session:
+            response = session.get(url, impersonate="chrome124", timeout=20, allow_redirects=False)
         rawhtml = response.text
 
         soup = BeautifulSoup(rawhtml, "html.parser")
