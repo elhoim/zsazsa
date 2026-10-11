@@ -3099,6 +3099,25 @@ def indicator_json_text(rows, feed=None) -> str:
     return json.dumps(doc, indent=2)
 
 
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _csv_safe(value) -> str:
+    """Neutralise spreadsheet formula injection in one CSV cell.
+
+    An attribute value carried through from MISP can start with a character a
+    spreadsheet treats as the beginning of a formula (``=`` ``+`` ``-`` ``@``) or
+    with a control character, so opening the export in Excel or LibreOffice could
+    execute it. Such a value is prefixed with a single quote and imported as
+    literal text instead. The quote is a display artefact only, so the plain and
+    typed-value exports (machine feeds split on the first tab) are left untouched.
+    """
+    text = "" if value is None else str(value)
+    if text and text[0] in _CSV_FORMULA_TRIGGERS:
+        return "'" + text
+    return text
+
+
 def indicator_csv_text(rows) -> str:
     """Result rows as CSV text.
 
@@ -3109,7 +3128,7 @@ def indicator_csv_text(rows) -> str:
     writer = csv.writer(buf)
     writer.writerow([header for _, header in INDICATOR_FEED_COLUMNS])
     for r in rows:
-        writer.writerow([r.get(key, "") for key, _ in INDICATOR_FEED_COLUMNS])
+        writer.writerow([_csv_safe(r.get(key, "")) for key, _ in INDICATOR_FEED_COLUMNS])
     return buf.getvalue()
 
 
