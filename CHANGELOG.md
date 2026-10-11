@@ -64,6 +64,12 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
   addresses, connection tests answer with a fixed message, and organisation
   lookups use the server's TLS setting, defaulting to verification when it is
   not configured. / reported by @elhoim
+- One mailed newsletter could stall the IMAP collector on every run, and the
+  web app when the mail was opened for review, through patterns that
+  backtracked over long runs of whitespace; so could a model answer with an
+  unclosed code fence (GHSA-v4mq-r4g8-g35w). Parsing now takes time linear in
+  the length of the text and reads every edition as before. / reported by
+  @elhoim
 
 ## 1.0.6
 

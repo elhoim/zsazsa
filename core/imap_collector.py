@@ -37,10 +37,9 @@ def _imap_connect(host: str, port: int, use_ssl: bool) -> imaplib.IMAP4:
 # or reprocessed.
 PROCESSED_KEYWORD = "zsazsaProcessed"
 
-# [ \t] rather than \s: under re.MULTILINE, \s also matches newlines, so every
-# position in a long run of blank lines becomes a ^ anchor whose \s* rescans the
-# run -- quadratic on attacker-mailed text. A forward marker sits on one line.
-_FORWARD_RE = re.compile(r"^[ \t]*-+[ \t]*Forwarded message[ \t]*-+[ \t]*$", re.IGNORECASE | re.MULTILINE)
+# Matched against one stripped line at a time: across lines, \s* would rescan
+# a long run of blank lines from every line start, and anyone can mail one in.
+_FORWARD_RE = re.compile(r"-+\s*Forwarded message\s*-+", re.IGNORECASE)
 _FORWARD_HEADER_RE = re.compile(r"^(From|Date|Subject|To|Sent|Cc|Reply-To):", re.IGNORECASE)
 _BODY_FROM_RE = re.compile(r"^\s*From:\s*(.+)$", re.IGNORECASE)
 # Leading e-mail quote marker, as Apple Mail and others add when forwarding ("> ").
@@ -74,14 +73,16 @@ def _strip_forward_preamble(text: str) -> str:
     "---------- Forwarded message ----------" line followed by From/Date/Subject/To.
     Those belong to the forward, not the newsletter, so they are dropped.
     """
-    match = _FORWARD_RE.search(text)
-    if not match:
-        return text
-    lines = text[match.end():].splitlines()
-    i = 0
-    while i < len(lines) and (not lines[i].strip() or _FORWARD_HEADER_RE.match(lines[i].strip())):
-        i += 1
-    return "\n".join(lines[i:])
+    start = 0
+    for line in text.split("\n"):
+        if _FORWARD_RE.fullmatch(line.strip()):
+            lines = text[start + len(line):].splitlines()
+            i = 0
+            while i < len(lines) and (not lines[i].strip() or _FORWARD_HEADER_RE.match(lines[i].strip())):
+                i += 1
+            return "\n".join(lines[i:])
+        start += len(line) + 1
+    return text
 
 
 def _body_text(msg: Message) -> str:

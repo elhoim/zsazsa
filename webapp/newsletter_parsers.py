@@ -30,15 +30,16 @@ def _bounded(text: str) -> str:
     return text
 
 
-# These run per line on untrusted text. The label groups capture greedily to the
-# end of the line and the caller strips them, rather than a lazy group followed by
-# a trailing whitespace quantifier, which backtracks super-linearly on a long run
-# of trailing whitespace.
-_PRIORITY_RE = re.compile(r'^Priority:[ \t]*(\d)[ \t]*-[ \t]*(.+)$', re.IGNORECASE)
-_RELEVANCE_RE = re.compile(r'^Relevance:[ \t]*(.+)$', re.IGNORECASE)
+# These run per line on untrusted text, so none may backtrack over a long run of
+# whitespace: a group that has to start or end on a non-space character, rather
+# than a lazy group followed by \s*$, keeps every match linear. They keep \s
+# rather than [ \t] between the parts, since an edition converted from HTML has
+# non-breaking spaces there. The caller strips the groups.
+_PRIORITY_RE = re.compile(r'^Priority:\s*(\d)\s*-\s*(\S.*)', re.IGNORECASE)
+_RELEVANCE_RE = re.compile(r'^Relevance:\s*(\S.*)', re.IGNORECASE)
 _URL_RE = re.compile(r'https?://\S+')
 # A "Quick overview" row: a section name followed by three counts.
-_OVERVIEW_ROW_RE = re.compile(r'^(.+?)[ \t]+\d+[ \t]+\d+[ \t]+\d+\s*$')
+_OVERVIEW_ROW_RE = re.compile(r'^(.*?[^ \t])[ \t]+\d+[ \t]+\d+[ \t]+\d+\s*$')
 _TLP_RE = re.compile(r'TLP:\s*(CLEAR|WHITE|GREEN|AMBER\+STRICT|AMBER|RED)', re.IGNORECASE)
 
 _PRIORITY_KEYS = {1: "critical", 2: "urgent", 3: "important"}
@@ -49,16 +50,18 @@ _QUOTE_RE = re.compile(r'^> ?')
 _FWD_HEADER_RE = re.compile(
     r'^(From|Date|Subject|To|Sent|Cc|Reply-To|Delivered-To|Return-Path'
     r'|Begin forwarded message)\b', re.IGNORECASE)
-# Trailing in-mail anchor link on a "Quick overview" section name,
-# e.g. "Industrial Sector <x-msg://3/#ICS>".
-_OVERVIEW_ANCHOR_RE = re.compile(r'\s*<[^>]*>\s*$')
 
 # Markdown decoration, as it arrives when a message carried no plain-text part and
 # the collector converted its HTML instead: headings, bullets, table rows, emphasis
 # around a field label, and backslash-escaped punctuation.
-_ATX_RE = re.compile(r'^(#{1,6})[ \t]+(.*)$')
+_ATX_RE = re.compile(r'^(#{1,6})\s+(.*)$')
 _RULE_RE = re.compile(r'^(=+|-+)$')
-_BULLET_RE = re.compile(r'^[*+-][ \t]+([^\s*+-].*)$')
+_BULLET_RE = re.compile(r'^[*+-]\s+([^\s*+-].*)$')
+_TABLE_ROW_RE = re.compile(r'^\|.*\|$')
+_EMPHASIS_RE = re.compile(r'^([*_]{1,2})(.+?)\1$')
+_MD_ESCAPE_RE = re.compile(r'\\([\\`*_{}\[\]()#+.!-])')
+# Back-to-top arrow: bare in the list mail, a link in converted HTML.
+_ARROW_RE = re.compile(r'^(↑|\[↑\].*)$')
 
 
 def _atx_text(match: re.Match) -> str:
@@ -69,11 +72,6 @@ def _atx_text(match: re.Match) -> str:
     group that would backtrack on trailing whitespace.
     """
     return match.group(2).rstrip().rstrip('#').rstrip()
-_TABLE_ROW_RE = re.compile(r'^\|.*\|$')
-_EMPHASIS_RE = re.compile(r'^([*_]{1,2})(.+?)\1$')
-_MD_ESCAPE_RE = re.compile(r'\\([\\`*_{}\[\]()#+.!-])')
-# Back-to-top arrow: bare in the list mail, a link in converted HTML.
-_ARROW_RE = re.compile(r'^(↑|\[↑\].*)$')
 
 
 def _parsed_tlp(match: re.Match | None) -> str:
@@ -122,6 +120,18 @@ def _clean_title(text: str) -> str:
     return " ".join(_MD_ESCAPE_RE.sub(r"\1", text).split())
 
 
+def _without_anchor(name: str) -> str:
+    """A "Quick overview" section name without its trailing in-mail anchor
+    link, e.g. "Industrial Sector <x-msg://3/#ICS>". The anchor starts at the
+    first '<' after any earlier '>'."""
+    name = name.rstrip()
+    if name.endswith(">"):
+        start = name.find("<", name.rfind(">", 0, -1) + 1, len(name) - 1)
+        if start != -1:
+            name = name[:start]
+    return name.strip()
+
+
 def _etda_section_names(lines: list[str]) -> list[str]:
     """Section names in order, read from the 'Quick overview' table."""
     names = []
@@ -133,7 +143,7 @@ def _etda_section_names(lines: list[str]) -> list[str]:
         if in_overview:
             match = _OVERVIEW_ROW_RE.match(line.strip())
             if match:
-                names.append(_OVERVIEW_ANCHOR_RE.sub("", match.group(1)).strip())
+                names.append(_without_anchor(match.group(1)))
             elif names:
                 break
     return names
