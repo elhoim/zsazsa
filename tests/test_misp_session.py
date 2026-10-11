@@ -8,6 +8,7 @@ again only now and then, not once per request.
 """
 
 import contextlib
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -145,15 +146,22 @@ class PublishPermission(unittest.TestCase):
 
 
 class RecognisedUsers(unittest.TestCase):
-    """sso_configured() asks whether anyone was ever recognised. Before the app
-    has created its tables, as in a test or on a fresh install, nobody has."""
+    """sso_configured() asks whether anyone was ever recognised, on every page.
+    Before the app has created its tables, as in a test or on a fresh install,
+    nobody has; once somebody has, the database need not be asked again."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        patcher = mock.patch.object(misp_session.config, "DB_FILE", str(Path(tmp.name) / "test.db"))
+        db_file = str(Path(tmp.name) / "test.db")
+        patcher = mock.patch.object(misp_session.config, "DB_FILE", db_file)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(misp_session.sso_users._recognised_in.discard, db_file)
+
+    def unreadable(self):
+        return mock.patch.object(misp_session.sso_users, "_conn",
+                                 side_effect=sqlite3.OperationalError("database is locked"))
 
     def test_a_database_without_the_table_has_nobody_recorded(self):
         self.assertFalse(misp_session.sso_users.any_recorded())
@@ -163,6 +171,25 @@ class RecognisedUsers(unittest.TestCase):
         self.assertFalse(misp_session.sso_users.any_recorded())
         misp_session.sso_users.record_sighting({"email": "analyst@example.org", "id": "7"})
         self.assertTrue(misp_session.sso_users.any_recorded())
+
+    def test_once_somebody_was_recognised_the_database_is_not_asked_again(self):
+        misp_session.sso_users.init_db()
+        misp_session.sso_users.record_sighting({"email": "analyst@example.org", "id": "7"})
+        with self.unreadable() as conn:
+            self.assertTrue(misp_session.sso_users.any_recorded())
+        conn.assert_not_called()
+
+    def test_a_locked_database_refuses_trust_instead_of_failing_the_page(self):
+        """It raised, and every page with it, since the context processor asks."""
+        misp_session.sso_users.init_db()
+        with self.unreadable(), self.assertLogs(misp_session.sso_users.logger, "WARNING"), \
+             mock.patch.object(misp_session.config, "MISP_SESSION_REDIRECT_TO_LOGIN", False), \
+             mock.patch.object(misp_session.config, "MISP_SESSION_COOKIE_NAME", ""), \
+             Flask(__name__).test_request_context("/"):
+            g.misp_user = None
+            self.assertFalse(misp_session.current_user_can_publish())
+        # Only remembered when true: once the lock clears, the empty table answers.
+        self.assertFalse(misp_session.sso_users.any_recorded())
 
 
 @contextlib.contextmanager

@@ -11,10 +11,9 @@ from webapp import newsletter_ingest
 
 class PublishArticles(unittest.TestCase):
     def setUp(self):
-        # These cases cover counting and message shape, not the SSRF guard, and
-        # use short unresolvable URLs; treat every URL as a public web address so
-        # the guard does not drop them. The guard has its own tests below.
-        patcher = mock.patch("webapp.newsletter_ingest.is_safe_public_url", return_value=True)
+        # Every link here counts as public, without a DNS lookup; Refused
+        # covers the check itself.
+        patcher = mock.patch.object(newsletter_ingest, "is_safe_public_url", return_value=True)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -26,7 +25,7 @@ class PublishArticles(unittest.TestCase):
         with mock.patch("webapp.newsletter_ingest.scraper_queue.publish", side_effect=[1, 0]) as pub:
             counts = newsletter_ingest.publish_articles("ETDA CTI Robot", articles)
         self.assertEqual(pub.call_count, 2)
-        self.assertEqual(counts, {"published": 2, "failed": 0, "no_subscriber": 1})
+        self.assertEqual(counts, {"published": 2, "failed": 0, "no_subscriber": 1, "refused": 0})
 
     def test_skips_articles_without_url(self):
         with mock.patch("webapp.newsletter_ingest.scraper_queue.publish", return_value=1) as pub:
@@ -37,7 +36,7 @@ class PublishArticles(unittest.TestCase):
     def test_publish_failure_counted(self):
         with mock.patch("webapp.newsletter_ingest.scraper_queue.publish", side_effect=OSError("down")):
             counts = newsletter_ingest.publish_articles("ETDA CTI Robot", [{"url": "http://a"}])
-        self.assertEqual(counts, {"published": 0, "failed": 1, "no_subscriber": 0})
+        self.assertEqual(counts, {"published": 0, "failed": 1, "no_subscriber": 0, "refused": 0})
 
     def test_message_carries_feed_and_section_tags(self):
         captured = {}
@@ -55,23 +54,29 @@ class PublishArticles(unittest.TestCase):
         self.assertIn('zsazsa:newsletter-priority="urgent"', captured["feed_tags"])
 
 
-class PublishArticlesSsrf(unittest.TestCase):
-    """The auto IMAP path takes URLs from attacker-controlled newsletter text, so
-    only public web addresses reach the scraper; a dropped URL is counted as a
-    failure rather than silently, since the counts report delivery."""
+class Refused(unittest.TestCase):
+    """A newsletter can come from anyone who can mail the mailbox, and the
+    scraper fetches what it is sent (GHSA-24wh-h52p-fcgg)."""
 
-    def test_a_non_public_url_is_skipped_and_counted_as_failed(self):
-        articles = [
-            {"url": "http://169.254.169.254/latest/meta-data/", "title": "metadata"},
-            {"url": "https://public.example/advisory", "title": "ok"},
-        ]
-        safe = lambda u: not u.startswith("http://169.254")  # noqa: E731
-        with mock.patch("webapp.newsletter_ingest.is_safe_public_url", side_effect=safe), \
-                mock.patch("webapp.newsletter_ingest.scraper_queue.publish", return_value=1) as pub:
+    def test_a_link_that_is_not_public_is_not_sent_to_the_scraper(self):
+        articles = [{"url": "http://127.0.0.1:8080/admin"}, {"url": "https://news.example.org/a"}]
+        with mock.patch.object(newsletter_ingest, "is_safe_public_url",
+                               side_effect=lambda url: "127.0.0.1" not in url) as check, \
+             mock.patch("webapp.newsletter_ingest.scraper_queue.publish", return_value=1) as pub:
             counts = newsletter_ingest.publish_articles("ETDA CTI Robot", articles)
-        self.assertEqual(pub.call_count, 1)
-        self.assertEqual(pub.call_args.args[0]["link"], "https://public.example/advisory")
-        self.assertEqual(counts, {"published": 1, "failed": 1, "no_subscriber": 0})
+        self.assertEqual([c.args[0] for c in check.call_args_list],
+                         ["http://127.0.0.1:8080/admin", "https://news.example.org/a"])
+        self.assertEqual([c.args[0]["link"] for c in pub.call_args_list], ["https://news.example.org/a"])
+        self.assertEqual(counts["refused"], 1)
+        self.assertEqual(counts["published"], 1)
+
+    def test_the_real_check_refuses_an_internal_address(self):
+        """No stand-in here: a literal address needs no DNS lookup."""
+        with mock.patch("webapp.newsletter_ingest.scraper_queue.publish") as pub:
+            counts = newsletter_ingest.publish_articles("ETDA CTI Robot",
+                                                        [{"url": "http://169.254.169.254/latest/meta-data/"}])
+        pub.assert_not_called()
+        self.assertEqual(counts["refused"], 1)
 
 
 class ArticlesFromParsed(unittest.TestCase):

@@ -44,7 +44,7 @@ def _webhook_host(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}" if parts.netloc else "webhook"
 
 
-def _without_secret(message: str, url: str) -> str:
+def without_secret(message: str, url: str) -> str:
     """Strip a webhook's secret path out of a message.
 
     requests puts the failing URL in its exception text, which for a Mattermost
@@ -69,7 +69,7 @@ def _post(targets: list[dict], payload: dict, label: str) -> bool:
             sent_any = True
         except requests.RequestException as e:
             logger.error("Mattermost notification failed (%s) to %s: %s",
-                         label, _webhook_host(url), _without_secret(str(e), url))
+                         label, _webhook_host(url), without_secret(str(e), url))
     return sent_any
 
 
@@ -235,6 +235,13 @@ def send_detection_eng_request_notification(der, markdown: str, channel_ids: lis
 
     targets = _active_webhooks(channel_ids)
     return _chunk_and_send(targets, body, f"detection engineering request {getattr(der, 'der_id', '')}")
+
+
+def send_threat_landscape_report_notification(tlr, markdown: str, channel_ids: list[str] | None = None) -> bool:
+    """Send a threat landscape report to the given Mattermost channels."""
+    body = f"### :world_map: {getattr(tlr, 'tlr_id', '')}: Threat landscape report\n{markdown}"
+    targets = _active_webhooks(channel_ids)
+    return _chunk_and_send(targets, body, f"threat landscape report {getattr(tlr, 'tlr_id', '')}")
 
 
 def send_threat_actor_profile_notification(tap, markdown: str,

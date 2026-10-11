@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import config
+import requests
 from core.db import next_sequence_value
 from pymisp import MISPAttribute, MISPEvent, MISPObject, PyMISP
 from webapp import misp_session
@@ -297,11 +298,15 @@ def extract_story_context(event) -> dict:
     Scale ratings, CTI-evaluation taxonomy tags) survives onto the story
     instead of being lost when the article is folded into the briefing.
     """
+    return context_from_tags([getattr(t, "name", "") or "" for t in getattr(event, "tags", []) or []])
+
+
+def context_from_tags(tag_names) -> dict:
+    """extract_story_context() for a list of tag names, such as a cached event's."""
     geographic_scope, sectors, threat_actors, techniques = [], [], [], []
     source_reliability, information_credibility = "", ""
     cti_evaluation = {}
-    for t in getattr(event, "tags", []) or []:
-        name = getattr(t, "name", "") or ""
+    for name in tag_names:
         if name.startswith('misp-galaxy:country=') or name.startswith('misp-galaxy:target-information='):
             v = name.split('=', 1)[1].strip('"')
             if v and v not in geographic_scope:
@@ -564,6 +569,12 @@ def mitre_technique_label(value: str) -> str:
     return f"{raw} - {name}" if name else raw
 
 
+def technique_id(value: str) -> str:
+    """The ATT&CK id in a technique reference, "T1566" from "Phishing - T1566", or ""."""
+    found = _STORY_TECHNIQUE_RE.search(value or "")
+    return found.group(0) if found else ""
+
+
 def mitre_technique_labels(values) -> list:
     """Map a list of technique references through mitre_technique_label()."""
     return [mitre_technique_label(v) for v in (values or []) if v]
@@ -579,11 +590,21 @@ def _test_connection(url, key, verify):
             return {"ok": True, "version": resp["version"], "url": url}
         return {"ok": False, "url": url, "error": "Unexpected response from server"}
     except Exception as exc:
-        # A fixed message rather than str(exc): the exception text can carry the
-        # upstream response body, which would turn a failed connection test into
-        # a read of whatever the given URL returned. The detail goes to the log.
-        logger.warning("MISP connection test to %s failed: %s", url, exc)
-        return {"ok": False, "url": url, "error": "Could not connect to the MISP server."}
+        logger.warning("MISP connection test to %s failed (%s)", url, type(exc).__name__)
+        return {"ok": False, "url": url, "error": _connection_failure(exc)}
+
+
+def _connection_failure(exc):
+    """What a failed connection test tells the page, never the exception text:
+    PyMISP puts the server's response in it, and that server can be any host
+    a URL points at, including one redirected to from the URL given."""
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "The server's TLS certificate could not be verified."
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "The server did not answer in time."
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "Could not connect to the server."
+    return "The server did not return a valid MISP response for this API key."
 
 
 def test_scraper_misp():
@@ -774,7 +795,11 @@ def _sync_object_attributes(misp, event, object_name, new_obj, label="object"):
     if old is None:
         _check(misp.add_object(_event_ref(event), new_obj), f"add {label} object")
         return
+    _update_object(misp, old, new_obj, label)
 
+
+def _update_object(misp, old, new_obj, label="object"):
+    """Edit old in place so it matches new_obj, as _sync_object_attributes does."""
     existing = {}
     for a in getattr(old, "attributes", []) or []:
         if getattr(a, "deleted", False):
@@ -928,7 +953,19 @@ def _event_has_tag(event, tag_name: str) -> bool:
     }
 
 
+def _is_event_id(value) -> bool:
+    """Whether a value from a URL can name a MISP event: a UUID or a numeric id.
+
+    Anything else, such as "review" from /products/vea/review, is no event, and
+    asking MISP for it only puts its 404 in the log as an error.
+    """
+    value = str(value or "")
+    return bool(_UUID_RE.fullmatch(value)) or value.isdigit()
+
+
 def _stakeholder_event(uuid):
+    if not _is_event_id(uuid):
+        return None
     misp = _misp()
     event = misp.get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None:
@@ -943,9 +980,9 @@ def _stakeholder_event(uuid):
 
 
 def _is_record(event, object_name, tag):
-    """Whether an event is a zsazsa record of one type: it carries that type's
+    """Whether an event is a zsazsa record of one type: it has that type's
     zsazsa object or its tag. Either is enough, since flash intel alerts from
-    older analyser runs carry no object, and a tag renamed in the settings
+    older analyser runs have no object, and a tag renamed in the settings
     leaves older records with the one they were created with."""
     return _get_obj(event, object_name) is not None or _event_has_tag(event, tag)
 
@@ -957,6 +994,8 @@ def _zsazsa_event(uuid, object_name, tag):
     so nothing may show, change or delete an event with zsazsa's service key
     before it is known to be a record of the type asked for.
     """
+    if not _is_event_id(uuid):
+        return None
     event = _misp().get_event(uuid, pythonify=True)
     if isinstance(event, dict) or event is None or not _is_record(event, object_name, tag):
         return None
@@ -1431,16 +1470,15 @@ def rename_subscription_product(old_name: str, new_name: str, apply: bool = Fals
 
 # ── PIR CRUD ──────────────────────────────────────────────────────────────────
 
-def list_selectable_pirs(linked_uuid=""):
+def list_selectable_pirs(*linked_uuids):
     """The PIRs a product may be linked to, newest intake state respected.
 
     A PIR that is still in intake has not been agreed yet, so a product must not
-    claim to answer it. The one exception is the PIR a product is already linked
+    claim to answer it. The one exception is a PIR the product is already linked
     to: it stays in the list whatever its status has become, or reopening an
     older product and saving it would quietly drop the link.
     """
-    return [p for p in list_pirs()
-            if p.status == "Active" or (linked_uuid and p.uuid == linked_uuid)]
+    return [p for p in list_pirs() if p.status == "Active" or p.uuid in linked_uuids]
 
 
 def list_pirs():
@@ -2210,7 +2248,7 @@ def delete_indicator_feed(uuid):
 
 
 def get_indicator_feed_by_token(token):
-    """The feed whose public URL carries this token, or None. A feed with its
+    """The feed whose public URL holds this token, or None. A feed with its
     public URL switched off is not found."""
     token = (token or "").strip()
     if not token:
@@ -3977,19 +4015,16 @@ def create_collection_source(data: dict) -> str:
 
 
 def update_collection_source(uuid, data: dict):
-    """Update a collection source: replace the MISP object with new field values."""
+    """Update a collection source with new field values."""
     misp = _misp()
     ev = _zsazsa_event(uuid, "zsazsa-collection-source", TAG_COLLECTION_SOURCE)
     if ev is None:
         raise ValueError(f"Collection source {uuid} not found")
-    old_enabled = True
     old_obj = _get_obj(ev, "zsazsa-collection-source")
-    if old_obj is not None:
-        old_enabled = _obj_attr(old_obj, "enabled") != "false"
-        misp.delete_object(old_obj.id)
+    old_enabled = old_obj is None or _obj_attr(old_obj, "enabled") != "false"
     new_enabled = data["enabled"] if "enabled" in data else old_enabled
-    _check(misp.add_object(uuid, _collection_source_obj(data, enabled=new_enabled),
-                            pythonify=True), "update collection source object")
+    _sync_object_attributes(misp, ev, "zsazsa-collection-source",
+                            _collection_source_obj(data, enabled=new_enabled), "collection source")
     new_info = f"Collection source: {(data.get('name') or '').strip()}"
     misp.update_event({"Event": {"id": ev.id, "info": new_info}})
     _apply_admiralty_tag(misp, uuid, data.get("source_reliability", ""))
@@ -3998,8 +4033,8 @@ def update_collection_source(uuid, data: dict):
 def toggle_collection_source(uuid, enabled: bool):
     """Enable or disable a collection source."""
     misp = _misp()
-    ev = misp.get_event(uuid, pythonify=True)
-    if not ev or isinstance(ev, dict):
+    ev = _zsazsa_event(uuid, "zsazsa-collection-source", TAG_COLLECTION_SOURCE)
+    if ev is None:
         raise ValueError(f"Collection source {uuid} not found")
     old_obj = _get_obj(ev, "zsazsa-collection-source")
     if old_obj is None:
@@ -4011,9 +4046,8 @@ def toggle_collection_source(uuid, enabled: bool):
         "description": _obj_attr(old_obj, "description"),
         "source_reliability": _obj_attr(old_obj, "source-reliability"),
     }
-    misp.delete_object(old_obj.id)
-    _check(misp.add_object(uuid, _collection_source_obj(data, enabled=enabled),
-                            pythonify=True), "toggle collection source")
+    _sync_object_attributes(misp, ev, "zsazsa-collection-source",
+                            _collection_source_obj(data, enabled=enabled), "collection source")
 
 
 def delete_collection_source(uuid):
@@ -4874,7 +4908,7 @@ def create_fia(data):
 
 
 def update_fia(uuid, data):
-    """Replace the FIA object on the event and re-render the report."""
+    """Update the FIA object on the event and re-render the report."""
     misp = _misp()
     event = _zsazsa_event(uuid, "zsazsa-flash-intel", config.TAG_FLASH_INTEL)
     if event is None:
@@ -4892,8 +4926,7 @@ def update_fia(uuid, data):
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _fia_obj(data)), "update FIA object")
+    _sync_object_attributes(misp, event, "zsazsa-flash-intel", _fia_obj(data), "FIA")
 
     title = (data.get("title") or "").strip() or "Untitled"
     misp.update_event({"Event": {"id": event.id, "info": f"[zsazsa:fia] {title}"}})
@@ -5713,8 +5746,7 @@ def update_vea(uuid, data):
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _vea_obj(data)), "update VEA object")
+    _sync_object_attributes(misp, event, "zsazsa-vea", _vea_obj(data), "VEA")
 
     cve = (data.get("cve_id") or "").strip()
     title = (data.get("title") or cve or "Untitled").strip()
@@ -6141,8 +6173,7 @@ def update_der(uuid, data):
     data.setdefault("status", (_obj_attr(old, "status") if old else "") or DER_STATUS_PENDING)
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _der_obj(data)), "update DER object")
+    _sync_object_attributes(misp, event, "zsazsa-detection-eng-request", _der_obj(data), "DER")
 
     title = (data.get("title") or "Untitled").strip()
     misp.update_event({"Event": {"id": event.id, "info": f"[zsazsa:der] {title}"}})
@@ -6685,11 +6716,10 @@ def create_briefing(data):
     return uuid
 
 
-# update_briefing and publish_briefing both rebuild the briefing object by
-# deleting it and adding a new one. Two of them overlapping (the drafting job
-# saving while an analyst publishes) would otherwise leave the event with two
-# briefing objects, or with neither. zsazsa runs as one process (INSTALL.md), so
-# a process lock is enough.
+# update_briefing and publish_briefing each read the briefing, decide, and
+# write it back. Two of them overlapping (the drafting job saving while an
+# analyst publishes) would otherwise let the later write undo the earlier one.
+# zsazsa runs as one process (INSTALL.md), so a process lock is enough.
 _briefing_write_lock = threading.RLock()
 
 
@@ -6735,8 +6765,7 @@ def _update_briefing(uuid, data, expected_state):
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
-        misp.delete_object(old.id)
-    _check(misp.add_object(_event_ref(event), _briefing_obj(data)), "update briefing object")
+    _sync_object_attributes(misp, event, "zsazsa-daily-briefing", _briefing_obj(data), "briefing")
 
     _delete_briefing_reports(misp, event)
     for i, story in enumerate(data.get("stories", []), 1):
@@ -6765,15 +6794,12 @@ def _publish_briefing(uuid):
         raise RuntimeError(f"Briefing event {uuid} not found")
     briefing = _briefing_ns(event)
 
-    old = _get_obj(event, "zsazsa-daily-briefing")
-    if old:
-        misp.delete_object(old.id)
-    # The object is rebuilt from scratch, so everything it held has to be
-    # carried across; only the review state and the approver change here.
+    # The object is written whole, so everything it holds has to be kept;
+    # only the review state and the approver change here.
     data = {field: getattr(briefing, field) for field in BRIEFING_FIELDS}
     data["review_state"] = BRIEFING_REVIEW_PUBLISHED
     data["approved_by"] = misp_session.current_user_email()
-    _check(misp.add_object(_event_ref(event), _briefing_obj(data)), "publish briefing object")
+    _sync_object_attributes(misp, event, "zsazsa-daily-briefing", _briefing_obj(data), "briefing")
     for tag in list(getattr(event, "tags", []) or []):
         if tag.name.startswith("workflow:state="):
             try:
@@ -6944,11 +6970,98 @@ def pir_collection_gap(pir) -> dict:
 
 # ── Threat Landscape Report ──────────────────────────────────────────────────
 
+# ENISA's validation stage: an internal review, then the stakeholders' review,
+# then a formal approval before the report goes out.
 TLR_REVIEW_DRAFT = "draft"
+TLR_REVIEW_INTERNAL = "internal-review"
+TLR_REVIEW_STAKEHOLDER = "stakeholder-review"
+TLR_REVIEW_APPROVED = "approved"
 TLR_REVIEW_PUBLISHED = "published"
-TLR_REVIEW_STATES = [TLR_REVIEW_DRAFT, TLR_REVIEW_PUBLISHED]
+TLR_REVIEW_STATES = [TLR_REVIEW_DRAFT, TLR_REVIEW_INTERNAL, TLR_REVIEW_STAKEHOLDER,
+                     TLR_REVIEW_APPROVED, TLR_REVIEW_PUBLISHED]
+# Where a report can go from each state, other than publishing. A review can
+# always send it back to draft.
+TLR_NEXT_STATES = {
+    TLR_REVIEW_DRAFT: [TLR_REVIEW_INTERNAL],
+    TLR_REVIEW_INTERNAL: [TLR_REVIEW_STAKEHOLDER, TLR_REVIEW_DRAFT],
+    TLR_REVIEW_STAKEHOLDER: [TLR_REVIEW_APPROVED, TLR_REVIEW_DRAFT],
+    TLR_REVIEW_APPROVED: [TLR_REVIEW_DRAFT],
+}
+# Once approved, a report reads as it was signed off: changing it means sending
+# it back to draft first.
+TLR_LOCKED_STATES = (TLR_REVIEW_APPROVED, TLR_REVIEW_PUBLISHED)
 
 TLR_TLP_LEVELS = ["clear", "green", "amber", "amber+strict", "red"]
+
+# Form field, label and icon of the actor categories under trending threat actors.
+# The MISP attribute is the field name with hyphens.
+TLR_ACTOR_CATEGORIES = [
+    ("actors_nation_state", "Nation state", "fa-landmark"),
+    ("actors_cybercrime", "Cybercrime", "fa-sack-dollar"),
+    ("actors_hacker_for_hire", "Hacker-for-hire", "fa-user-ninja"),
+    ("actors_hacktivists", "Hacktivists", "fa-bullhorn"),
+]
+
+
+# The prime threats of ENISA's threat landscape, which an entry's threat type
+# is picked from.
+TLR_THREAT_TYPES = [
+    "Ransomware",
+    "Malware",
+    "Social engineering",
+    "Threats against data",
+    "Threats against availability",
+    "Information manipulation and interference",
+    "Supply chain attacks",
+]
+TLR_RELEVANCE = ["high", "medium", "low"]
+
+# An entry is one source event in a landscape's dataset, with the landscape's
+# own assessment of it. The MISP attribute is the field name with hyphens.
+TLR_ENTRY_FIELDS = ("event_uuid", "source_id", "event_info", "event_date", "relevance",
+                    "source_reliability", "information_credibility", "threat_type", "note",
+                    "affected_assets", "impact", "motivation", "mitigation")
+# The questions ENISA asks of every incident besides who, where and how.
+TLR_ENTRY_QUESTIONS = (("affected_assets", "Affected assets"), ("impact", "Impact"),
+                       ("motivation", "Motivation"), ("mitigation", "Mitigation"))
+TLR_ENTRY_LISTS = ("sectors", "geographic_scope", "threat_actors", "techniques")
+
+
+def _tlr_entry_obj(entry):
+    obj = _build_obj("zsazsa-tlr-entry")
+    for key in TLR_ENTRY_FIELDS:
+        _oa(obj, key.replace("_", "-"), entry.get(key))
+    for key in TLR_ENTRY_LISTS:
+        _oa_json(obj, key.replace("_", "-"), entry.get(key))
+    _oa(obj, "excluded", "yes" if entry.get("excluded") else "")
+    return obj
+
+
+def _tlr_entry(obj):
+    entry = {key: _obj_attr(obj, key.replace("_", "-")) or "" for key in TLR_ENTRY_FIELDS}
+    entry.update({key: _json_list(_obj_attr(obj, key.replace("_", "-"))) for key in TLR_ENTRY_LISTS})
+    entry["excluded"] = _obj_attr(obj, "excluded") == "yes"
+    return entry
+
+
+def _tlr_entry_objs(event):
+    return [o for o in event.objects if o.name == "zsazsa-tlr-entry"]
+
+
+# The direction of a report, after the first stage of ENISA's method: why it is
+# written, for whom, the period and scope it covers, and the PIRs it answers.
+# Without scope sectors or geography a report covers the whole organisation.
+TLR_DIRECTION_FIELDS = ("purpose", "audience_level", "period_start", "period_end", "methodology")
+TLR_DIRECTION_LISTS = ("scope_sectors", "scope_geography", "linked_pir_uuids")
+
+# The fields of one threat assessment. A report holds any number, stored
+# together as a JSON list.
+TLR_SECTION_FIELDS = ("threat_type", "title", "findings", "confidence", "key_drivers",
+                      "alternative_hypotheses", "recommendations")
+# The written parts of a threat assessment, in reading order, with their headings.
+TLR_SECTION_TEXTS = (("findings", "Findings"), ("key_drivers", "Key drivers"),
+                     ("alternative_hypotheses", "Alternative hypotheses"),
+                     ("recommendations", "Recommendations"))
 
 
 def _tlr_obj(data):
@@ -6961,9 +7074,18 @@ def _tlr_obj(data):
     _oa(obj, "audience", data.get("audience"))
     _oa(obj, "top-threats", data.get("top_threats"))
     _oa(obj, "trending-actors", data.get("trending_actors"))
+    for key, _label, _icon in TLR_ACTOR_CATEGORIES:
+        _oa(obj, key.replace("_", "-"), data.get(key))
     _oa(obj, "key-incidents", data.get("key_incidents"))
     _oa(obj, "recommendations", data.get("recommendations"))
     _oa(obj, "outlook", data.get("outlook"))
+    for key in TLR_DIRECTION_FIELDS:
+        _oa(obj, key.replace("_", "-"), data.get(key))
+    for key in TLR_DIRECTION_LISTS:
+        _oa_json(obj, key.replace("_", "-"), data.get(key))
+    _oa_json(obj, "threat-sections", data.get("threat_sections"))
+    _oa_json(obj, "review-log", data.get("review_log"))
+    _oa_json(obj, "corrections", data.get("corrections"))
     _oa(obj, "review-state", data.get("review_state", TLR_REVIEW_DRAFT))
     _oa(obj, "creator", data.get("creator"))
     _oa(obj, "approved-by", data.get("approved_by"))
@@ -6989,38 +7111,107 @@ def _tlr_ns(event):
         audience=g("audience"),
         top_threats=g("top-threats"),
         trending_actors=g("trending-actors"),
+        **{key: g(key.replace("_", "-")) for key, _label, _icon in TLR_ACTOR_CATEGORIES},
         key_incidents=g("key-incidents"),
         recommendations=g("recommendations"),
         outlook=g("outlook"),
+        **{key: g(key.replace("_", "-")) for key in TLR_DIRECTION_FIELDS},
+        **{key: _json_list(g(key.replace("_", "-"))) for key in TLR_DIRECTION_LISTS},
+        threat_sections=_json_list(g("threat-sections")),
+        review_log=_json_list(g("review-log")),
+        corrections=_json_list(g("corrections")),
         review_state=g("review-state") or TLR_REVIEW_DRAFT,
         creator=g("creator"),
         approved_by=g("approved-by"),
         published=bool(getattr(event, "published", False)),
         created_at=_parse_dt(event.date.isoformat() if event.date else None),
+        entries=sorted((SimpleNamespace(uuid=o.uuid, **_tlr_entry(o)) for o in _tlr_entry_objs(event)),
+                       key=lambda e: e.event_date, reverse=True),
     )
 
 
-def render_tlr_markdown(tlr):
-    lines = [
-        f"# Threat Landscape Report - {tlr.reporting_period or tlr.tlr_id}",
-        "",
-        f"**Prepared by:** {tlr.author or 'analyst'}",
-        f"**Audience:** {tlr.audience or '-'}",
-        f"**Classification:** TLP:{(tlr.tlp or 'AMBER').upper()}",
-        "",
-        "---",
-        "",
+def tlr_annex(tlr):
+    """The dataset behind a report, as (label, value) rows for its annex.
+
+    ENISA has every landscape say what it was built from: how many events,
+    from which sources, over which dates, and how they were rated.
+    """
+    included = [e for e in tlr.entries if not e.excluded]
+    if not included:
+        return []
+
+    def mix(values):
+        return ", ".join(f"{value} ({count})" for value, count in Counter(values).most_common())
+
+    dates = sorted(e.event_date for e in included if e.event_date)
+    rows = [
+        ("Events", f"{len(included)} in the analysis, {len(tlr.entries) - len(included)} left out"),
+        ("Event dates", f"{dates[0]} to {dates[-1]}" if dates else ""),
+        ("Sources", mix(e.source_id or "unknown" for e in included)),
+        ("Relevance", mix(e.relevance or "not assessed" for e in included)),
+        ("Source reliability", mix(e.source_reliability or "not rated" for e in included)),
+        ("Information credibility", mix(e.information_credibility or "not rated" for e in included)),
     ]
+    return [(label, value) for label, value in rows if value]
+
+
+def render_tlr_markdown(tlr, linked_pirs=(), preview_url=""):
+    """The report as Markdown, for the mail and Mattermost channels.
+
+    The metadata rows run without a break under the title, so the e-mail
+    renderer lifts them into its meta grid, and the order follows the PDF.
+    """
+    scope = tlr.scope_sectors + tlr.scope_geography
+    period = f"{tlr.period_start or '…'} to {tlr.period_end or '…'}" if tlr.period_start or tlr.period_end else ""
+    meta = [
+        ("ID", tlr.tlr_id),
+        ("Date", (tlr.created_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d")),
+        ("Author", tlr.author),
+        ("Classification", f"TLP:{(tlr.tlp or 'amber').upper()}"),
+        ("Reporting period", tlr.reporting_period),
+        ("Period", period),
+        ("Audience", tlr.audience),
+        ("Audience level", tlr.audience_level),
+        ("Scope", ", ".join(scope) if scope else "the whole organisation"),
+        ("Answers", ", ".join(p.pir_id for p in linked_pirs)),
+    ]
+    lines = [f"# {tlr.title or tlr.tlr_id}", ""]
+    lines += [f"**{label}:** {value}" for label, value in meta if value]
+    lines += ["", "---", ""]
+    if tlr.purpose:
+        lines += ["## Purpose", "", tlr.purpose, ""]
+    if tlr.top_threats:
+        lines += ["## Top threats", "", tlr.top_threats, ""]
+
+    labels = {value: label for value, label, _help in ESTIMATIVE_CONFIDENCE}
+    for section in tlr.threat_sections:
+        lines += [f"## {section.get('title') or section.get('threat_type') or 'Threat assessment'}", ""]
+        facts = [f"**Threat type:** {section['threat_type']}"] if section.get("threat_type") else []
+        if section.get("confidence"):
+            facts.append(f"**Confidence:** {labels.get(section['confidence'], section['confidence'])}")
+        if facts:
+            lines += [" | ".join(facts), ""]
+        for key, heading in TLR_SECTION_TEXTS:
+            if section.get(key):
+                lines += [f"### {heading}", "", section[key], ""]
+
+    categories = [f"### {label}\n\n{getattr(tlr, key, '')}" for key, label, _icon in TLR_ACTOR_CATEGORIES
+                  if getattr(tlr, key, "")]
+    actors = "\n\n".join(([tlr.trending_actors] if tlr.trending_actors else []) + categories)
     sections = [
-        ("Top threats", tlr.top_threats),
-        ("Trending threat actors", tlr.trending_actors),
+        ("Trending threat actors", actors),
         ("Key incidents", tlr.key_incidents),
         ("Recommendations", tlr.recommendations),
         ("Outlook", tlr.outlook),
+        ("Methodology and limitations", tlr.methodology),
+        ("Dataset", "\n".join(f"- **{label}:** {value}" for label, value in tlr_annex(tlr))),
+        ("Corrections", "\n".join(f"- {c['date']}: {c['text']}" for c in tlr.corrections)),
     ]
     for heading, content in sections:
         if content:
             lines += [f"## {heading}", "", content, ""]
+    if preview_url:
+        lines += [f"[Open report]({preview_url})", ""]
     return "\n".join(lines)
 
 
@@ -7055,43 +7246,68 @@ def create_tlr(data):
     return uuid
 
 
-def update_tlr(uuid, data):
-    misp = _misp()
+def _tlr_event(uuid):
     event = _zsazsa_event(uuid, "zsazsa-threat-landscape-report", config.TAG_TLR)
     if event is None:
         raise RuntimeError(f"TLR event {uuid} not found")
+    return event
+
+
+def update_tlr(uuid, data):
+    misp = _misp()
+    event = _tlr_event(uuid)
     old = _get_obj(event, "zsazsa-threat-landscape-report")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
         data.setdefault("approved_by", _obj_attr(old, "approved-by") or "")
-        misp.delete_object(old.id)
-    title = data.get("title", "")
-    tlr_id = data.get("tlr_id", "")
-    misp.edit_event(uuid, info=f"[zsazsa:tlr] {tlr_id}: {title}")
-    _check(misp.add_object(_event_ref(event), _tlr_obj(data)), "update TLR object")
+        # Kept by the report itself, not by the form.
+        data.setdefault("review_log", _json_list(_obj_attr(old, "review-log")))
+        data.setdefault("corrections", _json_list(_obj_attr(old, "corrections")))
+    # In place, as for the other records: deleting the object and adding a new
+    # one left a report with no content at all whenever the add failed.
+    _sync_object_attributes(misp, event, "zsazsa-threat-landscape-report", _tlr_obj(data), "TLR")
+    info = f"[zsazsa:tlr] {data.get('tlr_id', '')}: {data.get('title', '')}"
+    misp.update_event({"Event": {"id": event.id, "info": info}})
     return uuid
+
+
+def _rewrite_tlr(misp, event, changes):
+    """Store the report with some of its fields changed, keeping everything else it holds."""
+    data = {**vars(_tlr_ns(event)), **changes}
+    _sync_object_attributes(misp, event, "zsazsa-threat-landscape-report", _tlr_obj(data), "TLR")
+
+
+def _move_tlr(misp, event, state, comment):
+    tlr = _tlr_ns(event)
+    step = {"date": date.today().isoformat(), "by": misp_session.current_user_email(),
+            "from": tlr.review_state, "to": state, "comment": comment}
+    changes = {"review_state": state, "review_log": tlr.review_log + [step]}
+    # Approval names who signed off; sending the report back to draft withdraws it.
+    if state == TLR_REVIEW_APPROVED:
+        changes["approved_by"] = step["by"]
+    elif state == TLR_REVIEW_DRAFT:
+        changes["approved_by"] = ""
+    _rewrite_tlr(misp, event, changes)
+
+
+def set_tlr_state(uuid, state, comment=""):
+    """Move a report through its review, logging who moved it, when and why."""
+    _move_tlr(_misp(), _tlr_event(uuid), state, comment)
+
+
+def add_tlr_correction(uuid, text):
+    """Add a dated correction to a published report and publish it again."""
+    misp = _misp()
+    event = _tlr_event(uuid)
+    correction = {"date": date.today().isoformat(), "by": misp_session.current_user_email(), "text": text}
+    _rewrite_tlr(misp, event, {"corrections": _tlr_ns(event).corrections + [correction]})
+    misp.publish(event)
 
 
 def publish_tlr(uuid):
     misp = _misp()
-    event = _zsazsa_event(uuid, "zsazsa-threat-landscape-report", config.TAG_TLR)
-    if event is None:
-        raise RuntimeError(f"TLR event {uuid} not found")
-    tlr = _tlr_ns(event)
-    old = _get_obj(event, "zsazsa-threat-landscape-report")
-    if old:
-        misp.delete_object(old.id)
-    data = {
-        "tlr_id": tlr.tlr_id, "title": tlr.title,
-        "reporting_period": tlr.reporting_period, "tlp": tlr.tlp,
-        "author": tlr.author, "audience": tlr.audience,
-        "top_threats": tlr.top_threats, "trending_actors": tlr.trending_actors,
-        "key_incidents": tlr.key_incidents, "recommendations": tlr.recommendations,
-        "outlook": tlr.outlook, "review_state": TLR_REVIEW_PUBLISHED,
-        "creator": tlr.creator,
-        "approved_by": misp_session.current_user_email(),
-    }
-    _check(misp.add_object(_event_ref(event), _tlr_obj(data)), "publish TLR object")
+    event = _tlr_event(uuid)
+    _move_tlr(misp, event, TLR_REVIEW_PUBLISHED, "")
     for tag in list(getattr(event, "tags", []) or []):
         name = getattr(tag, "name", "") or ""
         if name.startswith('workflow:state='):
@@ -7107,8 +7323,43 @@ def delete_tlr(uuid):
     _delete_record(uuid, "zsazsa-threat-landscape-report", config.TAG_TLR, "TLR")
 
 
+def add_tlr_entries(uuid, entries):
+    """Add source events to a landscape's dataset, skipping any it holds already.
+
+    Returns how many were added.
+    """
+    misp = _misp()
+    event = _tlr_event(uuid)
+    held = {_obj_attr(o, "event-uuid") for o in _tlr_entry_objs(event)}
+    added = 0
+    for entry in entries:
+        if entry["event_uuid"] in held:
+            continue
+        _check(misp.add_object(_event_ref(event), _tlr_entry_obj(entry)), "add TLR entry")
+        held.add(entry["event_uuid"])
+        added += 1
+    return added
+
+
+def update_tlr_entries(uuid, changes):
+    """Save the triage of a landscape's entries.
+
+    changes maps an entry's object UUID to the fields the analyst set. An entry
+    left as it was is not written, so a save of a long table costs a call per
+    entry changed rather than per entry.
+    """
+    misp = _misp()
+    for obj in _tlr_entry_objs(_tlr_event(uuid)):
+        if obj.uuid not in changes:
+            continue
+        current = _tlr_entry(obj)
+        wanted = {**current, **changes[obj.uuid]}
+        if wanted != current:
+            _update_object(misp, obj, _tlr_entry_obj(wanted), "TLR entry")
+
+
 def find_products_using_source(src_uuid: str) -> list:
-    """Return all products (briefings, FIAs, VEAs) that reference src_uuid as a source event."""
+    """Return all products (briefings, FIAs, VEAs, landscape reports) that reference src_uuid as a source event."""
     results = []
     try:
         for b in list_briefings():
@@ -7150,4 +7401,15 @@ def find_products_using_source(src_uuid: str) -> list:
                 })
     except Exception as exc:
         logger.warning("find_products_using_source VEAs failed: %s", exc)
+    try:
+        for t in list_tlrs():
+            if any(e.event_uuid == src_uuid for e in t.entries):
+                results.append({
+                    "type": "threat-landscape",
+                    "uuid": t.uuid,
+                    "title": t.title or f"Threat landscape {t.tlr_id}",
+                    "date": (t.created_at.strftime("%Y-%m-%d") if t.created_at else ""),
+                })
+    except Exception as exc:
+        logger.warning("find_products_using_source TLRs failed: %s", exc)
     return results

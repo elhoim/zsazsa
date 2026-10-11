@@ -3,7 +3,7 @@
 Mattermost and the chat clients showing a notification fetch the image by URL,
 so the route skips login. It used to take any id and hand it to MISP, which
 also resolves numeric event ids, so anyone could walk 1, 2, 3 and get every
-threat actor profile, drafts and TLP:RED included. Now the URL carries an HMAC
+threat actor profile, drafts and TLP:RED included. Now the URL has an HMAC
 of the profile UUID, checked before MISP is asked, and only a published
 profile is served.
 

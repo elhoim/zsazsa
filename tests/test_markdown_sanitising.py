@@ -6,9 +6,14 @@ CDN that served marked but not DOMPurify turned a report into script on the
 analyst's page. Every call to marked.parse now sits inside DOMPurify.sanitize,
 and without DOMPurify the text is shown as text.
 
+Both libraries load from one include, _markdown_js.html, pinned by hash, and
+pages render through its zsazsaRenderMarkdown, so the fallback and the pin
+cannot drift apart page by page again. Every script from a CDN is pinned by hash.
+
     python -m unittest tests.test_markdown_sanitising
 """
 
+import re
 import unittest
 from pathlib import Path
 
@@ -24,6 +29,32 @@ class MarkedOutputIsSanitised(unittest.TestCase):
             if text.count("marked.parse(") != text.count("DOMPurify.sanitize(marked.parse("):
                 offenders.append(str(path.relative_to(_ROOT)))
         self.assertEqual(offenders, [])
+
+
+class OneIncludeLoadsThem(unittest.TestCase):
+    def templates(self):
+        return {str(p.relative_to(_ROOT)): p.read_text(encoding="utf-8")
+                for p in (_ROOT / "templates").rglob("*.html")}
+
+    def test_no_page_loads_or_calls_the_libraries_itself(self):
+        offenders = [name for name, text in self.templates().items()
+                     if name != "templates/_markdown_js.html"
+                     and any(use in text for use in ("marked.min.js", "marked.parse(", "DOMPurify."))]
+        self.assertEqual(offenders, [])
+
+    def test_a_page_that_renders_markdown_includes_the_helper(self):
+        offenders = [name for name, text in self.templates().items()
+                     if "zsazsaRenderMarkdown(" in text and name != "templates/_markdown_js.html"
+                     and '{% include "_markdown_js.html" %}' not in text]
+        self.assertEqual(offenders, [])
+
+    def test_every_cdn_script_and_stylesheet_is_pinned_by_hash(self):
+        tags = [tag for text in self.templates().values()
+                for tag in re.findall(r"<(?:script|link)\b[^>]*https://cdnjs[^>]*>", text)]
+        self.assertTrue(tags)
+        self.assertEqual([t for t in tags if 'integrity="sha512-' not in t], [])
+        script = (_ROOT / "static/js/rulezet-code-modal.js").read_text(encoding="utf-8")
+        self.assertIn("s.integrity = 'sha512-", script)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ other browser checks:
 
 import os
 import re
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -62,7 +63,7 @@ def _story(n):
                            source_id="scraper", source_url="", drafted_by="", threat_actor_types=[])
 
 
-def _offline_patches():
+def _offline_patches(tmp):
     """Everything the pages ask MISP for, answered with hostile data. The
     organisation filter and the briefing date are stored as an install from
     before the save checks would hold them."""
@@ -110,7 +111,7 @@ def _offline_patches():
         delete_stakeholder=mock.Mock(),
         delete_collection_source=mock.Mock(),
     )
-    from webapp import audit, collection_cache, misp_session, misp_store, org_store, sso_users
+    from webapp import audit, collection_cache, job_store, misp_session, misp_store, org_store, sso_users
     return [
         mock.patch.object(misp_session, "refuse_unless_site_admin", return_value=None),
         mock.patch("requests.adapters.HTTPAdapter.send", no_network),
@@ -125,11 +126,18 @@ def _offline_patches():
         mock.patch.object(collection_cache, "get_events", return_value=[collected]),
         mock.patch.object(collection_cache, "get_source_status", return_value={}),
         mock.patch.object(collection_cache, "interval_s", return_value=300),
+        # This install's own database, log, job Redis and cache worker stay out of it.
+        mock.patch.object(_config, "DB_FILE", str(Path(tmp) / "test.db"), create=True),
+        mock.patch.object(_config, "LOG_FILE", str(Path(tmp) / "test.log"), create=True),
+        mock.patch.object(collection_cache, "start_worker"),
+        mock.patch.object(job_store, "_command", return_value=None),
     ]
 
 
-def _start(testcase_cls, patches):
-    for patcher in patches:
+def _start(testcase_cls):
+    tmp = tempfile.TemporaryDirectory()
+    testcase_cls.addClassCleanup(tmp.cleanup)
+    for patcher in _offline_patches(tmp.name):
         patcher.start()
         testcase_cls.addClassCleanup(patcher.stop)
 
@@ -139,7 +147,7 @@ class RenderedPages(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        _start(cls, _offline_patches())
+        _start(cls)
         from webapp import create_app
         cls.client = create_app().test_client()
 
@@ -197,6 +205,7 @@ class BriefingDate(unittest.TestCase):
                                    review_state="draft")
         with mock.patch.object(briefing_routes.misp_store, "get_briefing", return_value=briefing), \
              mock.patch.object(briefing_routes.misp_store, "update_briefing") as update, \
+             mock.patch.object(briefing_routes.job_store, "_command", return_value=None), \
              mock.patch.object(briefing_routes.audit, "record"):
             app.test_client().post(f"/briefing/{BRIEFING_UUID}/edit", data={"date": BREAKOUT})
         self.assertEqual(update.call_args.args[1]["date"], "2026-09-25")
@@ -211,7 +220,7 @@ class HostileTextInTheBrowser(unittest.TestCase):
         from playwright.sync_api import sync_playwright
         from werkzeug.serving import make_server
 
-        _start(cls, _offline_patches())
+        _start(cls)
         from webapp import create_app, misp_store
         cls.store = misp_store
 

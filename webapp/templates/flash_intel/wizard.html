@@ -32,11 +32,11 @@
            id="source-events-header" style="cursor:pointer;" title="Click to expand/collapse">
         <span><i class="fas fa-database me-2"></i>Source events ({{ source_events | length }})</span>
         <div class="d-flex gap-2 align-items-center">
-          {% if not is_edit %}
           <span class="zs-toolbar-label">AI assistance</span>
           <div class="zs-pill-group" id="build-ai-group" role="group">
             <button type="button" class="zs-pill" id="build-ai-btn"
                     data-source-uuids='{{ source_events | map(attribute="uuid") | list | tojson }}'
+                    {% if is_edit %}data-confirm="Build with AI replaces the text in the fields it fills. Continue?"{% endif %}
                     {% if not any_reports %}disabled{% endif %}>
               <i class="fas fa-wand-magic-sparkles"></i>Build with AI
             </button>
@@ -76,7 +76,6 @@
               </li>
             </ul>
           </div>
-          {% endif %}
           <button type="button" class="btn btn-xs btn-link text-muted p-0" id="source-events-toggle">
             <i class="fas fa-chevron-down me-1"></i>Show
           </button>
@@ -643,16 +642,13 @@
 
 {% block scripts %}
 {% include "_qa_review_js.html" %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
 (function() {
   // Render report markdown bodies
   if (typeof marked !== 'undefined') {
-    marked.setOptions({ breaks: true, gfm: true });
     document.querySelectorAll('.report-md-body[data-md]').forEach(function(el) {
-      var raw = el.getAttribute('data-md') || '';
-      el.innerHTML = raw.trim() ? DOMPurify.sanitize(marked.parse(raw)) : '<em class="text-muted">No content.</em>';
+      zsazsaRenderMarkdown(el, el.getAttribute('data-md'), '<em class="text-muted">No content.</em>');
       el.removeAttribute('data-md');
     });
   }
@@ -808,8 +804,7 @@
     srcToggleBtn.addEventListener('click', function(e) { e.stopPropagation(); toggleSrcAccordion(); });
     if (srcHeader) {
       srcHeader.addEventListener('click', function(e) {
-        if (e.target.closest('#source-events-toggle')) return;
-        if (e.target.closest('#build-ai-btn')) return;
+        if (e.target.closest('#source-events-toggle, #build-ai-group')) return;
         toggleSrcAccordion();
       });
     }
@@ -920,6 +915,7 @@
   function runBuildAi(mode) {
     var sourceUuids = JSON.parse(buildAiBtn.dataset.sourceUuids || '[]');
     if (!sourceUuids.length) { alert('No source event UUIDs found.'); return; }
+    if (buildAiBtn.dataset.confirm && !confirm(buildAiBtn.dataset.confirm)) return;
 
     var originalHtml = buildAiBtn.innerHTML;
     buildAiBtn.disabled = true;

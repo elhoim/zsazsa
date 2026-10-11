@@ -91,7 +91,10 @@ class SettingsAccess(unittest.TestCase):
 
     def test_with_the_login_redirect_on_nobody_identified_is_sent_to_misp(self):
         self.as_user(None)
-        with mock.patch.object(_config, "MISP_SESSION_REDIRECT_TO_LOGIN", True):
+        # The warning that explains the miss would otherwise ask this install's
+        # session Redis where the sessions are.
+        with mock.patch.object(_config, "MISP_SESSION_REDIRECT_TO_LOGIN", True), \
+             mock.patch.object(misp_session, "_database_with_sessions", return_value=None):
             resp = self.client.get("/config")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/users/login", resp.headers["Location"])

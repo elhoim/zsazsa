@@ -72,6 +72,24 @@ class ChannelIds(unittest.TestCase):
         self.assertFalse(saved[0]["enabled"])
 
 
+class Ping(unittest.TestCase):
+    def test_a_failed_ping_does_not_send_the_webhook_back(self):
+        """Webhook URLs are write-only on the settings page, and a Mattermost
+        webhook's path is its credential."""
+        app = Flask(__name__)
+        app.register_blueprint(config_page.bp)
+        url = "https://chat.example.org/hooks/abcdefghijklmnopqrstuvwxyz"
+        failure = config_page.requests.ConnectionError(f"Max retries exceeded with url: {url}")
+        with mock.patch.object(config_page.misp_session, "refuse_unless_site_admin", return_value=None), \
+             mock.patch.object(config_page, "_read_notification_channels",
+                               return_value=[{"id": "soc", "type": "mattermost", "url": url}]), \
+             mock.patch.object(config_page.requests, "post", side_effect=failure):
+            reply = app.test_client().post("/config/ping-notification-channel",
+                                           json={"channel_id": "soc"}).get_json()
+        self.assertFalse(reply["ok"])
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", reply["error"])
+
+
 class Subscriptions(unittest.TestCase):
     """The stakeholder form only renders active channels, so a disabled one is
     absent from the submission rather than unchecked."""

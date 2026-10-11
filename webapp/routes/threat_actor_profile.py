@@ -210,7 +210,7 @@ def pdf(id):
 def _diamond_signature(uuid):
     """The signature that lets a Diamond Model image URL work without a session:
     an HMAC of the profile UUID under the app's secret key. Only a notification
-    carries one, and it cannot be turned into the URL of another profile."""
+    has one, and it cannot be turned into the URL of another profile."""
     key = current_app.config["SECRET_KEY"].encode()
     return hmac.new(key, f"diamond:{uuid}".encode(), sha256).hexdigest()
 
@@ -221,7 +221,7 @@ def diamond_png(id):
     """Serve the Diamond Model of a published profile as a PNG, without a session.
 
     Mattermost and the chat clients showing a notification fetch it by image
-    URL, so the URL carries a signature instead (see _diamond_signature). It is
+    URL, so the URL is signed instead (see _diamond_signature). It is
     checked before MISP is asked, and every refusal is the same 404, so the
     route tells nothing about which events exist.
 

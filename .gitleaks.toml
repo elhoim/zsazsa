@@ -1,0 +1,12 @@
+# The default rules, plus what they do not know about.
+[extend]
+useDefault = true
+
+# A Mattermost incoming webhook is authorised by its path alone, so the URL is
+# the credential. requests puts it in exception text, which is how two of them
+# reached a committed log file (GHSA-64wh-phxq-pw33).
+[[rules]]
+id = "mattermost-webhook"
+description = "Mattermost incoming webhook"
+regex = '''/hooks/[a-z0-9]{26}\b'''
+keywords = ["/hooks/"]

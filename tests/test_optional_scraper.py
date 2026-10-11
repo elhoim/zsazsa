@@ -20,7 +20,7 @@ from unittest import mock
 from flask import Flask, get_flashed_messages
 from pymisp.exceptions import PyMISPError
 
-from webapp import collection_cache, create_app, misp_store
+from webapp import collection_cache, create_app, job_store, misp_store
 from webapp.routes import collection_sources, config_page, daily_briefing, data_collection
 
 
@@ -247,8 +247,15 @@ class ScraperCard(unittest.TestCase):
     """The Collection sources page renders the scraper's own settings."""
 
     def setUp(self):
-        # This install may have single sign-on on, which would answer 302.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        # This install may have single sign-on on, which would answer 302. Its
+        # database, log, job Redis and collection cache worker are left alone.
         patches = [
+            mock.patch.object(misp_store.config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True),
+            mock.patch.object(misp_store.config, "LOG_FILE", str(Path(tmp.name) / "test.log"), create=True),
+            mock.patch.object(collection_cache, "start_worker"),
+            mock.patch.object(job_store, "_command", return_value=None),
             mock.patch.object(misp_store.config, "MISP_SESSION_REDIRECT_TO_LOGIN", False),
             mock.patch.object(misp_store, "list_collection_sources", return_value=[]),
             mock.patch.object(config_page.misp_session, "refuse_unless_site_admin", return_value=None),

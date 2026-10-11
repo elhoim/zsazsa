@@ -31,7 +31,10 @@ def resolve_public_url(url: str):
     ``port`` is the effective port (the URL's own, or 80/443 for the scheme).
     The caller pins the fetch to exactly these addresses.
     """
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
     if parts.scheme not in ("http", "https"):
         return None
     host = parts.hostname

@@ -316,8 +316,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <style>
 .report-md-body { font-size: .92rem; line-height: 1.6; color: var(--text-primary); }
 .report-md-body h1, .report-md-body h2, .report-md-body h3,
@@ -363,10 +362,8 @@
 </style>
 <script>
 (function() {
-  marked.setOptions({ breaks: true, gfm: true });
   document.querySelectorAll('.report-md-body').forEach(function(el) {
-    var raw = el.getAttribute('data-md') || '';
-    el.innerHTML = raw.trim() ? DOMPurify.sanitize(marked.parse(raw)) : '<em class="text-muted">No content.</em>';
+    zsazsaRenderMarkdown(el, el.getAttribute('data-md'), '<em class="text-muted">No content.</em>');
     el.removeAttribute('data-md');
   });
 })();

@@ -65,6 +65,9 @@ class Delivery(JobTestCase):
         job = self.start(lambda log: (time.sleep(1), (True, "sent via email"))[1])
         self.assertLess(time.time() - started, 0.5)
         self.assertIn(job["status"], ("queued", "running"))
+        # Finished here, while the job store and audit log are still stand-ins:
+        # left running, it wrote to the real ones once the test had returned.
+        _wait_for_finish(job["id"])
 
     def test_a_successful_delivery_completes_and_is_audited(self):
         job = self.start(lambda log: (log("2 recipient(s)."), (True, "sent via email"))[1])

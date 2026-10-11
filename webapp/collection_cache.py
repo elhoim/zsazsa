@@ -149,13 +149,15 @@ def cached_event_counts() -> list[dict]:
     return rows
 
 
-def get_events(source_ids: list, tag_filters: list, limit: int) -> list:
+def get_events(source_ids: list, tag_filters: list, limit: int, exclude=()) -> list:
     """Return cached events for the given source IDs, applying tag filters.
 
     Tags are stored as a JSON array per row, so the tag filter is applied in
     Python. When filtering, all candidate rows are scanned in date order rather
     than a pre-capped slice: capping the SQL result first would silently drop
-    matching events that happen to be older than the cap.
+    matching events that happen to be older than the cap. Events whose UUID is
+    in ``exclude`` are skipped the same way, so they do not count towards
+    ``limit``.
     """
     if not source_ids:
         return []
@@ -167,7 +169,7 @@ def get_events(source_ids: list, tag_filters: list, limit: int) -> list:
     )
     try:
         with _db() as conn:
-            if required:
+            if required or exclude:
                 # Filtering in Python: scan everything, stop once `limit` match.
                 rows = conn.execute(base_sql, source_ids).fetchall()
             else:
@@ -179,7 +181,7 @@ def get_events(source_ids: list, tag_filters: list, limit: int) -> list:
     result = []
     for r in rows:
         tags = json.loads(r["tags"] or "[]")
-        if required and not required.issubset(set(tags)):
+        if (required and not required.issubset(set(tags))) or r["uuid"] in exclude:
             continue
         result.append({
             "uuid": r["uuid"],

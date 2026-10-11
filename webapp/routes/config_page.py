@@ -1277,29 +1277,31 @@ def test_imap_mailbox():
     return jsonify(result)
 
 
+def _stored_misp_servers():
+    """(URL, key, TLS verification) for each configured MISP server."""
+    servers = [
+        (getattr(_config, "MISP_WEBAPP_URL", ""), getattr(_config, "MISP_WEBAPP_KEY", ""),
+         getattr(_config, "MISP_WEBAPP_VERIFYCERT", True)),
+        (getattr(_config, "MISP_URL", ""), getattr(_config, "MISP_KEY", ""),
+         getattr(_config, "MISP_VERIFYCERT", True)),
+    ]
+    servers.extend(
+        (server.get("url"), server.get("api_key"), server.get("verify_tls", True))
+        for server in getattr(_config, "MISP_SERVERS", []) or []
+    )
+    return servers
+
+
 def _stored_misp_keys():
     """(URL, key) of every MISP server zsazsa holds a key for."""
-    pairs = [(getattr(_config, "MISP_WEBAPP_URL", ""), getattr(_config, "MISP_WEBAPP_KEY", "")),
-             (getattr(_config, "MISP_URL", ""), getattr(_config, "MISP_KEY", ""))]
-    pairs += [(s.get("url"), s.get("api_key")) for s in getattr(_config, "MISP_SERVERS", []) or []]
-    return pairs
+    return [(url, key) for url, key, _verify in _stored_misp_servers()]
 
 
-def _stored_verify_for(url):
-    """The stored TLS-verification setting for a configured MISP URL, or None.
-
-    Lets a lookup against a server zsazsa already knows reuse that server's
-    verify_tls, rather than silently contacting it with verification turned off.
-    """
-    if not (url or "").strip():
-        return None
-    candidates = [
-        (getattr(_config, "MISP_WEBAPP_URL", ""), getattr(_config, "MISP_WEBAPP_VERIFYCERT", True)),
-        (getattr(_config, "MISP_URL", ""), getattr(_config, "MISP_VERIFYCERT", True)),
-    ]
-    candidates += [(s.get("url"), s.get("verify_tls", True))
-                   for s in getattr(_config, "MISP_SERVERS", []) or []]
-    return next((v for addr, v in candidates if addr and _same_address(addr, url)), None)
+def _stored_verify_tls(url):
+    """Whether TLS is verified for a MISP server, as stored with its URL. On for
+    a URL zsazsa has no setting for."""
+    return next((bool(verify) for addr, _key, verify in _stored_misp_servers()
+                 if _same_address(addr, url)), True)
 
 
 @bp.route("/config/sources/pull-estimate", methods=["POST"])
@@ -1390,12 +1392,7 @@ def lookup_org():
 
     servers = []
     if misp_url and misp_key:
-        # Reuse the stored verify_tls for a known server; never hard-code it off
-        # (that both disabled TLS verification, CWE-295, and let the lookup reach
-        # any client-supplied host). An unknown URL is contacted with
-        # verification on.
-        stored_verify = _stored_verify_for(misp_url)
-        servers.append((misp_url, misp_key, True if stored_verify is None else stored_verify))
+        servers.append((misp_url, misp_key, _stored_verify_tls(misp_url)))
     servers.append((_config.MISP_WEBAPP_URL, _config.MISP_WEBAPP_KEY, _config.MISP_WEBAPP_VERIFYCERT))
     if scraper_enabled() and _config.MISP_URL != _config.MISP_WEBAPP_URL:
         servers.append((_config.MISP_URL, _config.MISP_KEY, _config.MISP_VERIFYCERT))
@@ -1585,7 +1582,9 @@ def ping_notification_channel():
         r.raise_for_status()
         return jsonify({"ok": True})
     except requests.RequestException as exc:
-        return jsonify({"ok": False, "error": str(exc)})
+        # The settings never send a stored webhook back, and requests names the URL.
+        from notifier.mattermost import without_secret
+        return jsonify({"ok": False, "error": without_secret(str(exc), url)})
 
 
 @bp.route("/config/save-flowintel-instance", methods=["POST"])

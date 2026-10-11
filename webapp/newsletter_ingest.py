@@ -33,26 +33,29 @@ def _message(source: str, article: dict) -> dict:
     }
 
 
+def public_urls(articles: list[dict]) -> list[str]:
+    """The article links the scraper will be sent, as recorded on the archived
+    newsletter: a link publish_articles refuses must not read as pushed."""
+    return [a["url"] for a in articles if is_safe_public_url(a["url"])]
+
+
 def publish_articles(source: str, articles: list[dict]) -> dict:
     """Publish each article's URL to the scraper channel.
 
     `articles` is a list of dicts with keys url, title, section, priority.
-    Returns {"published", "failed", "no_subscriber"} counts. Articles without a
-    URL are skipped.
+    Returns {"published", "failed", "no_subscriber", "refused"} counts. Articles
+    without a URL are skipped. A newsletter can arrive from anyone who can mail
+    the mailbox, and the scraper fetches whatever it is sent, so a link that is
+    not a public web address is refused rather than handed to it.
     """
-    published = failed = no_subscriber = 0
+    published = failed = no_subscriber = refused = 0
     for article in articles:
         url = (article.get("url") or "").strip()
         if not url:
             continue
-        # The URLs come from newsletter text, which on the auto IMAP path an
-        # unauthenticated sender controls. Only public web addresses go to the
-        # scraper, so a crafted mail cannot make it fetch an internal host
-        # (SSRF). A dropped URL counts as a failure rather than being silent,
-        # since this count is how the ingest paths report delivery.
         if not is_safe_public_url(url):
-            failed += 1
-            logger.warning("scraper publish skipped non-public URL: %s", url)
+            refused += 1
+            logger.warning("%s: not sending a non-public link to the scraper", source)
             continue
         try:
             receivers = scraper_queue.publish(_message(source, article))
@@ -63,7 +66,7 @@ def publish_articles(source: str, articles: list[dict]) -> dict:
             published += 1
             if receivers == 0:
                 no_subscriber += 1
-    return {"published": published, "failed": failed, "no_subscriber": no_subscriber}
+    return {"published": published, "failed": failed, "no_subscriber": no_subscriber, "refused": refused}
 
 
 def articles_from_parsed(parsed: dict) -> list[dict]:

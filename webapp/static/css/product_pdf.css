@@ -329,7 +329,6 @@ h1.doc-title {
   padding: 3pt 6pt;
   text-align: left;
   overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .story-body th {

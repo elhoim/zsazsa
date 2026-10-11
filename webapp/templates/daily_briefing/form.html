@@ -623,8 +623,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+{% include "_markdown_js.html" %}
 <script>
 var storyCount = {{ stories | length }};
 var isEditMode = {{ 'true' if page_mode == 'edit' else 'false' }};
@@ -1454,9 +1453,7 @@ function reportAccordion(reports) {
 
     var content = document.createElement('div');
     content.className = 'accordion-body report-md-body';
-    // Report text comes from outside, so without DOMPurify it is shown as text.
-    if (window.DOMPurify) content.innerHTML = DOMPurify.sanitize(marked.parse(report.content || ''));
-    else content.textContent = report.content || '';
+    zsazsaRenderMarkdown(content, report.content);
 
     var panel = document.createElement('div');
     panel.id = 'misp-report-' + i;

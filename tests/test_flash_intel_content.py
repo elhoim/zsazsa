@@ -22,6 +22,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from pymisp import PyMISP
+
 from webapp import misp_store
 from webapp.utils import human_size
 
@@ -351,25 +353,26 @@ class TheAlertLinksBackToZsazsa(unittest.TestCase):
 
 class ChangingTheReviewStateKeepsTheContent(unittest.TestCase):
     """Approving, publishing and rejecting all go through set_fia_review_state,
-    which rebuilds the whole object from a payload it assembles by hand. A field
+    which writes the whole object from a payload it assembles by hand. A field
     that payload does not carry is destroyed at the moment the alert is
     published, and the notification that goes out is built from what survived."""
 
     def _rebuilt(self, state=misp_store.FIA_REVIEW_APPROVED):
         """The FIA object as it stands after a review-state change."""
         stored = misp_store._fia_obj(_filled_fia_data())
-        stored.id = "7"  # only objects fetched from MISP carry one, and it is deleted by id
-        event = SimpleNamespace(uuid="u" * 36, id="42", attributes=[], event_reports=[],
+        stored.id = "7"  # only objects fetched from MISP have one
+        uuid = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+        event = SimpleNamespace(uuid=uuid, id="42", attributes=[], event_reports=[],
                                 objects=[stored], published=False, publish_timestamp=None,
                                 timestamp=None, date=None)
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = event
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
              mock.patch.object(misp_store, "_write_fia_report"), \
              mock.patch.object(misp_store.misp_session, "current_user_email",
                                return_value="reviewer@example.org"):
-            misp_store.set_fia_review_state("u" * 36, state)
-        return misp.add_object.call_args[0][1]
+            misp_store.set_fia_review_state(uuid, state)
+        return misp.update_object.call_args.args[0]
 
     def test_the_write_up_and_the_gaps_survive_publishing(self):
         obj = self._rebuilt()

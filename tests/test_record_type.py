@@ -4,7 +4,7 @@ The routes pass the id from the URL to the store, which acts on it with
 zsazsa's own MISP key, and MISP resolves numeric event ids too. Any MISP user
 could delete or overwrite events that were never zsazsa records, or reach a
 published record through the routes of another type. An event now only counts
-as a record when it carries that record type's zsazsa object or its tag, and an
+as a record when it has that record type's zsazsa object or its tag, and an
 attachment, note or scope item only when it belongs to the record named in the
 URL.
 
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from flask import Flask
-from pymisp import MISPAttribute, MISPEvent
+from pymisp import MISPAttribute, MISPEvent, PyMISP
 
 from webapp import misp_store
 from webapp.routes import flash_intel, indicator_feed, requirements, rfi, threat_actor_profile
@@ -39,7 +39,7 @@ RECORDS = {
 
 
 def _event(object_name=None, tag=None):
-    """A MISP event, carrying the given zsazsa object and tag, or neither."""
+    """A MISP event with the given zsazsa object and tag, or neither."""
     event = MISPEvent()
     event.uuid = UUID
     event.id = "42"
@@ -54,12 +54,29 @@ def _event(object_name=None, tag=None):
 
 class StoreCase(unittest.TestCase):
     def misp_returning(self, event):
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = event
         patcher = mock.patch.object(misp_store, "_misp", return_value=misp)
         patcher.start()
         self.addCleanup(patcher.stop)
         return misp
+
+
+class NotAnEventId(StoreCase):
+    def test_a_word_from_the_url_is_not_looked_up(self):
+        """/products/vea/review reached MISP as an event id, and PyMISP logged
+        the 404 as an error."""
+        misp = self.misp_returning(_event())
+        self.assertIsNone(misp_store.get_vea("review"))
+        self.assertIsNone(misp_store.get_stakeholder("review"))
+        misp.get_event.assert_not_called()
+
+    def test_a_uuid_or_a_numeric_id_still_is(self):
+        misp = self.misp_returning(_event("zsazsa-vea"))
+        for event_id in (UUID, "42"):
+            with self.subTest(event_id=event_id):
+                self.assertIsNotNone(misp_store.get_vea(event_id))
+        self.assertEqual(misp.get_event.call_count, 2)
 
 
 class Getters(StoreCase):
@@ -130,6 +147,7 @@ class Writes(StoreCase):
         ("update_briefing", (UUID, {})),
         ("update_tlr", (UUID, {})),
         ("update_collection_source", (UUID, {})),
+        ("toggle_collection_source", (UUID, False)),
         ("update_pir_intake", (UUID, "approved")),
         ("set_fia_review_state", (UUID, misp_store.FIA_REVIEW_APPROVED)),
         ("set_vea_review_state", (UUID, misp_store.VEA_REVIEW_APPROVED)),
@@ -193,7 +211,7 @@ class Routes(unittest.TestCase):
     def test_deleting_an_event_through_the_feed_route_deletes_nothing(self):
         """The advisory's reproduction, against the real store."""
         client = _client(indicator_feed.bp)
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = _event()
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
              mock.patch.object(misp_store, "profiles_using_indicator_feed", return_value=[]), \

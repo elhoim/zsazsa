@@ -281,7 +281,7 @@ SSO against MISP requires three things:
 
 All three failures look the same from the outside: nobody is ever identified, and with the redirect on it resembles a login loop. The **Test single sign-on** button in the Single sign-on section tells them apart. It reports which cookie name zsazsa expects, which cookies your browser actually sent, whether Redis is reachable and on which database, and whether a session was found. When the sessions turn out to be in another database of the same Redis, it names that database and the setting to change.
 
-With `MISP_SESSION_REDIRECT_TO_LOGIN` on, a visitor without a valid MISP session is redirected to MISP's login page. With it off, such requests fall back to the `admin@admin.test`. Users seen through a session are recorded and listed on the community page. Two URLs stay reachable without a session because they are meant to be handed out. The public indicator feed URL carries a random token per feed. The Diamond Model image that a Mattermost notification shows carries a signature made with `SECRET_KEY`, works only for a published profile, and stops working when `SECRET_KEY` changes.
+With `MISP_SESSION_REDIRECT_TO_LOGIN` on, a visitor without a valid MISP session is redirected to MISP's login page. With it off, such requests fall back to the `admin@admin.test`. Users seen through a session are recorded and listed on the community page. Two URLs stay reachable without a session because they are meant to be handed out. The public indicator feed URL has a random token per feed. The URL of the Diamond Model image that a Mattermost notification shows is signed with `SECRET_KEY`, works only for a published profile, and stops working when `SECRET_KEY` changes.
 
 Approving, publishing and (re)sending a product, delivering an indicator feed or switching its public URL on or off, and setting a stakeholder's product to automated delivery, take MISP's own **publish** permission (`perm_publish` on the user's role). The Configuration and Collection sources pages take **site admin** (`perm_site_admin`).
 
@@ -320,7 +320,7 @@ This tab lists every prompt template file found in `zsazsaprompts/`.
 
 Changing these headings or structure will cause the corresponding feature to fail silently.
 
-Three prompts support the drafting and review buttons on the products themselves. `threat_actor_profile_draft` fills the narrative fields of a threat actor profile from the selected actors, the MISP galaxy context and any notes already on the form, and only ever writes into fields the analyst left empty. `threat_landscape_trends` drafts the threat landscape report from the collection events queued for it, counting the events behind each trend and leaving `[ANALYST]` markers where the organisational judgement belongs. `product_qa_review` backs the "QA check against source" button on flash intel alert and vulnerability advisory drafts: it audits the draft against the report content of its source events and returns a verdict with the claims a reviewer should fix before publishing.
+Three prompts support the drafting and review buttons on the products themselves. `threat_actor_profile_draft` fills the narrative fields of a threat actor profile from the selected actors, the MISP galaxy context and any notes already on the form, and only ever writes into fields the analyst left empty. `threat_landscape_trends` drafts the threat landscape report from the events in its dataset, or from the queue for a new report, counting the events behind each trend and leaving `[ANALYST]` markers where the organisational judgement belongs. `product_qa_review` backs the "QA check against source" button on flash intel alert and vulnerability advisory drafts: it audits the draft against the report content of its source events and returns a verdict with the claims a reviewer should fix before publishing.
 
 ### AI
 
@@ -532,6 +532,10 @@ Each newsletter source inside it:
 | Enabled | Whether this source is applied when the mailbox is polled |
 
 "Test connection" opens the mailbox with the entered settings without reading or changing any mail. Polling never deletes mail; a message is flagged with the `zsazsaProcessed` IMAP keyword only once it has been archived, so a failure retries on the next run instead of losing the newsletter.
+
+Subject and sender filters cannot prove a message is genuine. In automatic mode, the scraper fetches its links, so zsazsa only forwards links whose hosts resolve to public addresses. This also applies to links pasted in by hand. Private or internal links are skipped. Newsletters with no eligible links wait for review. Use `Manual review` for mailboxes external senders can reach.
+
+The check runs before the separate scraper fetches a link, so it cannot prevent redirects or DNS changes from reaching internal addresses. Restrict the scraper host's outbound access until its subscriber validates destinations too.
 
 ## Optional post-installation steps
 
