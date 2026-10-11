@@ -224,7 +224,7 @@ This tab covers the MISP server zsazsa uses as its own **data store**, configure
 |---|---|
 | `MISP_WEBAPP_URL` | URL of the MISP server zsazsa uses to store its own program data |
 | `MISP_WEBAPP_KEY` | API key for the webapp MISP server. It also looks up a user's role for the settings pages, so it has to be allowed to view users |
-| `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate |
+| `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate. Defaults to `True`; set it to `False` only for an internal MISP with a self-signed certificate. The better option for a self-signed server is to leave verification on and make its CA trusted by the host (PyMISP's certificate argument also accepts a CA-bundle path). When verification is off, zsazsa suppresses the per-request insecure-request warning so the log is not flooded |
 | `RULEZET_URL` | Base URL of a [Rulezet](https://rulezet.org) instance. Product forms search it for public detection rules by CVE ID or MITRE ATT&CK technique, and a product page reads a saved rule back from it. A detection engineering request also validates its draft rule against it. Leave empty to disable the lookup |
 
 ### Products
@@ -451,7 +451,7 @@ The "MISP scraper (collection pipeline)" card holds the connection to the misp-s
 | Enabled | Switch for collecting from the scraper at all, as each other MISP server has (`MISP_SCRAPER_ENABLED`) |
 | URL | Address of the misp-scraper MISP instance (`MISP_URL`); empty means no scraper |
 | API key | API key for the scraper MISP instance (`MISP_KEY`); empty means no scraper |
-| Verify TLS | Whether to verify the scraper MISP server's TLS certificate (`MISP_VERIFYCERT`) |
+| Verify TLS | Whether to verify the scraper MISP server's TLS certificate (`MISP_VERIFYCERT`). Defaults to `True`; turn it off only for an internal self-signed MISP, preferably trusting its CA on the host instead |
 | Max events | Maximum number of events pulled per run (`MISP_SCRAPER_LIMIT`) |
 | Events from last (days) | Only pull scraper events from the last N days (`MISP_SCRAPER_SINCE_DAYS`); 0 disables the date window |
 

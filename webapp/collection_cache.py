@@ -29,7 +29,11 @@ from webapp import job_store
 from webapp.utils import scraper_enabled
 
 logger = logging.getLogger(__name__)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Only silence the insecure-request warning when the operator has explicitly
+# turned certificate verification off (an internal self-signed MISP), so a
+# verified deployment still surfaces any TLS warning instead of hiding it.
+if not getattr(config, "MISP_VERIFYCERT", True) or not getattr(config, "MISP_WEBAPP_VERIFYCERT", True):
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _DB_FILE = "data/collection_cache.db"
 _DEFAULT_INTERVAL_MIN = 15
