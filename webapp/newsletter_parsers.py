@@ -13,11 +13,16 @@ writing a parser and registering it in PARSERS.
 
 import re
 
-_PRIORITY_RE = re.compile(r'^Priority:\s*(\d)\s*-\s*(.+?)\s*$', re.IGNORECASE)
-_RELEVANCE_RE = re.compile(r'^Relevance:\s*(.+?)\s*$', re.IGNORECASE)
+# A newsletter can be mailed in by anyone, so no pattern here may backtrack
+# over a long run of whitespace: a group that has to start or end on a
+# non-space character, rather than one followed by \s*$, keeps every match
+# linear in the length of the line. The lines are stripped before matching, so
+# a group running to the end of the line has no trailing whitespace to drop.
+_PRIORITY_RE = re.compile(r'^Priority:\s*(\d)\s*-\s*(\S.*)', re.IGNORECASE)
+_RELEVANCE_RE = re.compile(r'^Relevance:\s*(\S.*)', re.IGNORECASE)
 _URL_RE = re.compile(r'https?://\S+')
 # A "Quick overview" row: a section name followed by three counts.
-_OVERVIEW_ROW_RE = re.compile(r'^(.+?)[ \t]+\d+[ \t]+\d+[ \t]+\d+\s*$')
+_OVERVIEW_ROW_RE = re.compile(r'^(.*?[^ \t])[ \t]+\d+[ \t]+\d+[ \t]+\d+\s*$')
 _TLP_RE = re.compile(r'TLP:\s*(CLEAR|WHITE|GREEN|AMBER\+STRICT|AMBER|RED)', re.IGNORECASE)
 
 _PRIORITY_KEYS = {1: "critical", 2: "urgent", 3: "important"}
@@ -28,16 +33,14 @@ _QUOTE_RE = re.compile(r'^> ?')
 _FWD_HEADER_RE = re.compile(
     r'^(From|Date|Subject|To|Sent|Cc|Reply-To|Delivered-To|Return-Path'
     r'|Begin forwarded message)\b', re.IGNORECASE)
-# Trailing in-mail anchor link on a "Quick overview" section name,
-# e.g. "Industrial Sector <x-msg://3/#ICS>".
-_OVERVIEW_ANCHOR_RE = re.compile(r'\s*<[^>]*>\s*$')
 
 # Markdown decoration, as it arrives when a message carried no plain-text part and
 # the collector converted its HTML instead: headings, bullets, table rows, emphasis
 # around a field label, and backslash-escaped punctuation.
-_ATX_RE = re.compile(r'^(#{1,6})\s+(.*?)\s*#*$')
+# The heading text still carries any closing hashes; see _etda_kinds.
+_ATX_RE = re.compile(r'^(#{1,6})\s+(.*)')
 _RULE_RE = re.compile(r'^(=+|-+)$')
-_BULLET_RE = re.compile(r'^[*+-]\s+(?!\s*[*+-])(.+)$')
+_BULLET_RE = re.compile(r'^[*+-]\s+(\S.*)')
 _TABLE_ROW_RE = re.compile(r'^\|.*\|$')
 _EMPHASIS_RE = re.compile(r'^([*_]{1,2})(.+?)\1$')
 _MD_ESCAPE_RE = re.compile(r'\\([\\`*_{}\[\]()#+.!-])')
@@ -91,6 +94,18 @@ def _clean_title(text: str) -> str:
     return " ".join(_MD_ESCAPE_RE.sub(r"\1", text).split())
 
 
+def _without_anchor(name: str) -> str:
+    """A "Quick overview" section name without its trailing in-mail anchor
+    link, e.g. "Industrial Sector <x-msg://3/#ICS>". The anchor starts at the
+    first '<' after any earlier '>'."""
+    name = name.rstrip()
+    if name.endswith(">"):
+        start = name.find("<", name.rfind(">", 0, -1) + 1, len(name) - 1)
+        if start != -1:
+            name = name[:start]
+    return name.strip()
+
+
 def _etda_section_names(lines: list[str]) -> list[str]:
     """Section names in order, read from the 'Quick overview' table."""
     names = []
@@ -102,10 +117,17 @@ def _etda_section_names(lines: list[str]) -> list[str]:
         if in_overview:
             match = _OVERVIEW_ROW_RE.match(line.strip())
             if match:
-                names.append(_OVERVIEW_ANCHOR_RE.sub("", match.group(1)).strip())
+                names.append(_without_anchor(match.group(1)))
             elif names:
                 break
     return names
+
+
+def _bullet(line: str) -> str:
+    """The text of a '* Title' bullet, or "". A row of markers such as
+    '* * *' is a rule, not a bullet."""
+    match = _BULLET_RE.match(line)
+    return match.group(1) if match and match.group(1)[0] not in "*+-" else ""
 
 
 def _opens_section(lines: list[str], idx: int) -> bool:
@@ -119,7 +141,7 @@ def _opens_section(lines: list[str], idx: int) -> bool:
     prev = lines[idx - 1].strip() if idx else ""
     nxt = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
     after = lines[idx + 2].strip() if idx + 2 < len(lines) else ""
-    if prev or nxt or not _BULLET_RE.match(after):
+    if prev or nxt or not _bullet(after):
         return False
     return not (_URL_RE.search(line) or _PRIORITY_RE.match(line)
                 or _RELEVANCE_RE.match(line))
@@ -138,7 +160,7 @@ def _etda_kinds(lines: list[str]) -> list[tuple[str, str]]:
         line = _strip_emphasis(raw)
         nxt = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
         atx = _ATX_RE.match(line)
-        bullet = _BULLET_RE.match(line)
+        bullet = _bullet(line)
         if not line or _RULE_RE.match(line) or _TABLE_ROW_RE.match(line):
             kinds.append(("skip", ""))
         elif _ARROW_RE.match(line):
@@ -148,9 +170,11 @@ def _etda_kinds(lines: list[str]) -> list[tuple[str, str]]:
             # under the report title in the list mail is wider than the title.
             kinds.append(("title" if nxt[0] == "=" else "section", line))
         elif atx:
-            kinds.append(("section" if len(atx.group(1)) <= 2 else "title", atx.group(2)))
+            # A closing run of hashes is optional in Markdown.
+            heading = atx.group(2).rstrip("#").rstrip()
+            kinds.append(("section" if len(atx.group(1)) <= 2 else "title", heading))
         elif bullet:
-            kinds.append(("title", bullet.group(1).strip()))
+            kinds.append(("title", bullet.strip()))
         elif _opens_section(lines, idx):
             kinds.append(("section", line))
         else:

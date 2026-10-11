@@ -151,8 +151,14 @@ def _unfence(text: str) -> str:
     that refusing it would mean check_relevance quietly rejecting every article
     and the draft features returning nothing at all.
     """
-    match = re.match(r"\s*```(?:json)?\s*(.*?)\s*```\s*$", text or "", flags=re.DOTALL)
-    return match.group(1) if match else text
+    # String checks rather than a pattern: a fence the model opens and never
+    # closes, over a long run of whitespace, made the regex this replaced
+    # backtrack for minutes.
+    answer = (text or "").strip()
+    if len(answer) < 6 or not (answer.startswith("```") and answer.endswith("```")):
+        return text
+    inner = answer[3:-3]
+    return (inner[4:] if inner.startswith("json") else inner).strip()
 
 
 def _json_object(text: str, feature: str) -> dict | None:
