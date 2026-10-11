@@ -2,8 +2,9 @@
 
 Their pages hid Delete and Edit once published, but the delete routes took the
 request anyway, and the detection engineering list still offered both. The
-threat actor profile and threat landscape routes already refused. MISP is
-patched out.
+alert and advisory reject routes took a published one too, which made it
+editable and deletable again. The threat actor profile and threat landscape
+routes already refused. MISP is patched out.
 
     python -m unittest tests.test_published_products_stay
 """
@@ -25,33 +26,36 @@ from webapp.routes import detection_eng, flash_intel, vea
 UUID = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
 
 PRODUCTS = [
-    (flash_intel, "/products/flash-intel", "get_fia", "delete_fia", misp_store.FIA_REVIEW_APPROVED),
-    (vea, "/products/vea", "get_vea", "delete_vea", misp_store.VEA_REVIEW_APPROVED),
-    (detection_eng, "/products/detection-eng", "get_der", "delete_der", misp_store.DER_REVIEW_APPROVED),
+    (flash_intel, "/products/flash-intel", "fia"),
+    (vea, "/products/vea", "vea"),
+    (detection_eng, "/products/detection-eng", "der"),
 ]
 
 
-class Delete(unittest.TestCase):
-    def deleted(self, routes, prefix, getter, deleter, state):
+class DeleteAndReject(unittest.TestCase):
+    def done(self, routes, prefix, kind, action, state):
+        """Whether the store was asked to delete or reject a record in this state."""
         app = Flask(__name__)
         app.secret_key = "test"
         app.register_blueprint(routes.bp)
         record = SimpleNamespace(review_state=state, fia_id="FIA-1", vea_id="VEA-1", der_id="DER-1")
-        with mock.patch.object(misp_store, getter, return_value=record), \
-             mock.patch.object(misp_store, deleter) as delete, \
+        with mock.patch.object(misp_store, f"get_{kind}", return_value=record), \
+             mock.patch.object(misp_store, f"{action}_{kind}") as write, \
              mock.patch.object(routes.audit, "record"):
-            app.test_client().post(f"{prefix}/{UUID}/delete")
-        return delete.called
+            app.test_client().post(f"{prefix}/{UUID}/{action}")
+        return write.called
 
     def test_a_published_product_is_refused(self):
-        for routes, prefix, getter, deleter, approved in PRODUCTS:
-            with self.subTest(product=prefix):
-                self.assertFalse(self.deleted(routes, prefix, getter, deleter, approved))
+        for routes, prefix, kind in PRODUCTS:
+            for action in ("delete", "reject"):
+                with self.subTest(product=prefix, action=action):
+                    self.assertFalse(self.done(routes, prefix, kind, action, "approved"))
 
-    def test_a_draft_is_still_deleted(self):
-        for routes, prefix, getter, deleter, _approved in PRODUCTS:
-            with self.subTest(product=prefix):
-                self.assertTrue(self.deleted(routes, prefix, getter, deleter, "draft"))
+    def test_a_draft_still_goes(self):
+        for routes, prefix, kind in PRODUCTS:
+            for action in ("delete", "reject"):
+                with self.subTest(product=prefix, action=action):
+                    self.assertTrue(self.done(routes, prefix, kind, action, "draft"))
 
 
 class DetectionEngineeringList(unittest.TestCase):

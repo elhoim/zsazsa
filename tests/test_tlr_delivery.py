@@ -1,6 +1,6 @@
 """A threat landscape report goes out as a PDF and by mail and Mattermost, under its TLP.
 
-The PDF carries the TLP banner and renders its fields as Markdown. Publishing
+The PDF shows the TLP banner and renders its fields as Markdown. Publishing
 hands delivery to a background job, which sends only to the stakeholders who
 are subscribed, cleared for the report's TLP and in its audience; a resend
 does the same. The mail puts the TLP in its subject and lifts the metadata into

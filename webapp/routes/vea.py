@@ -420,6 +420,10 @@ def reject(id):
     vea = misp_store.get_vea(id)
     if vea is None:
         return "VEA not found", 404
+    # Rejecting a published advisory would make it editable and deletable again.
+    if vea.review_state == misp_store.VEA_REVIEW_APPROVED:
+        flash("Published advisories cannot be rejected.", "warning")
+        return redirect(url_for("vea.detail", id=id))
     reason = request.form.get("reason", "").strip()
     try:
         misp_store.reject_vea(id, reason=reason)

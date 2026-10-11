@@ -980,9 +980,9 @@ def _stakeholder_event(uuid):
 
 
 def _is_record(event, object_name, tag):
-    """Whether an event is a zsazsa record of one type: it carries that type's
+    """Whether an event is a zsazsa record of one type: it has that type's
     zsazsa object or its tag. Either is enough, since flash intel alerts from
-    older analyser runs carry no object, and a tag renamed in the settings
+    older analyser runs have no object, and a tag renamed in the settings
     leaves older records with the one they were created with."""
     return _get_obj(event, object_name) is not None or _event_has_tag(event, tag)
 
@@ -2248,7 +2248,7 @@ def delete_indicator_feed(uuid):
 
 
 def get_indicator_feed_by_token(token):
-    """The feed whose public URL carries this token, or None. A feed with its
+    """The feed whose public URL holds this token, or None. A feed with its
     public URL switched off is not found."""
     token = (token or "").strip()
     if not token:
@@ -6794,8 +6794,8 @@ def _publish_briefing(uuid):
         raise RuntimeError(f"Briefing event {uuid} not found")
     briefing = _briefing_ns(event)
 
-    # The object is written whole, so everything it holds has to be carried
-    # across; only the review state and the approver change here.
+    # The object is written whole, so everything it holds has to be kept;
+    # only the review state and the approver change here.
     data = {field: getattr(briefing, field) for field in BRIEFING_FIELDS}
     data["review_state"] = BRIEFING_REVIEW_PUBLISHED
     data["approved_by"] = misp_session.current_user_email()

@@ -70,8 +70,8 @@ jobs:
             exit 1
           fi
 
-      # Runtime output and credentials, whatever .gitignore says: logs carry
-      # request URLs and hostnames, databases carry audit trails and users.
+      # Runtime output and credentials, whatever .gitignore says: logs hold
+      # request URLs and hostnames, databases hold audit trails and users.
       - name: No logs, databases, keys or live config
         run: |
           found=$(git ls-files | grep -E '\.log(\.[0-9]+)?$|\.(db|sqlite3?|pem|key)$|^config/__init__\.py$' || true)

@@ -8,7 +8,7 @@ and without DOMPurify the text is shown as text.
 
 Both libraries load from one include, _markdown_js.html, pinned by hash, and
 pages render through its zsazsaRenderMarkdown, so the fallback and the pin
-cannot drift apart page by page again. Every script from a CDN carries a hash.
+cannot drift apart page by page again. Every script from a CDN is pinned by hash.
 
     python -m unittest tests.test_markdown_sanitising
 """

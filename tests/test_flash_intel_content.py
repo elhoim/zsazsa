@@ -360,7 +360,7 @@ class ChangingTheReviewStateKeepsTheContent(unittest.TestCase):
     def _rebuilt(self, state=misp_store.FIA_REVIEW_APPROVED):
         """The FIA object as it stands after a review-state change."""
         stored = misp_store._fia_obj(_filled_fia_data())
-        stored.id = "7"  # only objects fetched from MISP carry one
+        stored.id = "7"  # only objects fetched from MISP have one
         uuid = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
         event = SimpleNamespace(uuid=uuid, id="42", attributes=[], event_reports=[],
                                 objects=[stored], published=False, publish_timestamp=None,

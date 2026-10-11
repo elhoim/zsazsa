@@ -1,9 +1,10 @@
 # Changelog
 
-## 1.0.7 - development
+## 1.0.7
 
-The settings pages are now for MISP site admins only, and they no longer show
-stored keys and passwords. Upgrading is recommended.
+Threat landscape reports follow ENISA's method, from triaged events to a PDF.
+The settings pages are for MISP site admins only and hide stored keys.
+Seven reported security issues are fixed, and CDN files are pinned by hash.
 
 ### Upgrading
 
@@ -13,11 +14,11 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
   Other users no longer see the Settings menu. Installs without single sign-on
   are unchanged.
 - Saved keys and passwords show as "Configured". Leave a field empty to keep
-  it, use "Remove" to clear it, and enter it again when you change its address.
+  it, use "Remove" to clear it.
 - An indicator feed tracks if it has a public URL. Existing feeds
-  keep their public URL,  until someone with MISP publish rights switches it off. A new
+  keep their public URL, until someone with MISP publish rights switches it off. A new
   feed starts with it on only when a publisher creates it.
-- zsazsa now only reads, changes or deletes an event when it carries the
+- zsazsa now only reads, changes or deletes an event when it has the
   zsazsa object or tag of the record type the page is about.
 
 ### Added
@@ -31,9 +32,8 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
 - A feed's public URL can be switched on or off on the feed's page, by users
   with MISP publish rights only.
 - The response of an RFI can be edited on the RFI's page.
-- A vulnerability advisory is built with AI from its source events header, the
+- A vulnerability advisory is built with AI from its source events, the
   way a flash intel alert is done.
-
 
 ### Fixed
 
@@ -72,8 +72,8 @@ Pull and restart, there is nothing to migrate. A few things behave differently:
   unclosed code fence (GHSA-v4mq-r4g8-g35w). Parsing now takes time linear in
   the length of the text and reads every edition as before. / reported by
   @elhoim
-- The scripts and stylesheets zsazsa loads from cdnjs carry an integrity hash,
-  so the browser refuses a file that was changed there.
+- The scripts and stylesheets zsazsa loads from cdnjs are pinned by hash, so
+  the browser refuses a file that was changed there.
 
 ## 1.0.6
 

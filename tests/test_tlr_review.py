@@ -5,7 +5,7 @@ each step logged with who, when and why; only an approved report is published,
 and approving takes MISP publish rights. Once approved it cannot be changed
 until it is sent back to draft. A published report takes dated corrections.
 Its dataset annex and its ATT&CK Navigator layer are built from the events left
-in the analysis, and the layer carries the report's TLP. MISP is patched out.
+in the analysis, and the layer is marked with the report's TLP. MISP is patched out.
 
     python -m unittest tests.test_tlr_review
 """

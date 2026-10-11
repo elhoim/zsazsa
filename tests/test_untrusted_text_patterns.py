@@ -35,7 +35,7 @@ class Linear(unittest.TestCase):
         self.assertLess(time.perf_counter() - started, 1, repr(text)[:60])
 
     def test_the_bullet_rule_and_overview_patterns(self):
-        # Many lines, each under the parser's length cap, as a mail can carry
+        # Many lines, each under the parser's length cap, as a mail can hold
         # without any of them being cut short.
         blank = " " * 19_000
         for text in ("".join(f"* {blank}*x\n" for _ in range(20)),

@@ -570,8 +570,8 @@ def correction(id):
 def navigator_layer(id):
     """The techniques of the report's events as an ATT&CK Navigator layer, scored by how many events use each.
 
-    The layer leaves zsazsa as a file, so it carries the report's TLP in its
-    name, its description and its metadata.
+    The layer leaves zsazsa as a file, so its name, description and metadata
+    all state the report's TLP.
     """
     tlr = misp_store.get_tlr(id)
     if tlr is None:

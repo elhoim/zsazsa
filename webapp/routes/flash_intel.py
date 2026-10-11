@@ -359,6 +359,10 @@ def reject(id):
     fia = misp_store.get_fia(id)
     if fia is None:
         return "FIA not found", 404
+    # Rejecting a published alert would make it editable and deletable again.
+    if fia.review_state == misp_store.FIA_REVIEW_APPROVED:
+        flash("Published alerts cannot be rejected.", "warning")
+        return redirect(url_for("flash_intel.detail", id=id))
     reason = request.form.get("reason", "").strip()
     try:
         misp_store.reject_fia(id, reason=reason)

@@ -4,7 +4,7 @@ The routes pass the id from the URL to the store, which acts on it with
 zsazsa's own MISP key, and MISP resolves numeric event ids too. Any MISP user
 could delete or overwrite events that were never zsazsa records, or reach a
 published record through the routes of another type. An event now only counts
-as a record when it carries that record type's zsazsa object or its tag, and an
+as a record when it has that record type's zsazsa object or its tag, and an
 attachment, note or scope item only when it belongs to the record named in the
 URL.
 
@@ -39,7 +39,7 @@ RECORDS = {
 
 
 def _event(object_name=None, tag=None):
-    """A MISP event, carrying the given zsazsa object and tag, or neither."""
+    """A MISP event with the given zsazsa object and tag, or neither."""
     event = MISPEvent()
     event.uuid = UUID
     event.id = "42"

@@ -95,13 +95,13 @@ class InPlace(unittest.TestCase):
         self.assertEqual(misp_store._obj_attr(obj, "enabled"), "false", "a save keeps the source off")
 
     def test_switching_a_collection_source_off_keeps_its_fields(self):
-        stored = misp_store._collection_source_obj({"name": "ISAC", "owner": "SOC", "description": "Mails",
-                                                    "source_reliability": "B"})
+        stored = misp_store._collection_source_obj({"name": "ISAC", "owner": "SOC", "location": "isac@example.org",
+                                                    "description": "Mails", "source_reliability": "B"})
         misp = self.store(stored)
         misp_store.toggle_collection_source(UUID, False)
         obj = self.written(misp, stored)
         self.assertEqual({a.object_relation: a.value for a in obj.attributes},
-                         {"name": "ISAC", "owner": "SOC", "description": "Mails",
+                         {"name": "ISAC", "owner": "SOC", "location": "isac@example.org", "description": "Mails",
                           "source-reliability": "B", "enabled": "false"})
 
     def test_a_field_cleared_on_save_is_removed_from_the_stored_object(self):

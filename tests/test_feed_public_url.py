@@ -1,7 +1,7 @@
 """A feed's public URL is a setting only a publisher changes.
 
 The public URL hands a feed's indicators to anyone holding the link, without a
-login. Each feed now carries a public-url setting on its MISP object, and only
+login. Each feed now has a public-url setting on its MISP object, and only
 a user with MISP publish rights switches it on or off. A feed a publisher
 creates starts with it on, one anyone else creates starts with it off, and
 feeds saved before the setting existed keep their URL on. While it is off, the
