@@ -1159,7 +1159,7 @@ def rulezet_attack_lookup():
 @bp.route("/rulezet-validate", methods=["POST"])
 @rate_limited("api_rulezet_validate", limit=20, window_s=60)
 def rulezet_validate():
-    """Proxy a dry-run rule-syntax check to Rulezet — nothing is ever saved.
+    """Proxy a dry-run rule-syntax check to Rulezet; nothing is ever saved.
 
     POST JSON: {"format": "sigma", "content": "..."}
     Returns: {"ok": true, "valid": bool, "errors": [...], "warnings": [...]}
