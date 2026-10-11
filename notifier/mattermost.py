@@ -44,7 +44,7 @@ def _webhook_host(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}" if parts.netloc else "webhook"
 
 
-def _without_secret(message: str, url: str) -> str:
+def without_secret(message: str, url: str) -> str:
     """Strip a webhook's secret path out of a message.
 
     requests puts the failing URL in its exception text, which for a Mattermost
@@ -69,7 +69,7 @@ def _post(targets: list[dict], payload: dict, label: str) -> bool:
             sent_any = True
         except requests.RequestException as e:
             logger.error("Mattermost notification failed (%s) to %s: %s",
-                         label, _webhook_host(url), _without_secret(str(e), url))
+                         label, _webhook_host(url), without_secret(str(e), url))
     return sent_any
 
 

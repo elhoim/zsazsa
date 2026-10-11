@@ -1,0 +1,29 @@
+# Findings that stay in the history and are accepted as known.
+#
+# data/analyser.log.1, committed in 7f24e1c, held two Mattermost incoming
+# webhooks of a local test environment (GHSA-64wh-phxq-pw33). The file is
+# gone from the tree; any new finding still fails the scan.
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3495
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3497
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3499
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3531
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3871
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3912
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3927
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3942
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3987
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3989
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:3992
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:4007
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:4009
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5137
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5139
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5141
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5663
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5666
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:5672
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:6761
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:9149
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:9151
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:34154
+7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:34499

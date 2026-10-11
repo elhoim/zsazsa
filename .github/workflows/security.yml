@@ -46,8 +46,40 @@ jobs:
 
       # config/__init__.py holds the MISP API keys and is gitignored, but the
       # ignore rules only cover the names we thought of; this covers the rest.
+      # .gitleaks.toml adds what the default rules miss, such as Mattermost
+      # webhooks, and .gitleaksignore lists history findings already rotated.
       - name: Scan history
         run: ./gitleaks git . --redact --verbose
+
+  tracked-files:
+    name: files that do not belong in git
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A file committed before .gitignore covered it stays tracked, and the
+      # ignore rule then hides nothing. That is how data/analyser.log.1, with
+      # live webhook URLs in it, was published (GHSA-64wh-phxq-pw33).
+      - name: Nothing tracked that .gitignore excludes
+        run: |
+          tracked=$(git ls-files -ci --exclude-standard)
+          if [ -n "$tracked" ]; then
+            echo "::error::Tracked although .gitignore excludes them:"
+            echo "$tracked"
+            exit 1
+          fi
+
+      # Runtime output and credentials, whatever .gitignore says: logs carry
+      # request URLs and hostnames, databases carry audit trails and users.
+      - name: No logs, databases, keys or live config
+        run: |
+          found=$(git ls-files | grep -E '\.log(\.[0-9]+)?$|\.(db|sqlite3?|pem|key)$|^config/__init__\.py$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::Files that must not be committed:"
+            echo "$found"
+            exit 1
+          fi
 
   dependencies:
     name: known vulnerabilities

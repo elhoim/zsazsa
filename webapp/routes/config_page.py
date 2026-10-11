@@ -1582,7 +1582,9 @@ def ping_notification_channel():
         r.raise_for_status()
         return jsonify({"ok": True})
     except requests.RequestException as exc:
-        return jsonify({"ok": False, "error": str(exc)})
+        # The settings never send a stored webhook back, and requests names the URL.
+        from notifier.mattermost import without_secret
+        return jsonify({"ok": False, "error": without_secret(str(exc), url)})
 
 
 @bp.route("/config/save-flowintel-instance", methods=["POST"])

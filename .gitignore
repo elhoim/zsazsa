@@ -31,6 +31,8 @@ data/state.json
 certs/
 
 *.log
+# Rotated logs: analyser.log.1 was committed once, webhook URLs and all.
+*.log.*
 logs/
 
 .vscode/
