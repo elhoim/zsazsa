@@ -761,13 +761,13 @@ def fetch_url():
         # rebind, so it is fetched as-is.
         try:
             ipaddress.ip_address(host)
-            session = cf_requests.Session()
+            pinned = {}
         except ValueError:
-            resolve_opt = {CurlOpt.RESOLVE: [f"{host}:{port}:{','.join(ips)}"]}
-            session = cf_requests.Session(curl_options=resolve_opt)
+            pinned = {CurlOpt.RESOLVE: [f"{host}:{port}:{','.join(ips)}"]}
         # allow_redirects=False so a public URL cannot 30x-redirect the fetch
         # to an internal target that bypasses the pre-fetch validation above.
-        response = session.get(url, impersonate="chrome124", timeout=20, allow_redirects=False)
+        with cf_requests.Session(curl_options=pinned) as session:
+            response = session.get(url, impersonate="chrome124", timeout=20, allow_redirects=False)
         rawhtml = response.text
 
         soup = BeautifulSoup(rawhtml, "html.parser")
