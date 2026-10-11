@@ -14,18 +14,18 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("threat_landscape", __name__, url_prefix="/products/threat-landscape")
 
 _TLR_QUEUE_TAG = 'zsazsa:product="threat-landscape-report"'
+QUEUE_SIZE = 500
 PRODUCT_NAME = "Threat landscape report"
 
 
-def _queued_events(tlrs):
-    """Collection events tagged for the threat landscape queue that no report holds yet.
+def _queued_events(tlrs, limit=QUEUE_SIZE):
+    """The newest collection events tagged for the threat landscape queue that no report holds yet.
 
     An event leaves the queue when it becomes an entry of a report, and comes
     back if that report is deleted. Its tag stays, as the mark that it fed one.
     """
     held = {e.event_uuid for t in tlrs for e in t.entries}
-    events = collection_cache.get_events(collection_cache.source_ids(), [_TLR_QUEUE_TAG], 500)
-    return [ev for ev in events if ev["uuid"] not in held]
+    return collection_cache.get_events(collection_cache.source_ids(), [_TLR_QUEUE_TAG], limit, exclude=held)
 
 
 def _source_reliabilities():
@@ -109,10 +109,14 @@ def _statistics(entries, previous=None):
     return stats
 
 
-def _previous_report(tlr, tlrs):
-    """The report before this one, by its sequence number, to compare the counts with."""
-    earlier = [t for t in tlrs if t.tlr_id < tlr.tlr_id]
-    return max(earlier, key=lambda t: t.tlr_id, default=None)
+def _previous_report(tlrs, before=None):
+    """The last published report, or the last one numbered before ``before``.
+
+    A draft is no baseline: its dataset and its findings can still change.
+    """
+    published = [t for t in tlrs if t.review_state == misp_store.TLR_REVIEW_PUBLISHED
+                 and (before is None or t.tlr_id < before.tlr_id)]
+    return max(published, key=lambda t: t.tlr_id, default=None)
 
 
 def _outside_scope(tlr, entry):
@@ -168,7 +172,6 @@ def _report_context():
 
 def _wizard_context(tlr):
     """What the wizard needs besides the report itself."""
-    linked = tlr.linked_pir_uuids if tlr else []
     included = [e for e in tlr.entries if not e.excluded] if tlr else []
     return {
         "tlp_levels": misp_store.TLR_TLP_LEVELS,
@@ -176,9 +179,7 @@ def _wizard_context(tlr):
         "intel_levels": INTEL_LEVELS,
         "threat_types": misp_store.TLR_THREAT_TYPES,
         "estimative_confidence": misp_store.ESTIMATIVE_CONFIDENCE,
-        # An agreed PIR, or one the report is already linked to whatever its
-        # status has become, as list_selectable_pirs() does for one PIR.
-        "pirs": [p for p in misp_store.list_pirs() if p.status == "Active" or p.uuid in linked],
+        "pirs": misp_store.list_selectable_pirs(*(tlr.linked_pir_uuids if tlr else [])),
         "sector_items": misp_store.galaxy_sectors(),
         "geo_items": misp_store.galaxy_geography(),
         "type_counts": Counter(e.threat_type for e in included if e.threat_type),
@@ -247,18 +248,22 @@ def _start_delivery(tlr, reason):
 @bp.route("/")
 def review():
     tlrs = misp_store.list_tlrs()
-    queued = _queued_events(tlrs)
+    # One more than is shown, to know whether older events are waiting too.
+    queued = _queued_events(tlrs, QUEUE_SIZE + 1)
+    more_waiting = len(queued) > QUEUE_SIZE
+    queued = queued[:QUEUE_SIZE]
     for ev in queued:
         ev["context"] = misp_store.context_from_tags(ev["tags"])
     shown = _filter_queue(queued, request.args)
     return render_template(
-        "threat_landscape/list.html", tlrs=tlrs, queued=queued, shown=shown,
+        "threat_landscape/list.html", tlrs=tlrs, queued=queued, shown=shown, more_waiting=more_waiting,
         filters=request.args,
         sources=sorted({ev["source_id"] for ev in queued}),
         sectors=sorted({v for ev in queued for v in ev["context"]["sectors"]}),
         actors=sorted({v for ev in queued for v in ev["context"]["threat_actors"]}),
         drafts=[t for t in tlrs if t.review_state not in misp_store.TLR_LOCKED_STATES],
         locked_states=misp_store.TLR_LOCKED_STATES,
+        can_publish=misp_session.current_user_can_publish(),
     )
 
 
@@ -317,8 +322,7 @@ def wizard_new():
         except Exception as exc:
             flash(f"Could not create TLR: {exc}", "warning")
     tlrs = misp_store.list_tlrs()
-    last = max((t for t in tlrs if t.review_state == misp_store.TLR_REVIEW_PUBLISHED),
-               key=lambda t: t.tlr_id, default=None)
+    last = _previous_report(tlrs)
     return render_template(
         "threat_landscape/wizard.html", tlr=None, is_edit=False, queued=_queued_events(tlrs),
         last=last, last_feedback=misp_store.list_product_feedback(last.uuid) if last else [],
@@ -441,7 +445,7 @@ def entries(id):
             logger.warning("TLR %s triage failed: %s", id, exc)
             flash(f"Could not save the triage: {exc}", "warning")
         return redirect(url_for("threat_landscape.entries", id=id))
-    previous = _previous_report(tlr, misp_store.list_tlrs())
+    previous = _previous_report(misp_store.list_tlrs(), before=tlr)
     return render_template(
         "threat_landscape/entries.html", tlr=tlr, locked=locked, previous=previous,
         stats=_statistics(tlr.entries, previous), entry_questions=misp_store.TLR_ENTRY_QUESTIONS,
@@ -572,8 +576,8 @@ def navigator_layer(id):
     tlr = misp_store.get_tlr(id)
     if tlr is None:
         return "TLR not found", 404
-    counts = Counter(misp_store.technique_id(t) for e in tlr.entries if not e.excluded
-                     for t in e.techniques if misp_store.technique_id(t))
+    ids = (misp_store.technique_id(t) for e in tlr.entries if not e.excluded for t in e.techniques)
+    counts = Counter(technique for technique in ids if technique)
     tlp = f"TLP:{tlr.tlp.upper()}"
     layer = {
         "name": f"{tlr.tlr_id} {tlr.title} ({tlp})",

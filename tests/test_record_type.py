@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from flask import Flask
-from pymisp import MISPAttribute, MISPEvent
+from pymisp import MISPAttribute, MISPEvent, PyMISP
 
 from webapp import misp_store
 from webapp.routes import flash_intel, indicator_feed, requirements, rfi, threat_actor_profile
@@ -54,7 +54,7 @@ def _event(object_name=None, tag=None):
 
 class StoreCase(unittest.TestCase):
     def misp_returning(self, event):
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = event
         patcher = mock.patch.object(misp_store, "_misp", return_value=misp)
         patcher.start()
@@ -193,7 +193,7 @@ class Routes(unittest.TestCase):
     def test_deleting_an_event_through_the_feed_route_deletes_nothing(self):
         """The advisory's reproduction, against the real store."""
         client = _client(indicator_feed.bp)
-        misp = mock.MagicMock()
+        misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = _event()
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
              mock.patch.object(misp_store, "profiles_using_indicator_feed", return_value=[]), \

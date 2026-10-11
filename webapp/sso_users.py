@@ -10,10 +10,15 @@ import sqlite3
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import config
 from core.db import row_connection as _conn
 from webapp import org_store
 
 logger = logging.getLogger(__name__)
+
+# The databases known to hold a recognised user. Rows are never deleted, so
+# once any_recorded() is true it stays true, and need not be asked every request.
+_recognised_in = set()
 
 
 def init_db():
@@ -65,20 +70,32 @@ def record_sighting(user):
                 role = excluded.role,
                 last_seen = excluded.last_seen
         """, (email, misp_user_id, organisation, organisation_uuid, role, now, now))
+    _recognised_in.add(config.DB_FILE)
 
 
 def any_recorded():
-    """Whether any MISP user has been recognised through a session."""
-    with _conn() as db:
-        try:
-            return db.execute("SELECT 1 FROM sso_users LIMIT 1").fetchone() is not None
-        except sqlite3.OperationalError as exc:
-            # The table is created when the app first starts, and before that
-            # nobody has been recognised. Any other error, such as a locked
-            # database, is not an answer.
-            if "no such table" not in str(exc):
-                raise
+    """Whether any MISP user has been recognised through a session.
+
+    It decides whether a request without a session is trusted, and every page
+    asks, so a database that cannot be read answers yes: that request is then
+    refused what needs trust, rather than every page failing.
+    """
+    if config.DB_FILE in _recognised_in:
+        return True
+    try:
+        with _conn() as db:
+            found = db.execute("SELECT 1 FROM sso_users LIMIT 1").fetchone() is not None
+    except sqlite3.Error as exc:
+        # The table is created when the app first starts, and before that
+        # nobody has been recognised.
+        if "no such table" in str(exc):
             return False
+        logger.warning("could not read the recognised users, so a request without a MISP session "
+                       "is not trusted: %s", exc)
+        return True
+    if found:
+        _recognised_in.add(config.DB_FILE)
+    return found
 
 
 def list_sso_users():

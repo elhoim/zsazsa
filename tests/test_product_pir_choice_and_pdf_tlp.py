@@ -33,9 +33,9 @@ _PIRS = [
 
 
 class OnlyAgreedPirsCanBeLinked(unittest.TestCase):
-    def _selectable(self, linked=""):
+    def _selectable(self, *linked):
         with mock.patch.object(misp_store, "list_pirs", return_value=_PIRS):
-            return [p.pir_id for p in misp_store.list_selectable_pirs(linked)]
+            return [p.pir_id for p in misp_store.list_selectable_pirs(*linked)]
 
     def test_a_pir_still_in_intake_cannot_be_picked(self):
         self.assertEqual(self._selectable(), ["PIR-00001", "PIR-00005"])
@@ -48,6 +48,10 @@ class OnlyAgreedPirsCanBeLinked(unittest.TestCase):
         without saying so."""
         self.assertEqual(self._selectable("pir-00002"),
                          ["PIR-00001", "PIR-00002", "PIR-00005"])
+
+    def test_a_landscape_report_keeps_every_pir_it_answers(self):
+        self.assertEqual(self._selectable("pir-00002", "pir-00004"),
+                         ["PIR-00001", "PIR-00002", "PIR-00004", "PIR-00005"])
 
     def test_a_link_to_a_pir_that_no_longer_exists_adds_nothing(self):
         self.assertEqual(self._selectable("gone"), ["PIR-00001", "PIR-00005"])

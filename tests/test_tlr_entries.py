@@ -115,11 +115,10 @@ class UsedIn(unittest.TestCase):
 
 class Queue(unittest.TestCase):
     def test_an_event_a_report_holds_leaves_the_queue(self):
-        events = [_cached("e1"), _cached("e2")]
-        with mock.patch.object(threat_landscape.collection_cache, "get_events", return_value=events), \
+        with mock.patch.object(threat_landscape.collection_cache, "get_events", return_value=[]) as get, \
              mock.patch.object(threat_landscape.collection_cache, "source_ids", return_value=["scraper"]):
-            queued = threat_landscape._queued_events([_report([_entry("e1")])])
-        self.assertEqual([ev["uuid"] for ev in queued], ["e2"])
+            threat_landscape._queued_events([_report([_entry("e1")])])
+        self.assertEqual(get.call_args.kwargs["exclude"], {"e1"})
 
     def test_the_filters_narrow_the_queue(self):
         queued = [_cached("e1", ['misp-galaxy:sector="Energy"'], date="2026-07-01"),
@@ -257,10 +256,14 @@ class Statistics(unittest.TestCase):
                                                    _entry("e2", threat_type="Phishing")], previous))
         self.assertEqual(stats["Threat type"], [("Ransomware", 1, 1), ("Phishing", 1, 0)])
 
-    def test_the_previous_report_is_the_one_numbered_before(self):
-        reports = [SimpleNamespace(tlr_id=n) for n in ("TLR-00003", "TLR-00005", "TLR-00009")]
-        self.assertEqual(threat_landscape._previous_report(reports[2], reports).tlr_id, "TLR-00005")
-        self.assertIsNone(threat_landscape._previous_report(reports[0], reports))
+    def test_the_previous_report_is_the_last_one_published_before(self):
+        reports = [SimpleNamespace(tlr_id=n, review_state=s) for n, s in (
+            ("TLR-00003", "published"), ("TLR-00005", "published"), ("TLR-00007", "internal-review"),
+            ("TLR-00009", "draft"), ("TLR-00011", "published"))]
+        self.assertEqual(threat_landscape._previous_report(reports, before=reports[3]).tlr_id, "TLR-00005",
+                         "a report still in review is no baseline")
+        self.assertIsNone(threat_landscape._previous_report(reports, before=reports[0]))
+        self.assertEqual(threat_landscape._previous_report(reports).tlr_id, "TLR-00011")
 
 
 class Pages(unittest.TestCase):
@@ -307,6 +310,15 @@ class Pages(unittest.TestCase):
         targets = [o["value"] for o in page.select("select[name=target] option")]
         self.assertEqual(targets, ["", UUID])
         self.assertIn("Energy", [o.get_text() for o in page.select("select[name=sector] option")])
+
+    def test_a_full_queue_says_more_events_are_waiting(self):
+        queued = [_cached(f"e{i}") for i in range(3)]
+        with mock.patch.object(threat_landscape, "QUEUE_SIZE", 2):
+            page = self.page("/products/threat-landscape/", queued=queued)
+            self.assertEqual(len(page.select("input.tlr-pick")), 2)
+            self.assertIn("More events are waiting than the 2 newest shown here", page.get_text(" ", strip=True))
+            page = self.page("/products/threat-landscape/", queued=queued[:2])
+            self.assertNotIn("More events are waiting", page.get_text())
 
     def test_the_dataset_page_shows_triage_and_counts(self):
         page = self.page(f"/products/threat-landscape/{UUID}/entries")
@@ -375,6 +387,13 @@ class Pages(unittest.TestCase):
     def test_editing_drafts_from_the_entries(self):
         page = self.page(f"/products/threat-landscape/{UUID}/edit")
         self.assertEqual(page.select_one("#tlr-draft-btn")["data-tlr"], UUID)
+
+    def test_an_audience_typed_before_the_boxes_survives_an_edit(self):
+        """The audience was free text once; a save must not drop what it said."""
+        self.report.audience = "SOC, Board of directors"
+        page = self.page(f"/products/threat-landscape/{UUID}/edit")
+        ticked = [box["value"] for box in page.select("input[name=audience][checked]")]
+        self.assertEqual(ticked, ["SOC", "Board of directors"])
 
 
 class DraftTrends(unittest.TestCase):

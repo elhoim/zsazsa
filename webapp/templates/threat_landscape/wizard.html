@@ -108,7 +108,9 @@
               <label class="form-label">Audience</label>
               {% set current_audiences = (tlr.audience or '').split(', ') if tlr else [] %}
               <div class="d-flex flex-wrap gap-2">
-                {% for a in audiences %}
+                {# The audience was free text before it became these boxes, so an
+                   older report's own wording stays ticked rather than dropped. #}
+                {% for a in audiences + current_audiences | reject('in', audiences) | select | list %}
                 <div class="form-check form-check-inline me-0">
                   <input class="form-check-input" type="checkbox" name="audience" value="{{ a }}"
                          id="aud-{{ loop.index }}" {{ 'checked' if a in current_audiences }}>

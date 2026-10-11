@@ -44,7 +44,7 @@
         <p class="small text-muted">
           Counted over the {{ tlr.entries | rejectattr('excluded') | list | length }} events in the analysis.
           An event can count towards several sectors, actors or techniques.
-          {% if previous %}The second column is {{ previous.tlr_id }}, the report before this one.{% endif %}
+          {% if previous %}The second column is {{ previous.tlr_id }}, the last report published before this one.{% endif %}
         </p>
         <div class="row g-3">
           {% for heading, counts in stats %}
@@ -150,7 +150,7 @@
           <tr class="{{ 'text-muted opacity-50' if e.excluded }}" {% if e.uuid in outside_scope %}data-outside-scope{% endif %}>
             <td><input type="checkbox" class="form-check-input entry-pick"></td>
             <td style="min-width:14rem;">
-              <a href="{{ url_for('data_collection.index') }}#{{ e.event_uuid }}" class="text-decoration-none entry-title">{{ e.event_info or '(untitled)' }}</a>
+              <a href="{{ url_for('data_collection.detail', uuid=e.event_uuid, source=e.source_id or None) }}" class="text-decoration-none entry-title">{{ e.event_info or '(untitled)' }}</a>
               <div class="text-muted" style="font-size:.72rem;">
                 {{ e.event_date or '-' }} · {{ e.source_id or '-' }}
                 {% if e.uuid in outside_scope %}<span class="badge text-bg-warning ms-1">outside the scope</span>{% endif %}

@@ -15,9 +15,16 @@
 {% if queued %}
 <div class="card content-card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="fas fa-map me-2"></i>Queue <span class="badge text-bg-secondary ms-1">{{ queued | length }}</span></span>
+    <span><i class="fas fa-map me-2"></i>Queue <span class="badge text-bg-secondary ms-1">{{ queued | length }}{{ '+' if more_waiting }}</span></span>
     <span class="text-muted small">An event leaves the queue once a report holds it.</span>
   </div>
+  {% if more_waiting %}
+  <div class="alert alert-warning small rounded-0 border-start-0 border-end-0 mb-0">
+    <i class="fas fa-triangle-exclamation me-1"></i>
+    More events are waiting than the {{ queued | length }} newest shown here, and the filters only search these.
+    The older ones appear as these go into a report.
+  </div>
+  {% endif %}
 
   <form method="get" class="card-body border-bottom row g-2 align-items-end">
     <div class="col-md-2">
@@ -65,7 +72,7 @@
             <td><input type="checkbox" class="form-check-input tlr-pick" name="event" value="{{ ev.uuid }}"></td>
             <td class="text-muted small" style="white-space:nowrap;">{{ ev.date or '-' }}</td>
             <td>
-              <a href="{{ url_for('data_collection.index') }}#{{ ev.uuid }}" class="text-decoration-none">
+              <a href="{{ url_for('data_collection.detail', uuid=ev.uuid, source=ev.source_id or None) }}" class="text-decoration-none">
                 {{ ev.info or '(untitled)' }}
               </a>
             </td>
@@ -164,7 +171,7 @@
                 <a href="{{ url_for('threat_landscape.pdf', id=t.uuid) }}" class="btn btn-xs btn-outline-secondary" title="Download PDF">
                   <i class="fas fa-file-pdf"></i>
                 </a>
-                {% if published %}
+                {% if published and can_publish %}
                 <form method="post" action="{{ url_for('threat_landscape.resend', id=t.uuid) }}"
                       class="d-inline" data-submit-confirm="Resend {{ t.tlr_id }} to its recipients?">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

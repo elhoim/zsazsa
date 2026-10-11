@@ -1,7 +1,7 @@
-"""A published threat landscape report offers no Edit (GHSA-rqcp-gv9j-jgv6).
+"""A threat landscape report page offers only what its routes will do.
 
-The edit route refuses a published report; these check the pages stop offering
-it too, the way the briefing and alert pages already do.
+A published report offers no Edit (GHSA-rqcp-gv9j-jgv6), the way the briefing
+and alert pages already do, and only a publisher is offered Resend.
 
     python -m unittest tests.test_threat_landscape_pages
 """
@@ -66,6 +66,19 @@ class Pages(unittest.TestCase):
         for path in (f"/products/threat-landscape/{UUID}", "/products/threat-landscape/"):
             with self.subTest(path=path):
                 self.assertTrue(self.edit_links(path, _report("draft")))
+
+    def test_resend_is_offered_only_to_publishers(self):
+        """The route refuses anyone else, so the page should not invite it."""
+        for can_publish in (True, False):
+            for path in (f"/products/threat-landscape/{UUID}", "/products/threat-landscape/"):
+                with self.subTest(can_publish=can_publish, path=path), \
+                     mock.patch.object(misp_store, "get_tlr", return_value=_report("published")), \
+                     mock.patch.object(misp_store, "list_tlrs", return_value=[_report("published")]), \
+                     mock.patch.object(threat_landscape.misp_session, "current_user_can_publish",
+                                       return_value=can_publish):
+                    page = BeautifulSoup(self.client.get(path).data, "html.parser")
+                    resend = page.select_one(f'form[action="/products/threat-landscape/{UUID}/resend"]')
+                    self.assertEqual(resend is not None, can_publish)
 
 
 if __name__ == "__main__":

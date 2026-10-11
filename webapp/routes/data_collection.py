@@ -981,8 +981,7 @@ def _newsletter_push(source: str):
         )
         if refused:
             msg += " " + _refused_message(refused)
-        flash(
-            msg + archived, "warning")
+        flash(msg + archived, "warning")
     elif no_subscriber == published:
         # Naming where we published is the difference between "the service is
         # down" and "the service is up, on another Redis", which look identical

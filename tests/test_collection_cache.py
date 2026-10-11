@@ -65,6 +65,16 @@ class GetEvents(unittest.TestCase):
         matches = collection_cache.get_events(["src"], ["a", "b"], limit=10)
         self.assertEqual([m["uuid"] for m in matches], ["both"])
 
+    def test_excluded_events_do_not_take_a_place_under_the_limit(self):
+        """The threat landscape queue leaves out events a report holds; counted
+        first and dropped after, they pushed waiting events out of the result."""
+        for i in range(5):
+            collection_cache.insert_event(_row(f"e-{i}", f"2024-04-0{i + 1}", ["q"]))
+        for tags in (["q"], []):
+            with self.subTest(tags=tags):
+                events = collection_cache.get_events(["src"], tags, limit=2, exclude={"e-4", "e-3"})
+                self.assertEqual([e["uuid"] for e in events], ["e-2", "e-1"])
+
     def test_no_source_ids_returns_empty(self):
         self.assertEqual(collection_cache.get_events([], ["a"], limit=5), [])
 

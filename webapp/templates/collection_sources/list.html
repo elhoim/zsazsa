@@ -1375,7 +1375,8 @@
   });
 
   // A real form submit (scraper, redis, manual source) navigates away on save.
-  document.addEventListener('submit', () => { submitting = true; }, true);
+  // A delete answered with Cancel stays on the page, edits and all.
+  document.addEventListener('submit', (e) => { if (!e.defaultPrevented) submitting = true; }, true);
 
   // AJAX saves (MISP servers, IMAP) call these; adding/removing a source has no
   // input event, so the IMAP code marks the mailbox dirty explicitly.

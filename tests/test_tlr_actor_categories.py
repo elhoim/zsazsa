@@ -50,7 +50,7 @@ class ActorCategories(unittest.TestCase):
         with app.test_request_context():
             page = render_template(
                 "threat_landscape/wizard.html", tlr=_report(actors_cybercrime="LockBit"),
-                tlp_levels=misp_store.TLR_TLP_LEVELS, is_edit=True, queued=[],
+                tlp_levels=misp_store.TLR_TLP_LEVELS, is_edit=True, queued=[], audiences=[],
                 actor_categories=misp_store.TLR_ACTOR_CATEGORIES, intel_levels=[], threat_types=[],
                 estimative_confidence=[], pirs=[], sector_items=[], geo_items=[], type_counts={})
         soup = BeautifulSoup(page, "html.parser")
