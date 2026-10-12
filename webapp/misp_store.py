@@ -5294,14 +5294,36 @@ def stakeholders_subscribed_to(product_type: str) -> list:
     return [s for s in list_stakeholders() if product_type in (s.products or [])]
 
 
+def _tlp_level(value) -> str | None:
+    """The TLP level a stored value names, or None when it names none.
+
+    Unset is amber, the default the stakeholder and product forms use. Beyond the
+    form's own values this reads the spellings that turn up in MISP and in older
+    data: a "tlp:" prefix, any case, stray whitespace, "amber-strict" or
+    "amber_strict", and TLP 1.0's "white".
+    """
+    if value is None or not str(value).strip():
+        return "amber"
+    level = str(value).strip().lower()
+    if level.startswith("tlp:"):
+        level = level[4:].strip()
+    level = re.sub(r"[\s_-]+", "+", level)
+    level = "clear" if level == "white" else level
+    return level if level in _TLP_RANK else None
+
+
 def _tlp_cleared(clearance: str, tlp: str) -> bool:
     """Whether a stakeholder's clearance covers a product's classification.
 
-    Both sides fall back to amber when unset or unrecognised, the default the
-    stakeholder and product forms already use.
+    A value that names no level fails closed: a product's is read as red, so it
+    reaches only red-cleared stakeholders, and a clearance's as clear. Reading
+    either as amber, as before, sent a product stored as "tlp:red" to everyone
+    cleared for amber.
     """
-    amber = _TLP_RANK["amber"]
-    return _TLP_RANK.get((clearance or "amber").lower(), amber) >= _TLP_RANK.get((tlp or "amber").lower(), amber)
+    have, need = _tlp_level(clearance), _tlp_level(tlp)
+    have_rank = _TLP_RANK[have] if have is not None else _TLP_RANK["clear"]
+    need_rank = _TLP_RANK[need] if need is not None else _TLP_RANK["red"]
+    return have_rank >= need_rank
 
 
 def stakeholders_cleared_for(product_type: str, tlp: str) -> list:
