@@ -1,6 +1,6 @@
 """The CSV indicator export neutralises spreadsheet formula injection.
 
-An attribute value carried from MISP can start with a character a spreadsheet
+An attribute value from MISP can start with a character a spreadsheet
 treats as a formula (= + - @) or a control character. indicator_csv_text has to
 prefix those with a single quote so a consumer opening the file in Excel or
 LibreOffice gets literal text, while leaving ordinary values untouched.
