@@ -2909,6 +2909,12 @@ from pymisp import PyMISP
 
 _PYMISP_SCRIPT_TAIL = '''
 
+def cell(value):
+    """A CSV cell, quoted so a spreadsheet does not run it as a formula."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(FORMULA_START) else text
+
+
 def attributes(raw):
     """The attribute list out of a PyMISP attribute search response."""
     if isinstance(raw, dict) and raw.get("errors"):
@@ -2939,10 +2945,11 @@ def main():
                          "Attribute timestamp", "Type", "Value", "to_ids"])
         for a in attrs:
             event = a.get("Event") or {}
-            writer.writerow([a.get("event_id") or event.get("id", ""), event.get("info", ""),
-                             (event.get("Orgc") or {}).get("name", ""), event.get("date", ""),
-                             a.get("timestamp", ""), a.get("type", ""), a.get("value", ""),
-                             str(a.get("to_ids")).lower() in ("1", "true")])
+            writer.writerow([cell(v) for v in (
+                a.get("event_id") or event.get("id", ""), event.get("info", ""),
+                (event.get("Orgc") or {}).get("name", ""), event.get("date", ""),
+                a.get("timestamp", ""), a.get("type", ""), a.get("value", ""),
+                str(a.get("to_ids")).lower() in ("1", "true"))])
     else:
         for value in dict.fromkeys(str(a.get("value", "")) for a in attrs):
             print(value)
@@ -2976,6 +2983,9 @@ def pymisp_script(filters, feed=None) -> str:
             "tlp": getattr(feed, "tlp", "") or ""}
     lines = [f"FEED = {info!r}",
              f"GENERATED_AT = {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')!r}",
+             "",
+             "# A CSV cell starting with one of these is run as a formula by a spreadsheet.",
+             f"FORMULA_START = {_CSV_FORMULA_TRIGGERS!r}",
              "", "", "def search(misp):", "    return misp.search("]
     lines += [f"        {key}={code[key]}," for key in _PYMISP_ARG_ORDER if key in code]
     lines.append("    )")
@@ -3099,6 +3109,23 @@ def indicator_json_text(rows, feed=None) -> str:
     return json.dumps(doc, indent=2)
 
 
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _csv_safe(value) -> str:
+    """One CSV cell, quoted so a spreadsheet does not run it as a formula.
+
+    A value from MISP that starts with = + - @ or a control character is run as
+    a formula when the file is opened in Excel or LibreOffice, so it gets a
+    leading single quote. The quote is part of the data for anything else that
+    reads the CSV, the public feed URL with ?format=csv included. The plain and
+    typed-value exports are for tools rather than spreadsheets and stay as they
+    are.
+    """
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_CSV_FORMULA_TRIGGERS) else text
+
+
 def indicator_csv_text(rows) -> str:
     """Result rows as CSV text.
 
@@ -3109,7 +3136,7 @@ def indicator_csv_text(rows) -> str:
     writer = csv.writer(buf)
     writer.writerow([header for _, header in INDICATOR_FEED_COLUMNS])
     for r in rows:
-        writer.writerow([r.get(key, "") for key, _ in INDICATOR_FEED_COLUMNS])
+        writer.writerow([_csv_safe(r.get(key, "")) for key, _ in INDICATOR_FEED_COLUMNS])
     return buf.getvalue()
 
 
