@@ -39,11 +39,7 @@ from webapp.collection_cache import AI_SUMMARY_PREFIX, source_slug
 from webapp.models import STAKEHOLDER_ROLES
 from webapp.utils import human_size, scraper_enabled
 
-# Only silence the insecure-request warning when the operator has explicitly
-# turned certificate verification off (an internal self-signed MISP), so a
-# verified deployment still surfaces any TLS warning instead of hiding it.
-if not getattr(config, "MISP_VERIFYCERT", True) or not getattr(config, "MISP_WEBAPP_VERIFYCERT", True):
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 _UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")

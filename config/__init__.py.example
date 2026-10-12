@@ -5,17 +5,14 @@ SECRET_KEY = 'change-me-to-a-long-random-string'
 MISP_SCRAPER_ENABLED = True
 MISP_URL = 'https://your-misp-instance.example.com'
 MISP_KEY = 'your-misp-api-key-here'
-# Verify the MISP server's TLS certificate. Keep True in production. Set to
-# False only for an internal MISP with a self-signed certificate; the better
-# option is to leave verification on and point PyMISP at the CA bundle instead.
+# Verify the MISP server's TLS certificate. For a certificate from your own CA,
+# leave this on and trust that CA as INSTALL.md describes.
 MISP_VERIFYCERT = True
 
 # MISP - webapp (CTI program objects: stakeholders, PIRs, GIRs)
 # Defaults to the same server; override to use a dedicated MISP instance.
 MISP_WEBAPP_URL = 'https://your-misp-instance.example.com'
 MISP_WEBAPP_KEY = 'your-misp-api-key-here'
-# As MISP_VERIFYCERT above: keep True in production, False only for an internal
-# self-signed server.
 MISP_WEBAPP_VERIFYCERT = True
 
 # Distribution level for MISP events the backend creates (stakeholders, PIRs,
