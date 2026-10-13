@@ -122,6 +122,9 @@ key = f"SECRET_KEY = {secrets.token_hex(32)!r}"
 text, count = re.subn(r"^SECRET_KEY = .*", key, example.read_text(), count=1, flags=re.M)
 if not count:
     sys.exit(f"{example} has no SECRET_KEY line to replace")
+# The config holds SECRET_KEY and the MISP/LLM/SMTP keys, so create it readable
+# only by its owner before anything is written into it.
+target.touch(mode=0o600)
 target.write_text(text)
 PY
 

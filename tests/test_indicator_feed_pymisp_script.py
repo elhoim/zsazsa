@@ -9,6 +9,7 @@ string rather than letting it end the literal it sits in.
 """
 
 import contextlib
+import csv
 import io
 import os
 import unittest
@@ -38,18 +39,20 @@ def _feed(**over):
 class _FakeMISP:
     """Stands in for PyMISP: records the search it is asked for."""
 
+    found = [
+        {"type": "ip-dst", "value": "1.2.3.4", "timestamp": "10", "to_ids": True,
+         "event_id": "7", "Event": {"info": "Campaign", "date": "2026-09-01"}},
+        {"type": "ip-dst", "value": "1.2.3.4", "timestamp": "30", "event_id": "8"},
+        {"type": "domain", "value": "evil.example", "timestamp": "20", "event_id": "7"},
+    ]
+
     def __init__(self, *args, **kwargs):
         self.args, self.kwargs = args, kwargs
         self.searched = None
 
     def search(self, **kwargs):
         self.searched = kwargs
-        return {"Attribute": [
-            {"type": "ip-dst", "value": "1.2.3.4", "timestamp": "10", "to_ids": True,
-             "event_id": "7", "Event": {"info": "Campaign", "date": "2026-09-01"}},
-            {"type": "ip-dst", "value": "1.2.3.4", "timestamp": "30", "event_id": "8"},
-            {"type": "domain", "value": "evil.example", "timestamp": "20", "event_id": "7"},
-        ]}
+        return {"Attribute": self.found}
 
 
 def _load(src):
@@ -133,6 +136,27 @@ class Script(unittest.TestCase):
         lines = out.splitlines()
         self.assertTrue(lines[0].startswith("Event ID,"))
         self.assertEqual(len(lines), 4)
+
+    def test_csv_cells_that_start_like_a_formula_are_quoted(self):
+        """The script's CSV can be opened in a spreadsheet just like the feed's
+        own CSV download, so it quotes the same cells."""
+        found = [{"type": "text", "value": "=HYPERLINK(\"http://x\")", "timestamp": "10",
+                  "event_id": "7", "Event": {"info": "+cmd|calc", "Orgc": {"name": "@org"}}}]
+        with mock.patch.object(_FakeMISP, "found", found):
+            csv_out, _ = self._main("--csv")
+            plain, _ = self._main()
+        row = next(csv.reader(io.StringIO(csv_out.splitlines()[1])))
+        self.assertEqual(row[1:3], ["'+cmd|calc", "'@org"])
+        self.assertEqual(row[6], "'=HYPERLINK(\"http://x\")")
+        self.assertEqual(plain.splitlines(), ['=HYPERLINK("http://x")'], "the value list stays as MISP has it")
+
+    def test_a_csv_field_misp_left_empty_stays_empty(self):
+        found = [{"type": "ip-dst", "value": "1.2.3.4", "timestamp": "10", "event_id": "7",
+                  "Event": {"info": None, "date": None}}]
+        with mock.patch.object(_FakeMISP, "found", found):
+            out, _ = self._main("--csv")
+        row = next(csv.reader(io.StringIO(out.splitlines()[1])))
+        self.assertEqual((row[1], row[3]), ("", ""))
 
     def test_the_certificate_check_can_be_turned_off(self):
         _, made = self._main(env={"MISP_URL": "u", "MISP_KEY": "k", "MISP_VERIFY_CERT": "false"})

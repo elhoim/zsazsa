@@ -22,7 +22,7 @@ class FakeMisp:
         self._infos = infos
 
     def search(self, **kwargs):
-        return [type("E", (), {"info": i})() for i in self._infos]
+        return [type("E", (), {"info": i, "uuid": f"event-{n}"})() for n, i in enumerate(self._infos)]
 
 
 class PagedMisp:
@@ -92,6 +92,51 @@ class ReservedId(unittest.TestCase):
         misp = FakeMisp(["[zsazsa:pir] PIR-004"])
         self.assertEqual(misp_store._reserve_sequence_id(misp, "tag", "PIR", "PIR-002"), "PIR-002")
         self.assertEqual(misp_store._reserve_sequence_id(misp, "tag", "PIR", ""), "PIR-005")
+
+
+class UncheckedTitles(unittest.TestCase):
+    """Anyone who can tag an event in MISP writes the titles the scan reads. A
+    40-digit number in one failed every create of that type, since SQLite cannot
+    store it, and a smaller long one moved the counter there for good."""
+
+    LONG = ("[zsazsa:pir] PIR-" + "9" * 40, "[zsazsa:pir] PIR-1000000000000")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        db.init_db()
+
+    def misp(self, *extra):
+        return FakeMisp([f"[zsazsa:pir] PIR-{n:03d}" for n in range(1, 41)] + list(extra))
+
+    def test_the_form_suggests_the_next_real_id(self):
+        for title in self.LONG:
+            with self.subTest(title=title[:30]), self.assertLogs(misp_store.logger, "WARNING"):
+                self.assertEqual(misp_store._sequence_id(self.misp(title), "tag", "PIR", ""), "PIR-041")
+
+    def test_a_create_takes_the_next_real_id_and_the_counter_stays(self):
+        ids = []
+        for title in self.LONG:
+            with self.assertLogs(misp_store.logger, "WARNING"):
+                ids.append(misp_store._reserve_sequence_id(self.misp(title), "tag", "PIR", ""))
+        self.assertEqual(ids, ["PIR-041", "PIR-042"])
+
+    def test_six_digits_still_count_and_seven_do_not(self):
+        self.assertEqual(misp_store._scan_max_sequence(self.misp("PIR-999999"), "tag", "PIR"), 999999)
+        with self.assertLogs(misp_store.logger, "WARNING"):
+            self.assertEqual(misp_store._scan_max_sequence(self.misp("PIR-1000000"), "tag", "PIR"), 40)
+
+    def test_only_plain_digits_are_read_as_a_number(self):
+        """int() alone reads all of these as numbers. None is an id zsazsa wrote,
+        and none is worth a warning: they are not long numbers, just not ids."""
+        with self.assertNoLogs(misp_store.logger, "WARNING"):
+            for number in ("1_000", "+50", "\u0663", "\u00b2"):
+                with self.subTest(number=number):
+                    self.assertEqual(misp_store._scan_max_sequence(
+                        self.misp(f"PIR-{number}"), "tag", "PIR"), 40)
 
 
 class SearchAll(unittest.TestCase):

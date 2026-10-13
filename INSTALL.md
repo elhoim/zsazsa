@@ -224,10 +224,10 @@ This tab covers the MISP server zsazsa uses as its own **data store**, configure
 |---|---|
 | `MISP_WEBAPP_URL` | URL of the MISP server zsazsa uses to store its own program data |
 | `MISP_WEBAPP_KEY` | API key for the webapp MISP server. It also looks up a user's role for the settings pages, so it has to be allowed to view users |
-| `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate |
+| `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate. On by default; see below for a MISP whose certificate comes from your own CA |
 | `RULEZET_URL` | Base URL of a [Rulezet](https://rulezet.org) instance. Product forms search it for public detection rules by CVE ID or MITRE ATT&CK technique, and a product page reads a saved rule back from it. A detection engineering request also validates its draft rule against it. Leave empty to disable the lookup |
 
-zsazsa checks a MISP server's certificate against the CA list that ships with Python's requests package, not the host's. For a MISP whose certificate comes from your own CA, leave verification on: add the CA to the host (on Debian or Ubuntu, copy it in PEM format, with a `.crt` extension, to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`), then set `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` for the web app (an `Environment=` line in the systemd unit) and in front of the analyser and IMAP collector cron entries. Point it at the host's whole bundle rather than at your CA alone, or the public services zsazsa calls stop verifying. Turning verification off instead sends the API key to whatever answers at that address.
+zsazsa checks a MISP server's certificate against the CA list that ships with Python's requests package, not the host's. For a MISP whose certificate comes from your own CA, leave verification on: add the CA to the host (on Debian or Ubuntu, copy it to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`), then set `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` for the web app (an `Environment=` line in the systemd unit) and in front of the analyser and IMAP collector cron entries. Point it at the host's whole bundle rather than at your CA alone, or the public services zsazsa calls stop verifying. Turning verification off instead sends the API key to whatever answers at that address.
 
 ### Products
 
@@ -453,7 +453,7 @@ The "MISP scraper (collection pipeline)" card holds the connection to the misp-s
 | Enabled | Switch for collecting from the scraper at all, as each other MISP server has (`MISP_SCRAPER_ENABLED`) |
 | URL | Address of the misp-scraper MISP instance (`MISP_URL`); empty means no scraper |
 | API key | API key for the scraper MISP instance (`MISP_KEY`); empty means no scraper |
-| Verify TLS | Whether to verify the scraper MISP server's TLS certificate (`MISP_VERIFYCERT`) |
+| Verify TLS | Whether to verify the scraper MISP server's TLS certificate (`MISP_VERIFYCERT`). On by default; see "Connections" above for a certificate from your own CA |
 | Max events | Maximum number of events pulled per run (`MISP_SCRAPER_LIMIT`) |
 | Events from last (days) | Only pull scraper events from the last N days (`MISP_SCRAPER_SINCE_DAYS`); 0 disables the date window |
 

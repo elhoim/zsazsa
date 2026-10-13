@@ -1311,14 +1311,26 @@ def _gir_obj(data):
 
 # ── Sequential ID generation ──────────────────────────────────────────────────
 
+# The number in an id as zsazsa writes it: plain digits, and six at most, which
+# is decades of records. int() alone would also read "+5", "1_000" and digits of
+# other scripts.
+_SEQUENCE_NUMBER_RE = re.compile(r"[0-9]{1,6}")
+
+
 def _scan_max_sequence(misp, tag, prefix):
     """Return the highest existing {prefix}-NNN sequence number, scanning event titles.
 
     Known limitation: the sequence is derived from event info titles. If a title
     is manually edited or the prefix format changes, the scan may produce a
-    duplicate or restart from 0. Deleting the most recent record also frees its
-    number for the next create, so an id already sent to a stakeholder can come
-    back attached to something else.
+    duplicate or restart from 0. Deleting the most recent record lowers the
+    result too, which is why a create takes its number from the counter in
+    _reserve_sequence_id rather than from this scan alone: an id already sent to
+    a stakeholder must not come back attached to something else.
+
+    These titles are written by whoever can tag an event in MISP, so a number
+    longer than any id zsazsa gives out is skipped rather than taken as the
+    highest. Taken, it would move the counter as far as it says, and one past
+    what SQLite can store would fail every create of that type.
     """
     events = _search_all(misp, tags=[tag], metadata=True, pythonify=True)
     if not events or isinstance(events, dict):
@@ -1327,11 +1339,14 @@ def _scan_max_sequence(misp, tag, prefix):
     for e in events:
         for token in (e.info or "").split():
             clean = token.rstrip(":")
-            if clean.startswith(prefix + "-"):
-                try:
-                    max_n = max(max_n, int(clean[len(prefix) + 1:]))
-                except ValueError:
-                    pass
+            if not clean.startswith(prefix + "-"):
+                continue
+            number = clean[len(prefix) + 1:]
+            if _SEQUENCE_NUMBER_RE.fullmatch(number):
+                max_n = max(max_n, int(number))
+            elif number.isascii() and number.isdigit():
+                logger.warning("ignoring %s in the title of MISP event %s: longer than any id zsazsa "
+                               "gives out", clean[:40], e.uuid)
     return max_n
 
 
@@ -2910,6 +2925,12 @@ from pymisp import PyMISP
 
 _PYMISP_SCRIPT_TAIL = '''
 
+def cell(value):
+    """A CSV cell, quoted so a spreadsheet does not run it as a formula."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(FORMULA_START) else text
+
+
 def attributes(raw):
     """The attribute list out of a PyMISP attribute search response."""
     if isinstance(raw, dict) and raw.get("errors"):
@@ -2940,10 +2961,11 @@ def main():
                          "Attribute timestamp", "Type", "Value", "to_ids"])
         for a in attrs:
             event = a.get("Event") or {}
-            writer.writerow([a.get("event_id") or event.get("id", ""), event.get("info", ""),
-                             (event.get("Orgc") or {}).get("name", ""), event.get("date", ""),
-                             a.get("timestamp", ""), a.get("type", ""), a.get("value", ""),
-                             str(a.get("to_ids")).lower() in ("1", "true")])
+            writer.writerow([cell(v) for v in (
+                a.get("event_id") or event.get("id", ""), event.get("info", ""),
+                (event.get("Orgc") or {}).get("name", ""), event.get("date", ""),
+                a.get("timestamp", ""), a.get("type", ""), a.get("value", ""),
+                str(a.get("to_ids")).lower() in ("1", "true"))])
     else:
         for value in dict.fromkeys(str(a.get("value", "")) for a in attrs):
             print(value)
@@ -2977,6 +2999,9 @@ def pymisp_script(filters, feed=None) -> str:
             "tlp": getattr(feed, "tlp", "") or ""}
     lines = [f"FEED = {info!r}",
              f"GENERATED_AT = {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')!r}",
+             "",
+             "# A CSV cell starting with one of these is run as a formula by a spreadsheet.",
+             f"FORMULA_START = {_CSV_FORMULA_TRIGGERS!r}",
              "", "", "def search(misp):", "    return misp.search("]
     lines += [f"        {key}={code[key]}," for key in _PYMISP_ARG_ORDER if key in code]
     lines.append("    )")
@@ -3100,6 +3125,23 @@ def indicator_json_text(rows, feed=None) -> str:
     return json.dumps(doc, indent=2)
 
 
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _csv_safe(value) -> str:
+    """One CSV cell, quoted so a spreadsheet does not run it as a formula.
+
+    A value from MISP that starts with = + - @ or a control character is run as
+    a formula when the file is opened in Excel or LibreOffice, so it gets a
+    leading single quote. The quote is part of the data for anything else that
+    reads the CSV, the public feed URL with ?format=csv included. The plain and
+    typed-value exports are for tools rather than spreadsheets and stay as they
+    are.
+    """
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_CSV_FORMULA_TRIGGERS) else text
+
+
 def indicator_csv_text(rows) -> str:
     """Result rows as CSV text.
 
@@ -3110,7 +3152,7 @@ def indicator_csv_text(rows) -> str:
     writer = csv.writer(buf)
     writer.writerow([header for _, header in INDICATOR_FEED_COLUMNS])
     for r in rows:
-        writer.writerow([r.get(key, "") for key, _ in INDICATOR_FEED_COLUMNS])
+        writer.writerow([_csv_safe(r.get(key, "")) for key, _ in INDICATOR_FEED_COLUMNS])
     return buf.getvalue()
 
 
@@ -5296,14 +5338,36 @@ def stakeholders_subscribed_to(product_type: str) -> list:
     return [s for s in list_stakeholders() if product_type in (s.products or [])]
 
 
+def _tlp_level(value) -> str | None:
+    """The TLP level a stored value names, or None when it names none.
+
+    Unset is amber, the default the stakeholder and product forms use. Beyond the
+    form's own values this reads the spellings that turn up in MISP and in older
+    data: a "tlp:" prefix, any case, stray whitespace, "amber-strict" or
+    "amber_strict", and TLP 1.0's "white".
+    """
+    if value is None or not str(value).strip():
+        return "amber"
+    level = str(value).strip().lower()
+    if level.startswith("tlp:"):
+        level = level[4:].strip()
+    level = re.sub(r"[\s_-]+", "+", level)
+    level = "clear" if level == "white" else level
+    return level if level in _TLP_RANK else None
+
+
 def _tlp_cleared(clearance: str, tlp: str) -> bool:
     """Whether a stakeholder's clearance covers a product's classification.
 
-    Both sides fall back to amber when unset or unrecognised, the default the
-    stakeholder and product forms already use.
+    A value that names no level fails closed: a product's is read as red, so it
+    reaches only red-cleared stakeholders, and a clearance's as clear. Reading
+    either as amber, as before, sent a product stored as "tlp:red" to everyone
+    cleared for amber.
     """
-    amber = _TLP_RANK["amber"]
-    return _TLP_RANK.get((clearance or "amber").lower(), amber) >= _TLP_RANK.get((tlp or "amber").lower(), amber)
+    have, need = _tlp_level(clearance), _tlp_level(tlp)
+    have_rank = _TLP_RANK[have] if have is not None else _TLP_RANK["clear"]
+    need_rank = _TLP_RANK[need] if need is not None else _TLP_RANK["red"]
+    return have_rank >= need_rank
 
 
 def stakeholders_cleared_for(product_type: str, tlp: str) -> list:
