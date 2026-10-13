@@ -15,7 +15,7 @@ from flask import Blueprint, jsonify, url_for
 from core.net_safety import resolve_public_url
 from core.rulezet_lookup import (get_rule, search_rules_by_attack, search_rules_by_cve,
                                  validate_rule)
-from core.vuln_lookup import fetch_cve_info
+from core.vuln_lookup import CVE_RE, fetch_cve_info
 from webapp import audit, job_store, misp_session, misp_store
 from webapp.collection_cache import AI_SUMMARY_PREFIX
 from webapp.rate_limit import rate_limited
@@ -1024,12 +1024,6 @@ def build_fia():
     return jsonify({"fields": fields, "error": None})
 
 
-# A whole technique ID, nothing around it: the same pattern the forms use to
-# pick IDs out of the checked techniques, anchored because here it is a
-# gatekeeper for what gets forwarded to Rulezet, not a search.
-_TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
-
-
 def _id_list(body: dict, key: str) -> tuple[list[str], str]:
     """The list of IDs posted under key, stripped and upper-cased.
 
@@ -1060,7 +1054,7 @@ def cve_lookup():
     raw_ids, bad = _id_list(body, "cve_ids")
     if bad:
         return jsonify({"ok": False, "error": bad}), 400
-    cve_ids = [c for c in raw_ids if c.startswith("CVE-")][:10]
+    cve_ids = [c for c in raw_ids if CVE_RE.fullmatch(c)][:10]
     if not cve_ids:
         return jsonify({"ok": False, "error": "No valid CVE IDs provided"})
 
@@ -1092,7 +1086,7 @@ def rulezet_lookup():
     raw_ids, bad = _id_list(body, "cve_ids")
     if bad:
         return jsonify({"ok": False, "error": bad}), 400
-    cve_ids = [c for c in raw_ids if c.startswith("CVE-")][:10]
+    cve_ids = [c for c in raw_ids if CVE_RE.fullmatch(c)][:10]
     if not cve_ids:
         return jsonify({"ok": False, "error": "No valid CVE IDs provided"})
 
@@ -1148,7 +1142,7 @@ def rulezet_attack_lookup():
     raw_ids, bad = _id_list(body, "technique_ids")
     if bad:
         return jsonify({"ok": False, "error": bad}), 400
-    technique_ids = [t for t in raw_ids if _TECHNIQUE_ID_RE.match(t)][:20]
+    technique_ids = [t for t in raw_ids if _TECH_RE.fullmatch(t)][:20]
     if not technique_ids:
         return jsonify({"ok": False, "error": "No valid technique IDs provided"})
 

@@ -178,7 +178,7 @@ class BriefingHtml(unittest.TestCase):
 
 class DetectionEngineeringRequestHtml(unittest.TestCase):
     """The request mail is built from the same markdown the MISP report and the
-    Mattermost post carry, so what the renderer writes has to survive the split."""
+    Mattermost post hold, so what the renderer writes has to survive the split."""
 
     def _html(self):
         der = SimpleNamespace(

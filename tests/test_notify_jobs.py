@@ -129,11 +129,22 @@ class DoubleSubmit(JobTestCase):
         self.assertNotEqual(first["id"], again["id"])
 
     def test_another_kind_of_job_on_the_product_does_not_stand_in_for_it(self):
-        """A briefing being drafted carries the same uuid as its delivery."""
+        """A briefing being drafted has the same uuid as its delivery."""
         drafting = job_store.create_job("briefing-draft")
         job_store.update_job(drafting["id"], entity="product-d", status="running")
         job = self.start(lambda log: (True, "ok"), entity_id="product-d")
         self.assertNotEqual(job["id"], drafting["id"])
+
+
+class BriefingPages(JobTestCase):
+    """The briefing list and detail pages show what the AI drafting did."""
+
+    def test_a_later_delivery_does_not_hide_the_drafting(self):
+        drafting = job_store.create_job("briefing-draft")
+        job_store.update_job(drafting["id"], entity="product-e", status="completed")
+        delivery = job_store.create_job("notify-briefing")
+        job_store.update_job(delivery["id"], entity="product-e", status="completed")
+        self.assertEqual(job_store.by_entity("briefing-draft")["product-e"]["id"], drafting["id"])
 
 
 class AuditTrail(JobTestCase):

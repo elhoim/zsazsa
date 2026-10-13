@@ -301,7 +301,7 @@ class DetectionEngineeringRequestMail(unittest.TestCase):
                 der, "# Detection engineering request: Detect WMI\n\nbody", channel_ids=["em1"])
         return send
 
-    def test_subject_carries_the_id_title_and_classification(self):
+    def test_subject_has_the_id_title_and_classification(self):
         send = self._sent(SimpleNamespace(der_id="DER-00042", title="Detect WMI", tlp="amber"))
         self.assertEqual(send.call_args.args[1], "[CTI] TLP:AMBER - DER-00042: Detect WMI")
         self.assertEqual(send.call_args.args[3], "DER DER-00042")

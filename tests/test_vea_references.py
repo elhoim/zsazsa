@@ -44,7 +44,7 @@ class ReferenceLinks(unittest.TestCase):
                       "CVE-2024-1234/../../x"):
             self.assertEqual(self.links(_seed(_event(value))), [], value)
 
-    def test_the_cve_id_field_still_carries_all_of_them(self):
+    def test_the_cve_id_field_still_holds_all_of_them(self):
         """Filtering the links must not filter what the advisory is about."""
         seed = _seed(_event("CVE-2024-1234", "GHSA-abcd-1234-efgh"))
         self.assertEqual(seed.cve_id.split("\n"), ["CVE-2024-1234", "GHSA-abcd-1234-efgh"])

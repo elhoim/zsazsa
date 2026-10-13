@@ -1,6 +1,6 @@
 """What a threat actor profile actually says when it reaches a stakeholder.
 
-The notification body carried the title, the actors, the summary and the
+The notification body held the title, the actors, the summary and the
 attribution, and stopped there. The recommendations were never in it, so the one
 part a reader is meant to act on only existed on the product page, and a
 detection rule attached to the profile never reached the mail or Mattermost at
@@ -80,7 +80,7 @@ def _full_tap(**over):
 
 
 class MatchesThePdf(unittest.TestCase):
-    """The mail carried a fraction of what the PDF does: no metadata grid, no
+    """The mail held a fraction of what the PDF does: no metadata grid, no
     actor details, no scope and no references. The body now follows the PDF's
     sections and order, so a stakeholder reading the mail misses nothing."""
 
@@ -105,7 +105,7 @@ class MatchesThePdf(unittest.TestCase):
         self.assertEqual(headings, ["Summary", "Threat actor details", "Attribution",
                                     "Scope", "Recommendations", "References"])
 
-    def test_the_actor_details_scope_and_references_are_carried(self):
+    def test_the_actor_details_scope_and_references_are_included(self):
         md = self.body()
         for text in ("**Type:** State-sponsored", "**Synonyms:** Fancy Bear",
                      "**Suspected origin:** RU (Moderate confidence)",

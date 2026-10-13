@@ -427,7 +427,7 @@ def _markdown(tap, pir=None):
     stakeholder reading the mail misses nothing the PDF would have told them.
     The metadata rows run without a break under the title, which is what lets the
     e-mail renderer lift them into its meta grid. Empty fields are left out rather
-    than printed blank. The Diamond Model is not in here: each channel carries the
+    than printed blank. The Diamond Model is not in here: each channel sends the
     image its own way."""
     def get(name, default=""):
         return getattr(tap, name, default) or default

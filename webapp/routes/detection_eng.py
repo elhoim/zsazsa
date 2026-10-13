@@ -254,7 +254,7 @@ def wizard_edit(id):
         data["status"] = der.status
         # The draft rule and its format are only changed through
         # set_draft_rule, which refuses while the request is Active. The
-        # wizard carries neither as an editable field, so whatever the form
+        # wizard has neither as an editable field, so whatever the form
         # posts for them is ignored rather than trusted.
         data["format"] = der.format
         data["draft_rule"] = der.draft_rule
@@ -415,7 +415,11 @@ def _apply_der_status(der, status):
         if not result.get("valid"):
             return "Draft rule failed Rulezet validation: " + "; ".join(result.get("errors") or ["no details returned."])
 
-    misp_store.update_der(der.uuid, misp_store._der_data(der, status=status))
+    try:
+        misp_store.update_der(der.uuid, misp_store._der_data(der, status=status))
+    except Exception as exc:
+        logger.warning("DER %s status change to %s failed: %s", der.der_id, status, exc)
+        return f"Could not update the status: {exc}"
     audit.record("update", "detection_eng", entity_id=der.uuid, entity_label=f"{der.der_id} status={status}")
     if _is_completion(der, status):
         _start_der_delivery(der.der_id, der.uuid, "completed")

@@ -33,7 +33,7 @@
   };
 
   // Asks the loaded highlight.js rather than a hardcoded list: the cdnjs
-  // common build does not carry every language a rule format could map to
+  // common build does not include every language a rule format could map to
   // (http and nginx, for one), and a language it lacks must fall back to
   // plain text instead of making hljs.highlight() throw.
   function detectLanguage(hljs, format) {

@@ -219,22 +219,23 @@ def _build_scope_tags(data: dict) -> list:
     """Return MISP galaxy tag strings for geographic_scope, sectors, threat_actors.
 
     Lookup is case-insensitive so stored values normalised to a different case
-    still resolve to the correct tag.
+    still resolve to the correct tag, and ignores surrounding spaces, which a
+    galaxy value can have ("bonaire, saint eustatius and saba ").
     """
     tags = []
     geo_maps_ci = [
-        {k.lower(): v for k, v in _galaxy_tag_map(GALAXY_COUNTRY).items()},
-        {k.lower(): v for k, v in _galaxy_tag_map(GALAXY_TARGET_INFORMATION).items()},
+        {k.strip().lower(): v for k, v in _galaxy_tag_map(GALAXY_COUNTRY).items()},
+        {k.strip().lower(): v for k, v in _galaxy_tag_map(GALAXY_TARGET_INFORMATION).items()},
     ]
     for v in data.get("geographic_scope") or []:
         for gm_ci in geo_maps_ci:
-            tag = gm_ci.get(v.lower())
+            tag = gm_ci.get(v.strip().lower())
             if tag:
                 tags.append(tag)
                 break
-    sector_map_ci = {k.lower(): v for k, v in _galaxy_tag_map(GALAXY_SECTOR).items()}
+    sector_map_ci = {k.strip().lower(): v for k, v in _galaxy_tag_map(GALAXY_SECTOR).items()}
     for v in data.get("sectors") or []:
-        tag = sector_map_ci.get(v.lower())
+        tag = sector_map_ci.get(v.strip().lower())
         if tag:
             tags.append(tag)
     ta_map_ci = {k.lower(): v for k, v in _galaxy_tag_map(GALAXY_THREAT_ACTOR).items()}
@@ -3713,8 +3714,9 @@ def _all_source_clients():
             except Exception as exc:
                 logger.warning("skipping MISP server %r (%s): could not connect: %s",
                                sid, url, exc)
-    if (config.MISP_WEBAPP_URL != config.MISP_URL
-            and config.MISP_WEBAPP_KEY != config.MISP_KEY):
+    # Left out only when the scraper searched above is this same server.
+    if not scraper_enabled() or (config.MISP_WEBAPP_URL != config.MISP_URL
+                                 and config.MISP_WEBAPP_KEY != config.MISP_KEY):
         try:
             clients.append(("webapp", _misp(), "MISP webapp"))
         except Exception as exc:
@@ -5915,7 +5917,7 @@ DER_REVIEW_STATES = [DER_REVIEW_DRAFT, DER_REVIEW_PENDING, DER_REVIEW_APPROVED, 
 
 DER_PRIORITIES = ["Low", "Medium", "High", "Critical"]
 # The engineering status is stored as its display label, so these literals are
-# what existing requests already carry in MISP; they cannot be renamed without
+# what existing requests already hold in MISP; they cannot be renamed without
 # migrating them. "Pending" here is the team's untriaged column and has nothing
 # to do with DER_REVIEW_PENDING ("pending-review"), which is the publish
 # workflow waiting on a reviewer. A request can sit in both at once.

@@ -49,7 +49,7 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  // Wraps the search term in <mark> — used for the visible columns so a hit
+  // Wraps the search term in <mark>, for the visible columns, so a hit
   // is obvious in a long, paginated table. The term is matched against the
   // raw text and each piece escaped afterwards: matching on the escaped text
   // instead would find "amp" or "lt" inside the entities themselves and cut

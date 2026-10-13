@@ -72,7 +72,7 @@ def get_new_scraper_events(misp) -> list:
     #
     # Every page, not just the first: the run moves the watermark past
     # everything changed before it started, so an event left on page two is
-    # never asked for again. Events already complete still carry the marker
+    # never asked for again. Events already complete still have the marker
     # and fill pages too.
     limit = getattr(config, "MISP_SCRAPER_LIMIT", 500)
     events, page = [], 1

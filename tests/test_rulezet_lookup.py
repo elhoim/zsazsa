@@ -61,7 +61,7 @@ class GetRule(unittest.TestCase):
         self.assertEqual(rule["author"], "Benjamin Collas")
         self.assertEqual(rule["url"], "https://rulezet.test/rule/detail_rule/740025")
 
-    def test_the_fields_the_detail_endpoint_does_not_carry_are_left_empty(self):
+    def test_the_fields_the_detail_endpoint_does_not_return_are_left_empty(self):
         """The viewer skips an empty field, so they simply do not show rather
         than appearing with a made-up value."""
         with mock.patch.object(requests, "get", return_value=_response(json_data=_DETAIL)):
@@ -72,7 +72,7 @@ class GetRule(unittest.TestCase):
         self.assertEqual(rule["matched_techniques"], [])
 
     def test_a_record_whose_name_fields_are_not_strings_is_still_a_rule(self):
-        """Rulezet is a community instance and a record can carry anything. A
+        """Rulezet is a community instance and a record can hold anything. A
         number where a name belongs used to raise a TypeError out of the module
         and reach the analyst as a bare 500 instead of a rule."""
         for user in ({"first_name": 87, "last_name": "Collas"},
@@ -189,7 +189,7 @@ class Validate(unittest.TestCase):
             {"valid": False, "errors": ["bad"], "warnings": []},
         )
 
-    def test_a_4xx_carries_rulezets_own_error(self):
+    def test_a_4xx_passes_on_rulezets_own_error(self):
         self.assertEqual(self._validate(_response(status=400, json_data={"error": "Unknown format"})),
                          {"error": "Unknown format"})
 

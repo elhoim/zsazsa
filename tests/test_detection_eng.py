@@ -135,16 +135,25 @@ class ApplyStatus(unittest.TestCase):
     """_apply_der_status() is the one place the status rules live; the detail
     page and the kanban board both go through it."""
 
-    def apply(self, der, status, can_publish=True, rulezet=None):
+    def apply(self, der, status, can_publish=True, rulezet=None, misp_error=None):
         rulezet = {"valid": True} if rulezet is None else rulezet
         with mock.patch.object(detection_eng.misp_session, "current_user_can_publish",
                                return_value=can_publish), \
              mock.patch.object(detection_eng, "validate_rule", return_value=rulezet) as validate, \
-             mock.patch.object(detection_eng.misp_store, "update_der") as update, \
+             mock.patch.object(detection_eng.misp_store, "update_der", side_effect=misp_error) as update, \
              mock.patch.object(detection_eng.audit, "record"), \
              mock.patch.object(detection_eng, "_start_der_delivery") as deliver:
             error = detection_eng._apply_der_status(der, status)
         return error, update, deliver, validate
+
+    def test_a_write_misp_refuses_is_reported_and_nobody_is_told(self):
+        """The kanban board reads the reason from the JSON it gets back, which a
+        500 page does not give it."""
+        with self.assertLogs(detection_eng.logger, "WARNING"):
+            error, _, deliver, _ = self.apply(_stored_der(), misp_store.DER_STATUS_ACTIVE,
+                                              misp_error=RuntimeError("MISP said no"))
+        self.assertEqual(error, "Could not update the status: MISP said no")
+        deliver.assert_not_called()
 
     def test_an_approved_request_moves_on_and_keeps_its_other_fields(self):
         error, update, deliver, _ = self.apply(

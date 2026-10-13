@@ -1,13 +1,15 @@
 """What comes back from a model, and what the app does with it.
 
-Two answers matter beyond a well-formed one: JSON wrapped in a markdown fence,
-which local models produce often, and an empty answer, which is what a model
-that runs out of tokens returns instead of an error.
+Three answers matter beyond a well-formed one: JSON wrapped in a markdown
+fence, which local models produce often, an empty answer, which is what a model
+that runs out of tokens returns instead of an error, and an answer cut off at
+its token budget, which looks complete but is not.
 
     python -m unittest tests.test_llm_parsing
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from analyser import llm
@@ -80,6 +82,30 @@ class EmptyAnswers(unittest.TestCase):
         self.assertEqual(result["outcome"], "error")
         misp_webapp.add_event.assert_not_called()
         misp_webapp.add_event_report.assert_not_called()
+
+
+class CutOffAnswers(unittest.TestCase):
+    """A summary cut off at its budget lost its MISP context lines, which come
+    last, and with them every galaxy tag, without a word in the log."""
+
+    def answer(self, finish_reason):
+        choice = SimpleNamespace(finish_reason=finish_reason, message=SimpleNamespace(content="Summary text"))
+        # No usage, so nothing is recorded in the database.
+        response = SimpleNamespace(choices=[choice], usage=None)
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response)))
+        with mock.patch.object(llm, "_get_client", return_value=client):
+            return llm._call("system", "user", 1024, feature="summarise_report",
+                             cfg={"provider": "openai", "model": "gpt-4o-mini"})
+
+    def test_an_answer_cut_off_at_its_budget_is_logged(self):
+        with self.assertLogs(llm.logger, "WARNING") as logs:
+            self.assertEqual(self.answer("length"), "Summary text")
+        self.assertIn("summarise_report", logs.output[0])
+        self.assertIn("1024", logs.output[0])
+
+    def test_a_finished_answer_is_not(self):
+        with self.assertNoLogs(llm.logger, "WARNING"):
+            self.assertEqual(self.answer("stop"), "Summary text")
 
 
 class BriefingStoryFormatting(unittest.TestCase):
