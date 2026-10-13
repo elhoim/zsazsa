@@ -1310,14 +1310,26 @@ def _gir_obj(data):
 
 # ── Sequential ID generation ──────────────────────────────────────────────────
 
+# The number in an id as zsazsa writes it: plain digits, and six at most, which
+# is decades of records. int() alone would also read "+5", "1_000" and digits of
+# other scripts.
+_SEQUENCE_NUMBER_RE = re.compile(r"[0-9]{1,6}")
+
+
 def _scan_max_sequence(misp, tag, prefix):
     """Return the highest existing {prefix}-NNN sequence number, scanning event titles.
 
     Known limitation: the sequence is derived from event info titles. If a title
     is manually edited or the prefix format changes, the scan may produce a
-    duplicate or restart from 0. Deleting the most recent record also frees its
-    number for the next create, so an id already sent to a stakeholder can come
-    back attached to something else.
+    duplicate or restart from 0. Deleting the most recent record lowers the
+    result too, which is why a create takes its number from the counter in
+    _reserve_sequence_id rather than from this scan alone: an id already sent to
+    a stakeholder must not come back attached to something else.
+
+    These titles are written by whoever can tag an event in MISP, so a number
+    longer than any id zsazsa gives out is skipped rather than taken as the
+    highest. Taken, it would move the counter as far as it says, and one past
+    what SQLite can store would fail every create of that type.
     """
     events = _search_all(misp, tags=[tag], metadata=True, pythonify=True)
     if not events or isinstance(events, dict):
@@ -1326,11 +1338,14 @@ def _scan_max_sequence(misp, tag, prefix):
     for e in events:
         for token in (e.info or "").split():
             clean = token.rstrip(":")
-            if clean.startswith(prefix + "-"):
-                try:
-                    max_n = max(max_n, int(clean[len(prefix) + 1:]))
-                except ValueError:
-                    pass
+            if not clean.startswith(prefix + "-"):
+                continue
+            number = clean[len(prefix) + 1:]
+            if _SEQUENCE_NUMBER_RE.fullmatch(number):
+                max_n = max(max_n, int(number))
+            elif number.isascii() and number.isdigit():
+                logger.warning("ignoring %s in the title of MISP event %s: longer than any id zsazsa "
+                               "gives out", clean[:40], e.uuid)
     return max_n
 
 
