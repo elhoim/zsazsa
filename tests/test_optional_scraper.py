@@ -38,7 +38,7 @@ def pin_config(test, **values):
 
     MISP_SCRAPER_ENABLED is pinned whether or not the test names it: these tests
     must not depend on whether the scraper happens to be switched on in the
-    developer's own config/__init__.py, nor on whether that file carries the key
+    developer's own config/__init__.py, nor on whether that file has the key
     at all. A config written by a zsazsa that predates the switch has no such
     attribute, which is what create=True is for.
     """
@@ -85,6 +85,19 @@ class SourceClients(unittest.TestCase):
              mock.patch("pymisp.PyMISP", return_value=mock.Mock()), \
              mock.patch.object(misp_store, "_misp", return_value=mock.Mock()):
             self.assertEqual(self.ids(), ["scraper", "community", "webapp"])
+
+    def test_a_scraper_switched_off_on_the_webapp_misp_leaves_the_webapp_in(self):
+        """The webapp store is skipped when the scraper is that same server, so
+        its events are not searched twice. Switched off, the scraper keeps its
+        credentials but is not searched, and the webapp has to be."""
+        with mock.patch.object(misp_store.config, "MISP_SCRAPER_ENABLED", False), \
+             mock.patch.object(misp_store.config, "MISP_URL", "https://webapp.example.org"), \
+             mock.patch.object(misp_store.config, "MISP_KEY", "wk"), \
+             mock.patch.object(misp_store, "_scraper_misp") as scraper, \
+             mock.patch("pymisp.PyMISP", return_value=mock.Mock()), \
+             mock.patch.object(misp_store, "_misp", return_value=mock.Mock()):
+            self.assertEqual(self.ids(), ["community", "webapp"])
+            scraper.assert_not_called()
 
     def test_asking_for_the_scraper_client_without_one_raises_a_misp_error(self):
         """PyMISP's own NoURL, so an unguarded caller still lands on the
@@ -139,7 +152,7 @@ class BriefingSeeding(unittest.TestCase):
 
 
 class ProductSourceMarkers(unittest.TestCase):
-    """Only scraper events carry the zsazsa:product markers."""
+    """Only scraper events have the zsazsa:product markers."""
 
     def setUp(self):
         pin_config(self, MISP_URL="https://scraper.example.org", MISP_KEY="sk")
@@ -181,7 +194,7 @@ class ProductSourceMarkers(unittest.TestCase):
 
     def test_a_manual_entry_is_marked_on_the_webapp_store(self):
         """Manual entries are on the webapp MISP, which zsazsa writes to, so
-        they carry the marker like scraper events do."""
+        they have the marker like scraper events do."""
         webapp = mock.Mock()
         webapp.get_event.return_value = _event("u1")
         with mock.patch.object(misp_store, "_misp", return_value=webapp), \

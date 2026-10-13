@@ -166,7 +166,7 @@ IN_FLIGHT = ("queued", "running")
 def in_flight_for(entity_id: str, action: str) -> dict | None:
     """The unfinished `action` job working on this record, if there is one.
 
-    Jobs that write to one product carry its uuid in `entity`, so a caller can
+    Jobs that write to one product put its uuid in `entity`, so a caller can
     tell whether something is already running against it before starting a
     second one, and a page can say so to whoever is looking at it. The action
     matters: a briefing being drafted is not a briefing being delivered.
@@ -180,17 +180,19 @@ def in_flight_for(entity_id: str, action: str) -> dict | None:
     return None
 
 
-def by_entity() -> dict:
-    """The most recent job per record, keyed by the uuid it carries.
+def by_entity(action: str) -> dict:
+    """The most recent `action` job per record, keyed by the uuid in its `entity`.
 
     Whatever its status, so a page can say the AI finished as well as that it
     is working. One read serves a whole list: list_jobs() is capped and already
     sorted newest first, so the first job seen for a record is the one to show.
+    The action matters as it does for in_flight_for: a briefing's delivery is
+    newer than its drafting and would otherwise hide it.
     """
     latest = {}
     for job in list_jobs():
         entity = job.get("entity")
-        if entity and entity not in latest:
+        if entity and entity not in latest and job.get("action") == action:
             latest[entity] = job
     return latest
 

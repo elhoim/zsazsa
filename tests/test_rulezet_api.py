@@ -1,5 +1,6 @@
 """The /api/rulezet-* routes the "Search Rulezet" buttons and the Detection
-engineering request validation call.
+engineering request validation call, and /api/cve-lookup, which shares their
+ID checks.
 
 Anything can be posted to these, not only what the forms send, so a malformed
 body has to come back as a 400 with a reason rather than a 500, and only IDs of
@@ -92,6 +93,12 @@ class CveLookup(_Base):
         _reply, search = self._lookup([" cve-2021-44228 ", "not-a-cve", ""])
         search.assert_called_once_with(["CVE-2021-44228"])
 
+    def test_something_that_only_starts_like_a_cve_is_not_forwarded(self):
+        """Rulezet gets the IDs joined with commas, so one holding a comma
+        would smuggle in IDs the limit of ten never counted."""
+        _reply, search = self._lookup(["CVE-2021-44228,CVE-2021-1", "CVE-", "CVE-2021-44228/x"])
+        search.assert_not_called()
+
     def test_at_most_ten_are_forwarded(self):
         _reply, search = self._lookup([f"CVE-2024-{n:04d}" for n in range(15)])
         self.assertEqual(len(search.call_args[0][0]), 10)
@@ -100,6 +107,18 @@ class CveLookup(_Base):
         reply, search = self._lookup(["T1190"])
         self.assertFalse(reply.get_json()["ok"])
         search.assert_not_called()
+
+
+class CirclCveLookup(_Base):
+    """/api/cve-lookup reads its IDs the same way the Rulezet lookup does."""
+
+    def test_only_whole_cve_ids_are_looked_up(self):
+        """Anything starting with CVE- used to take one of the ten lookups."""
+        ids = [" cve-2021-44228 ", "CVE-2021-44228,CVE-2021-1", "CVE-"]
+        with mock.patch.object(api, "fetch_cve_info", return_value={"summary": "x"}) as fetch:
+            reply = self.client.post("/api/cve-lookup", json={"cve_ids": ids})
+        fetch.assert_called_once_with("CVE-2021-44228")
+        self.assertEqual([r["cve_id"] for r in reply.get_json()["results"]], ["CVE-2021-44228"])
 
 
 class RuleById(_Base):

@@ -15,6 +15,7 @@ from unittest import mock
 
 from flask import Flask
 
+from webapp import analyser_pipeline, misp_store
 from webapp.routes import api, data_collection
 
 
@@ -246,7 +247,8 @@ class SummaryScopeTags(unittest.TestCase):
     page had its own parser for an older, plain-text layout and silently tagged
     nothing once the prompt moved to markdown."""
 
-    def summarise(self, summary):
+    def summarise(self, summary, galaxies=None):
+        """`galaxies` maps a galaxy to its clusters; a galaxy not in it gets the ATT&CK ones."""
         misp = _FakeMisp()
         event = SimpleNamespace(id=7, uuid="u" * 36, info="Overlord RAT campaign", tags=[])
         scope_calls = []
@@ -268,7 +270,8 @@ class SummaryScopeTags(unittest.TestCase):
              mock.patch.object(data_collection, "_refresh_cached_event"), \
              mock.patch.object(data_collection.audit, "record") as audit_record, \
              mock.patch.object(data_collection.misp_store, "_build_scope_tags", build_scope_tags), \
-             mock.patch.object(data_collection.misp_store, "_galaxy_tag_map", return_value=_MITRE_CLUSTERS):
+             mock.patch.object(data_collection.misp_store, "_galaxy_tag_map",
+                               side_effect=lambda galaxy: (galaxies or {}).get(galaxy, _MITRE_CLUSTERS)):
             ok, message, status = data_collection._generate_ai_summary(misp, event, "scraper")
 
         self.assertEqual((ok, status), (True, 200), message)
@@ -292,6 +295,14 @@ class SummaryScopeTags(unittest.TestCase):
         _tagged, _scope, audit = self.summarise(_SUMMARY)
         self.assertIn('misp-galaxy:sector="Transportation"', audit["details"])
 
+    def test_a_sector_whose_name_holds_a_comma_stays_one_sector(self):
+        """The line is split on commas, which cut "Government, Administration"
+        in two and matched neither half."""
+        summary = _SUMMARY.replace("Transportation", "Finance, Government, Administration")
+        sectors = {"Finance": "s1", "Government, Administration": "s2"}
+        _tagged, scope, _audit = self.summarise(summary, {misp_store.GALAXY_SECTOR: sectors})
+        self.assertEqual(scope["sectors"], ["Finance", "Government, Administration"])
+
     def test_a_summary_that_identifies_nothing_tags_nothing(self):
         empty = _SUMMARY.replace("Transportation", "None identified") \
                         .replace("Belgium", "None identified") \
@@ -300,6 +311,45 @@ class SummaryScopeTags(unittest.TestCase):
         tagged, scope, _audit = self.summarise(empty)
         self.assertEqual(tagged, [])
         self.assertEqual(scope, {})
+
+
+class NamesWithCommas(unittest.TestCase):
+    """Galaxy names that hold a comma, read off a comma-separated context line."""
+
+    LINE = """- **Targeted sector:** Finance, Government, Administration
+- **Geographic scope:** Belgium, Bonaire, Saint Eustatius and Saba
+"""
+    NAMES = frozenset({"government, administration", "bonaire, saint eustatius and saba"})
+
+    def test_two_neighbours_that_make_a_known_name_stay_together(self):
+        context = analyser_pipeline.parse_misp_context(self.LINE, self.NAMES)
+        self.assertEqual(context["sectors"], ["Finance", "Government, Administration"])
+        self.assertEqual(context["geographies"], ["Belgium", "Bonaire, Saint Eustatius and Saba"])
+
+    def test_without_the_names_the_line_is_split_as_before(self):
+        context = analyser_pipeline.parse_misp_context(self.LINE)
+        self.assertEqual(context["sectors"], ["Finance", "Government", "Administration"])
+
+    def test_the_names_come_from_the_sector_and_country_galaxies(self):
+        galaxies = {misp_store.GALAXY_SECTOR: {"Finance": "s1", "Government, Administration": "s2"},
+                    misp_store.GALAXY_COUNTRY: {"bonaire, saint eustatius and saba ": "c1", "belgium": "c2"}}
+        with mock.patch.object(misp_store, "_galaxy_tag_map", side_effect=lambda g: galaxies.get(g, {})):
+            self.assertEqual(analyser_pipeline.galaxy_names_with_commas(), self.NAMES)
+
+    def test_the_analyser_tags_them_too_trailing_space_and_all(self):
+        """MISP's country galaxy writes Bonaire with a space at the end, so it
+        never matched a name read off a line, comma or not."""
+        galaxies = {misp_store.GALAXY_SECTOR: {"Government, Administration": "sector-tag"},
+                    misp_store.GALAXY_COUNTRY: {"bonaire, saint eustatius and saba ": "country-tag"}}
+        misp = _FakeMisp()
+        with mock.patch.object(misp_store, "_galaxy_tag_map", side_effect=lambda g: galaxies.get(g, {})):
+            lookup = analyser_pipeline._build_galaxy_lookup()
+            context = analyser_pipeline.parse_misp_context(self.LINE, analyser_pipeline.galaxy_names_with_commas())
+            analyser_pipeline._apply_misp_context_tags(misp, SimpleNamespace(uuid="e"), context, lookup)
+            scope_tags = misp_store._build_scope_tags({"geographic_scope": context["geographies"],
+                                                       "sectors": context["sectors"]})
+        self.assertEqual(sorted(misp.tagged), ["country-tag", "sector-tag"])
+        self.assertEqual(sorted(scope_tags), ["country-tag", "sector-tag"])
 
 
 if __name__ == "__main__":

@@ -343,7 +343,7 @@ def current_user_email():
 
 
 def sso_configured():
-    """Whether single sign-on is set up, so that requests are meant to carry a MISP user.
+    """Whether single sign-on is set up, so that requests are meant to come from a MISP user.
 
     Either setting says so. The redirect is the switch on the settings page, and
     saving with it on stores MISP_SESSION_COOKIE_NAME, which stays behind when the

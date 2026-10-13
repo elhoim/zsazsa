@@ -82,7 +82,7 @@ def _rule_dict(item: dict, base_url: str) -> dict:
     """One Rulezet record, in the shape the rule viewer expects.
 
     Shared by the searches and by get_rule so the two cannot drift: a field the
-    endpoint does not carry comes back empty, and the viewer leaves it out.
+    endpoint does not return comes back empty, and the viewer leaves it out.
     """
     rule_id = item.get("id")
     rule = {
@@ -157,8 +157,8 @@ def get_rule(rule_id: str) -> dict | None:
         logger.warning("Rulezet detail for rule %s returned an unexpected shape", rule_id)
         return None
 
-    # The detail endpoint carries no author string, only the Rulezet account
-    # that submitted the rule. A record that does carry one keeps it rather
+    # The detail endpoint has no author string, only the Rulezet account
+    # that submitted the rule. A record that does have one keeps it rather
     # than losing it to an account with no name on it.
     user = item.get("user") if isinstance(item.get("user"), dict) else {}
     submitter = " ".join(p for p in (_str(user.get("first_name")),
@@ -174,7 +174,7 @@ def search_rules_by_cve(cve_ids: list[str]) -> list[dict]:
 
     Returns a list of {id, title, format, source, cve_ids, quality_score, url}
     dicts, or an empty list on any failure, when RULEZET_URL is not configured,
-    or when no CVE ID is given — so callers can treat this as optional
+    or when no CVE ID is given, so callers can treat this as optional
     enrichment, the same way core.vuln_lookup.fetch_cve_info does.
     """
     return _search("search_rules_by_cve", "cve_ids", cve_ids) or []
@@ -190,7 +190,7 @@ def search_rules_by_attack(technique_ids: list[str]) -> list[dict]:
 
 
 def validate_rule(rule_format: str, content: str) -> dict | None:
-    """Dry-run a rule's syntax against a Rulezet instance's public validator —
+    """Dry-run a rule's syntax against a Rulezet instance's public validator:
     the same per-format check a rule goes through on creation, without ever
     saving anything.
 

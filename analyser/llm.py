@@ -141,6 +141,12 @@ def _call(system: str, user: str, max_tokens: int, feature: str = "unknown", cfg
         # rather than an error, so say why the caller got nothing.
         logger.error("%s returned no content for %s (model %s, finish_reason %s, token budget %s)",
                      effective_provider, feature, effective_model, choice.finish_reason, max_tokens)
+    elif choice.finish_reason == "length":
+        # The model stopped at the token budget, not at the end of its answer.
+        # What came back is still used, but the rest is missing: for a report
+        # summary, the MISP context lines its galaxy tags are read from.
+        logger.warning("%s answer for %s was cut off at its token budget of %s (model %s)",
+                       effective_provider, feature, max_tokens, effective_model)
     return text
 
 

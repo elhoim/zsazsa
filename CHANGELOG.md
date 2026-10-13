@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.0.8 - development
+
+Hardening contributed by @elhoim, and fixes found while reviewing the last
+releases.
+
+### Upgrading
+
+Pull and restart, there is nothing to migrate. In the CSV export of an
+indicator feed, a value that starts with `=`, `+`, `-` or `@` now has a single
+quote in front.
+
+### Added
+
+- From this release on, each release on GitHub has a CycloneDX SBOM.
+
+### Fixed
+
+- A long number in the title of a MISP event could stop new PIRs, GIRs, RFIs,
+  feeds, threat actor profiles and threat landscape reports from being created,
+  or push their numbering up for good. Such a number is now skipped.
+  / via @elhoim
+- With the scraper switched off but still set to the same MISP as the web app,
+  source events on that MISP were not found.
+- A detection engineering request whose status change MISP refused showed an
+  error page. The detail page and the board now say why.
+- The daily briefing pages lost the AI drafting badge once the briefing had
+  been delivered.
+- The Rulezet lookup passed on anything that started with `CVE-`, so one value
+  could hold several IDs separated by commas and get past the limit of ten. It
+  and the CVE lookup now only take whole CVE IDs.
+- A summary cut off at the model's token budget is now logged as a warning.
+
+### Security
+
+- A product with a TLP level the clearance check could not read, such as
+  `TLP:RED`, was treated as amber and reached stakeholders cleared for amber.
+  An unreadable level now counts as red. / via @elhoim
+- The example configuration shipped with MISP certificate checks off.
+  / via @elhoim
+- A value from MISP that looked like a spreadsheet formula ran as one when the
+  CSV export, or the CSV of the exported PyMISP script, was opened in Excel or
+  LibreOffice. / via @elhoim
+- The installer wrote `config/__init__.py`, which holds the keys, readable by
+  every user on the host. / via @elhoim
+
 ## 1.0.7
 
 Threat landscape reports follow ENISA's method, from triaged events to a PDF.

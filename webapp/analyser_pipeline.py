@@ -68,11 +68,27 @@ def _deduplicate_vendors(vendors: list) -> list:
     return kept
 
 
-def parse_misp_context(text: str) -> dict:
+def galaxy_names_with_commas() -> frozenset:
+    """The sector and country names, lower-cased, that have a comma in them.
+
+    parse_misp_context needs them to read a line like "Finance, Government,
+    Administration" as two sectors rather than three.
+    """
+    return frozenset(
+        name.strip().lower()
+        for galaxy in (misp_store.GALAXY_SECTOR, misp_store.GALAXY_COUNTRY, misp_store.GALAXY_TARGET_INFORMATION)
+        for name in misp_store._galaxy_tag_map(galaxy)
+        if "," in name
+    )
+
+
+def parse_misp_context(text: str, names_with_commas=frozenset()) -> dict:
     """The scope an AI summary names, read from its "MISP context" lines.
 
     Shared with the data collection page, which writes summaries of its own and
-    has to tag them with the same scope this run would.
+    has to tag them with the same scope this run would. The names on a line are
+    separated by commas, so two neighbours that together make a name in
+    `names_with_commas` (from galaxy_names_with_commas) stay one name.
     """
     result = {"sectors": [], "geographies": [], "attack_techniques": [], "threat_actors": [], "vendor": []}
 
@@ -83,7 +99,16 @@ def parse_misp_context(text: str) -> dict:
         val = m.group(1).strip()
         if "none identified" in val.lower():
             return []
-        return [s.strip() for s in val.split(",") if s.strip()]
+        names = []
+        for part in val.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if names and f"{names[-1]}, {part}".lower() in names_with_commas:
+                names[-1] += f", {part}"
+            else:
+                names.append(part)
+        return names
 
     result["sectors"] = _csv(_SECTOR_LINE_RE)
     result["geographies"] = _csv(_GEO_LINE_RE)
@@ -258,15 +283,15 @@ def _build_galaxy_lookup() -> dict:
     country_map = misp_store._galaxy_tag_map(misp_store.GALAXY_COUNTRY)
     ti_map = misp_store._galaxy_tag_map(misp_store.GALAXY_TARGET_INFORMATION)
     ta_map = misp_store._galaxy_tag_map(misp_store.GALAXY_THREAT_ACTOR)
-    country_by_name = {k.lower(): v for k, v in country_map.items()}
-    country_by_name.update({k.lower(): v for k, v in ti_map.items()})
+    country_by_name = {k.strip().lower(): v for k, v in country_map.items()}
+    country_by_name.update({k.strip().lower(): v for k, v in ti_map.items()})
     logger.info(
         "Galaxy lookup built: %d ATT&CK techniques, %d sectors, %d countries, %d threat actors",
         len(attack_by_id), len(sector_map), len(country_by_name), len(ta_map),
     )
     return {
         "attack_by_id": attack_by_id,
-        "sector_by_name": {k.lower(): v for k, v in sector_map.items()},
+        "sector_by_name": {k.strip().lower(): v for k, v in sector_map.items()},
         "country_by_name": country_by_name,
         "threat_actor_by_name": {k.lower(): v for k, v in ta_map.items()},
     }
@@ -328,7 +353,7 @@ def _ensure_ai_summary(misp, event, reports, galaxy_lookup: dict) -> tuple[str, 
         logger.warning("mark_ai_summary failed for %s: %s", event.uuid, exc)
 
     if galaxy_lookup:
-        context = parse_misp_context(summary)
+        context = parse_misp_context(summary, galaxy_names_with_commas())
         applied = _apply_misp_context_tags(misp, event, context, galaxy_lookup)
         if applied:
             logger.info("Applied %d galaxy tag(s) to %s from MISP context", applied, event.uuid)
@@ -491,11 +516,12 @@ def run_daily_briefing_action(progress=None) -> dict:
         "threat_types": list(getattr(config, "FOCUS_POINTS_THREAT_TYPES", []) or []),
         "threat_actors": list(getattr(config, "FOCUS_POINTS_THREAT_ACTORS", []) or []),
     }
+    names_with_commas = galaxy_names_with_commas() if events else frozenset()
     for event in events:
         summary = (summaries.get(event.uuid) or "").strip()
         article = _first_non_empty_report_content(reports_cache.get(event.uuid, []))
         source_text = summary or article
-        context = parse_misp_context(summary) if summary else {}
+        context = parse_misp_context(summary, names_with_commas) if summary else {}
 
         story_text = source_text
         actor_type = ""

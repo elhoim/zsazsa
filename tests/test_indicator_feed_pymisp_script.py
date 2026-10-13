@@ -2,7 +2,7 @@
 
 The script is code written from what analysts typed, the feed name and every
 query value, and it is meant to be run elsewhere. So it has to compile, run the
-same search the feed runs, carry no credential, and keep a hostile value a
+same search the feed runs, hold no credential, and keep a hostile value a
 string rather than letting it end the literal it sits in.
 
     python -m unittest tests.test_indicator_feed_pymisp_script
@@ -92,7 +92,7 @@ class Script(unittest.TestCase):
         # The value never appears raw, so it cannot have become code or a comment.
         self.assertNotIn(_HOSTILE, src)
 
-    def test_it_carries_no_credential_or_feed_token(self):
+    def test_it_holds_no_credential_or_feed_token(self):
         with mock.patch.object(misp_store.config, "MISP_URL", "https://misp.internal", create=True), \
                 mock.patch.object(misp_store.config, "MISP_KEY", "k" * 40, create=True):
             src = misp_store.pymisp_script({"types": ["ip-dst"]}, _feed())

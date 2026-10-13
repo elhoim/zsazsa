@@ -593,7 +593,8 @@ def _generate_ai_summary(misp, event, source_id, user=""):
 
     applied_tags = []
     try:
-        applied_tags = _tag_event_scope(misp, event, analyser_pipeline.parse_misp_context(summary))
+        context = analyser_pipeline.parse_misp_context(summary, analyser_pipeline.galaxy_names_with_commas())
+        applied_tags = _tag_event_scope(misp, event, context)
     except Exception as exc:
         logger.warning("Could not apply scope tags to %s: %s", uuid, exc)
     if applied_tags:

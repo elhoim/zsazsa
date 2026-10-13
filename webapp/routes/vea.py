@@ -364,7 +364,7 @@ def _build_seed_from_sources(source_uuids, source_pairs, source_events):
         references = misp_store.source_event_urls(source_uuids, source_hints)
 
     # Only the ones that really are CVE IDs: a MISP vulnerability attribute also
-    # carries GHSA and vendor identifiers, which have no page here, and its value
+    # holds GHSA and vendor identifiers, which have no page here, and its value
     # is whatever was typed into it, which has no business in a URL unchecked.
     for cve in cve_ids:
         if CVE_RE.fullmatch(cve):

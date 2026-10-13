@@ -349,7 +349,7 @@ def list_briefings():
     return render_template(
         "daily_briefing/list.html",
         briefings=briefings,
-        ai_jobs=job_store.by_entity(),
+        ai_jobs=job_store.by_entity("briefing-draft"),
         scope_summaries={b.uuid: misp_store.briefing_combined_scope_summary(b) for b in briefings},
         state_filter=state_filter or "",
         review_states=misp_store.BRIEFING_REVIEW_STATES,
@@ -515,7 +515,7 @@ def detail(id):
     return render_template(
         "daily_briefing/detail.html",
         briefing=briefing,
-        ai_job=job_store.by_entity().get(briefing.uuid),
+        ai_job=job_store.by_entity("briefing-draft").get(briefing.uuid),
         feedback=feedback,
         recipients=recipients,
         notify_status=notify_status,
