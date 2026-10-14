@@ -19,21 +19,29 @@ jobs:
   unittest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The oldest Python zsazsa supports and the one it is developed on. Some
+    # pins in requirements.txt differ between the two, and so does the
+    # standard library: on 3.10, concurrent.futures.TimeoutError is not yet
+    # the builtin one.
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       # Actions are pinned by commit SHA, not by tag: a tag can be moved to
       # point at different code. Dependabot keeps the SHAs current.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       # WeasyPrint renders the product PDFs and needs pango at import time.
       - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
-      # Bounded like the runtime deps: a new ruff minor can add checks to a
-      # rule already selected, which turns this red without a code change.
+      # Bounded, like the ranges in requirements.in: a new ruff minor can add
+      # checks to a rule already selected, which turns this red without a code
+      # change.
       - run: pip install -r requirements.txt 'ruff>=0.16,<0.17'
       # The suite imports config, which is not in the repository: it holds the
-      # MISP keys. The example carries the same names with empty values, which is
+      # MISP keys. The example has the same names with empty values, which is
       # all the tests need since none of them reach a server.
       - run: cp config/__init__.py.example config/__init__.py
       # Rule selection lives in ruff.toml so a local run matches this one.

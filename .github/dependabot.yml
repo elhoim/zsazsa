@@ -3,24 +3,24 @@
 version: 2
 
 updates:
-  # requirements.txt pins ranges with a hand-written "known-good version"
-  # comment per line, so a bump wants a glance at that comment rather than a
-  # blind merge. Grouped and weekly to keep that to one review, not fifteen.
-  - package-ecosystem: pip
+  # requirements.in holds the ranges zsazsa needs and requirements.txt the
+  # exact versions, compiled from it by uv. The uv ecosystem, not pip, is the
+  # one that understands that pair: it recompiles the lock with the options in
+  # its header, --universal and --python-version among them. Grouped and weekly
+  # to keep it to one review rather than one per package.
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    # The default for a requirements.txt is "increase", which raises every
-    # lower bound to whatever is newest. In that file the lower bound is what
-    # zsazsa needs and the comment beside it is the version it was tested
-    # against, so "increase" rewrites the wrong half: the first batch it opened
-    # excluded the versions actually in use. This only moves a bound when the
-    # range in place does not already allow the new version.
+    # Updates the pins in requirements.txt within the ranges, and only moves a
+    # range in requirements.in when the new version falls outside it. The
+    # default, "increase", would raise every lower bound to whatever is newest,
+    # and the lower bound is what zsazsa needs, not what it was tested with.
     versioning-strategy: increase-if-necessary
     ignore:
-      # requirements.txt caps openai below 3 on purpose and we stay there. The
+      # requirements.in caps openai below 3 on purpose and we stay there. The
       # call surface in analyser/llm.py was checked against 3.19.2 and works, so
       # this is not a known break, it is that no test exercises the SDK: a later
       # 3.x could move something under us and CI would stay green. Moving up is

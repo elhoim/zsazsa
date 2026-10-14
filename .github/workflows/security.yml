@@ -97,9 +97,9 @@ jobs:
       # job goes red for pip rather than for anything zsazsa depends on.
       - run: pip install --upgrade pip
 
-      # requirements.txt pins ranges, so this resolves the newest version in
-      # each range: the same thing a fresh install gets, which is what wants
-      # auditing.
+      # requirements.txt pins every package, so this audits exactly what an
+      # installation gets. A vulnerable pin stays red here, weekly as well,
+      # until the lock is bumped.
       - run: pip install -r requirements.txt
       - run: pip install 'pip-audit>=2.7,<3'
 
