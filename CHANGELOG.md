@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.8 - development
+## 1.0.8
 
 Hardening contributed by @elhoim, and fixes found while reviewing the last
 releases.
