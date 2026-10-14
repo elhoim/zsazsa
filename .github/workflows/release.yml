@@ -46,10 +46,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # requirements.txt pins ranges, so the SBOM is taken from a fresh install
-      # rather than from the file: that gives the versions a new installation
-      # gets, and the packages they pull in. The environment has no pip of its
-      # own, which zsazsa does not depend on and the SBOM would otherwise list.
+      # The SBOM is taken from an installation of the lock rather than from the
+      # file, because only an installed package has its licence and the rest
+      # of its metadata. The environment has no pip of its own, which zsazsa
+      # does not depend on and the SBOM would otherwise list.
       - name: Install the requirements in an environment of their own
         run: |
           python -m venv --without-pip "$RUNNER_TEMP/app"
@@ -58,24 +58,50 @@ jobs:
 
       # zsazsa has no pyproject.toml, which is where cyclonedx-py reads the
       # SBOM's own subject from. This one exists only for the run, so the SBOM
-      # names zsazsa, its version and licence, and its direct dependencies.
+      # names zsazsa, its version and licence, and its direct dependencies:
+      # those in requirements.in, not every package in the lock.
       - name: Describe zsazsa for the SBOM
         run: |
           python - "$RUNNER_TEMP/pyproject.toml" <<'EOF'
           import json, runpy, sys
           version = runpy.run_path("webapp/version.py")["APP_VERSION"]
-          deps = [line.split("#")[0].strip() for line in open("requirements.txt")]
+          deps = [line.split("#")[0].strip() for line in open("requirements.in")]
           with open(sys.argv[1], "w") as f:
               f.write(f'[project]\nname = "zsazsa"\nversion = "{version}"\nlicense = "AGPL-3.0-only"\n'
                       f'dependencies = {json.dumps([d for d in deps if d])}\n')
           EOF
 
+      # The NTIA minimum elements ask for the supplier, which cyclonedx-py has
+      # no option for, so it is added afterwards and the result checked against
+      # the schema again.
       - name: Generate the SBOM
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           cyclonedx-py environment --pyproject "$RUNNER_TEMP/pyproject.toml" \
             --of XML --sv 1.4 -o "zsazsa-$TAG.cdx.xml" "$RUNNER_TEMP/app/bin/python"
+          python - "zsazsa-$TAG.cdx.xml" <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+          from cyclonedx.schema import SchemaVersion
+          from cyclonedx.validation.xml import XmlValidator
+
+          path = sys.argv[1]
+          ns = "{http://cyclonedx.org/schema/bom/1.4}"
+          ET.register_namespace("", ns.strip("{}"))
+          tree = ET.parse(path)
+          metadata = tree.getroot().find(ns + "metadata")
+          supplier = ET.Element(ns + "supplier")
+          ET.SubElement(supplier, ns + "name").text = "cudeso.be"
+          # The schema fixes the order: the supplier comes after the component.
+          metadata.insert(list(metadata).index(metadata.find(ns + "component")) + 1, supplier)
+          ET.indent(tree, space="  ")
+          tree.write(path, xml_declaration=True, encoding="utf-8")
+
+          error = XmlValidator(SchemaVersion.V1_4).validate_str(open(path).read())
+          if error:
+              sys.exit(f"The SBOM does not validate: {error}")
+          EOF
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

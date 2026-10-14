@@ -7,9 +7,14 @@ releases.
 
 ### Upgrading
 
-Pull and restart, there is nothing to migrate. In the CSV export of an
-indicator feed, a value that starts with `=`, `+`, `-` or `@` now has a single
-quote in front.
+Pull, run `pip install -r requirements.txt` as in the upgrade steps, and
+restart. There is nothing to migrate.
+
+`requirements.txt` now pins every package to an exact version, generated from
+`requirements.in`, which has the ranges zsazsa needs.
+
+In the CSV export of an indicator feed, a value that starts with `=`, `+`, `-`
+or `@` now has a single quote in front.
 
 ### Added
 
@@ -31,6 +36,8 @@ quote in front.
   could hold several IDs separated by commas and get past the limit of ten. It
   and the CVE lookup now only take whole CVE IDs.
 - A summary cut off at the model's token budget is now logged as a warning.
+- On Python 3.10, pulling an event from a MISP server that had stopped
+  answering was reported as a failed fetch rather than as a timeout.
 
 ### Security
 

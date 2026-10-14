@@ -351,7 +351,9 @@ def _fetch_event_timed(misp, uuid, timeout):
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
         return pool.submit(_work).result(timeout=timeout)
-    except TimeoutError as exc:
+    except concurrent.futures.TimeoutError as exc:
+        # The futures one: on Python 3.10 it is a class of its own, which the
+        # builtin TimeoutError does not catch. From 3.11 they are the same.
         raise TimeoutError(f"MISP did not respond within {timeout}s") from exc
     finally:
         # As a context manager the pool waits for the stalled worker on the way
