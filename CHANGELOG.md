@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.9 - development
+
+### Added
+
+- Each release also has a deployment SBOM, covering zsazsa and the latest
+  misp-scraper release together, each with its own packages.
+
 ## 1.0.8
 
 Hardening contributed by @elhoim, and fixes found while reviewing the last
