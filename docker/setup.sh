@@ -688,6 +688,11 @@ write_env() {
         umask 077
         cat > "$ENV_FILE" <<EOF
 # Written by setup.sh from your answers; env.example explains each line.
+#
+# Docker Compose reads .env on creation of containers. zsazsa never reads it.
+# Changing a value does not change zsazsa. 
+# Edit the config file or go the Settings page, and run docker compose restart.
+# volumes/config/__init__.py
 COMPOSE_FILE=$files
 COMPOSE_PROFILES=$profiles
 ZSAZSA_BIND=$BIND
