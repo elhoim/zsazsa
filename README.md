@@ -1,12 +1,12 @@
 # zsazsa CTI
 
 <p align="center">
-  <a href="https://zsazsa-project.org/documentation.html"><b>Quickstart</b></a> ·
-  <a href="INSTALL.md"><b>Installation</b></a> ·
-  <a href="docker/README.md"><b>Docker</b></a> ·
-  <a href="#configuration"><b>Configuration</b></a> ·
-  <a href="CHANGELOG.md"><b>Changelog</b></a> ·
-  <a href="https://zsazsa-project.org"><b>Website</b></a>
+  <a href="https://zsazsa-project.org/documentation.html"><img alt="Quickstart" src="https://img.shields.io/badge/Quickstart-0066cc?style=for-the-badge&logo=rocket&logoColor=white"></a>
+  <a href="INSTALL.md"><img alt="Installation" src="https://img.shields.io/badge/Installation-0052a3?style=for-the-badge&logo=gnubash&logoColor=white"></a>
+  <a href="docker/README.md"><img alt="Docker" src="https://img.shields.io/badge/Docker-0052a3?style=for-the-badge&logo=docker&logoColor=white"></a>
+  <a href="#configuration"><img alt="Configuration" src="https://img.shields.io/badge/Configuration-0052a3?style=for-the-badge&logo=files&logoColor=white"></a>
+  <a href="CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/Changelog-6c757d?style=for-the-badge&logo=git&logoColor=white"></a>
+  <a href="https://zsazsa-project.org"><img alt="Website" src="https://img.shields.io/badge/Website-6c757d?style=for-the-badge&logo=googlechrome&logoColor=white"></a>
 </p>
 
 zsazsa is a **CTI program** management and production platform built around [MISP](https://www.misp-project.org/). It links collection, triage, analyst workflows, requirement management, publishing and stakeholder delivery in one place.

@@ -760,7 +760,7 @@ write_docker_config() {
     fi
 }
 
-# misp-scraper's configuration: kept, imported, or scraper.py.zsazsa with its MISP filled in.
+# misp-scraper's configuration: kept, imported, or scraper.py.zsazsa with its MISP and a Flask secret filled in.
 write_scraper_config() {
     local staging
     if [[ "$SCRAPER_CONFIG" != keep ]]; then
@@ -768,7 +768,10 @@ write_scraper_config() {
         if [[ -n "$SCRAPER_CONFIG" ]]; then
             cp "$SCRAPER_CONFIG" "$staging/scraper.py"
         else
+            # Each install its own Flask secret, never one from a template.
+            S=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n') \
             U="$SCRAPER_MISP_URL" K="$SCRAPER_MISP_KEY" V="$SCRAPER_MISP_VERIFY" awk '
+                /^flask_secret_key = / { print "flask_secret_key = \"" ENVIRON["S"] "\""; next }
                 /^misp_url = / { print "misp_url = \"" ENVIRON["U"] "\""; next }
                 /^misp_key = / { print "misp_key = \"" ENVIRON["K"] "\""; next }
                 /^misp_verifycert = / { print "misp_verifycert = " ENVIRON["V"]; next }

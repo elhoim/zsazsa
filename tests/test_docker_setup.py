@@ -221,6 +221,30 @@ class SetupScript(unittest.TestCase):
         for line in ('misp_url = "https://misp.example.org"', 'misp_key = "k"', "misp_verifycert = True"):
             self.assertIn(line, written)
 
+    def write_scraper_config(self):
+        scraper = self.root / "misp-scraper"
+        scraper.mkdir(exist_ok=True)
+        (scraper / "feedlist.json").write_text("[]")
+        self.run_bash('source docker/setup.sh\ninit_answers\n'
+                      f'SCRAPER_DIR={scraper}\nSCRAPER_MISP_URL=https://misp.example.org\n'
+                      'SCRAPER_MISP_KEY=k\nSCRAPER_MISP_VERIFY=True\n'
+                      'copy_scraper_files() { cp "$1/scraper.py" written.py; }\ncheck_scraper_config() { :; }\n'
+                      'write_scraper_config\n')
+        return (self.root / "written.py").read_text()
+
+    def test_each_scraper_config_gets_a_flask_secret_key_of_its_own(self):
+        # The template once had misp-scraper's example key, so every Docker
+        # install shared one that is on GitHub for anyone to read.
+        keys = []
+        for _ in range(2):
+            lines = [line for line in self.write_scraper_config().splitlines()
+                     if line.startswith("flask_secret_key = ")]
+            self.assertEqual(len(lines), 1)
+            keys.append(lines[0].split('"')[1])
+        self.assertNotEqual(keys[0], keys[1])
+        for key in keys:
+            self.assertRegex(key, r"^[0-9a-f]{64}$")
+
 
 def _compose_available():
     try:

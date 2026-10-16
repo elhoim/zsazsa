@@ -1,5 +1,6 @@
-# misp-scraper's configuration next to zsazsa. setup.sh fills in misp_url and
-# misp_key; Redis comes from the environment the compose file sets.
+# misp-scraper's configuration next to zsazsa. setup.sh fills in misp_url,
+# misp_key and a flask_secret_key of its own; Redis comes from the environment
+# the compose file sets.
 import os
 
 # General configuration
@@ -7,7 +8,7 @@ misp_scraper_log = "/config/scraper.log"
 app_name = "MISP-Scraper"                                       # Used in the Flask server
 manual_feed = "Manual"
 manual_feedsource = "Manual"
-flask_secret_key = "MyZsuePerSecret1984key"                     # Flask secret key. Change this to something random
+flask_secret_key = ""                                           # setup.sh writes a random one
 flask_address = "127.0.0.1"                                     # IP address for the Flask server
 flask_port = 5200
 flask_url = "http://127.0.0.1:5200"
