@@ -1,0 +1,716 @@
+{% extends "base.html" %}
+{% from "_macros.html" import remove_secret %}
+
+{% block title %}Setup wizard | zsazsa CTI{% endblock %}
+{% block page_title %}Setup wizard{% endblock %}
+
+{# A step that saves through the Settings form: /config keeps every setting
+   the form does not send, and goes on to the next step once it has saved. #}
+{% macro settings_form() %}
+<form method="post" action="{{ url_for('config_page.index') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="wizard_step" value="{{ current }}">
+  {{ caller() }}
+</form>
+{% endmacro %}
+
+{# Back, and either Continue or, for a step with a form, Skip and Save. #}
+{% macro footer(saves=False) %}
+<div class="wizard-footer">
+  {% if previous %}
+  <a href="{{ url_for('setup_wizard.step', name=previous) }}" class="btn btn-light border shadow-sm">
+    <i class="fas fa-arrow-left me-1"></i> Back
+  </a>
+  {% else %}<span></span>{% endif %}
+  <div class="d-flex align-items-center gap-2">
+    {% if saves %}
+    <a href="{{ url_for('setup_wizard.step', name=following) }}" class="btn btn-link text-muted text-decoration-none">Skip this step</a>
+    <button type="submit" class="btn btn-primary">Save and continue <i class="fas fa-arrow-right ms-1"></i></button>
+    {% else %}
+    <a href="{{ url_for('setup_wizard.step', name=following) }}" class="btn btn-primary">Continue <i class="fas fa-arrow-right ms-1"></i></a>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro next_item(icon, text, label, link) %}
+<li>
+  <span class="wizard-summary-icon text-muted"><i class="fas {{ icon }}"></i></span>
+  <span class="flex-grow-1 small">{{ text }}</span>
+  <a href="{{ link }}" class="btn btn-sm btn-light border shadow-sm">{{ label }}</a>
+</li>
+{% endmacro %}
+
+{% block content %}
+{% set done_count = done.values() | select | list | length %}
+<div class="wizard">
+
+  <div class="wizard-hero">
+    <div class="wizard-hero-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+    <div class="flex-grow-1">
+      <h2 class="wizard-hero-title">Set up zsazsa</h2>
+      <p class="wizard-hero-text">
+        A few questions to get zsazsa collecting and analysing. Every answer can be changed later,
+        here or on the Settings pages, and you can come back to this wizard at any time.
+      </p>
+      <div class="wizard-progress" title="{{ done_count }} of {{ done | length }} steps set up">
+        <div class="wizard-progress-bar" style="width: {{ (100 * done_count / done | length) | round | int }}%"></div>
+      </div>
+      <div class="wizard-progress-label">{{ done_count }} of {{ done | length }} set up</div>
+    </div>
+  </div>
+
+  <ol class="wizard-steps">
+    {% for name, step_title, _ in steps %}
+    <li class="wizard-step {{ 'is-current' if name == current }} {{ 'is-done' if done.get(name) }}">
+      <a href="{{ url_for('setup_wizard.step', name=name) }}">
+        <span class="wizard-step-dot">
+          {% if done.get(name) %}<i class="fas fa-check"></i>{% elif name == 'done' %}<i class="fas fa-flag-checkered"></i>{% else %}{{ loop.index }}{% endif %}
+        </span>
+        <span class="wizard-step-title">{{ step_title }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="card content-card wizard-card">
+    <div class="card-header">
+      <i class="fas {{ icon }} me-2"></i>{{ title }}
+      {% if done.get(current) %}<span class="badge source-enabled ms-2"><i class="fas fa-circle-check me-1"></i>Set up</span>{% endif %}
+    </div>
+
+    {# ── Your organisation ─────────────────────────────────────────────── #}
+    {% if current == 'organisation' %}
+    {% call settings_form() %}
+    <div class="card-body">
+      <p class="wizard-lead">
+        Who the intelligence comes from. The names and the logo go in the header of the product
+        PDFs and of the mails zsazsa sends to stakeholders.
+      </p>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="wz-company">Company or organisation</label>
+          <input type="text" id="wz-company" name="BRAND_COMPANY" class="form-control" value="{{ view.company }}" placeholder="Example Corp" autofocus>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="wz-department">Department or team</label>
+          <input type="text" id="wz-department" name="BRAND_DEPARTMENT" class="form-control" value="{{ view.department }}" placeholder="Cyber Threat Intelligence">
+        </div>
+      </div>
+      <div class="wizard-logo">
+        <img {% if view.logo %}src="{{ url_for('config_page.serve_logo') }}"{% else %}hidden{% endif %} alt="Your logo" id="wz-logo-preview">
+        <div>
+          <label class="form-label mb-1" for="wz-logo-file">Logo</label>
+          <div class="small text-muted mb-2">PNG or JPG, up to 2 MB.</div>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <input type="file" id="wz-logo-file" accept=".png,.jpg,.jpeg" class="form-control form-control-sm" style="max-width:300px;">
+            <button type="button" class="btn btn-sm btn-light border shadow-sm" id="wz-logo-upload">
+              <i class="fas fa-upload me-1"></i>{{ 'Replace logo' if view.logo else 'Upload logo' }}
+            </button>
+            <span class="small" id="wz-logo-result" role="status"></span>
+          </div>
+        </div>
+      </div>
+      <p class="form-text mt-3 mb-0">
+        Colours and the theme are on the <a href="{{ url_for('config_page.index', tab='tab-styling') }}">Styling</a> tab of the Settings page.
+      </p>
+    </div>
+    {{ footer(saves=True) }}
+    {% endcall %}
+
+    {# ── Data collection sources ───────────────────────────────────────── #}
+    {% elif current == 'sources' %}
+    <div class="card-body">
+      <p class="wizard-lead">
+        Where zsazsa gets its events from. Each source below adds to what the analyser reads; you need
+        at least one. A source is saved as soon as you add it.
+      </p>
+
+      <div class="wizard-tiles">
+        <div class="wizard-tile">
+          <div class="wizard-tile-head">
+            <span class="wizard-tile-icon"><i class="fas fa-spider"></i></span>
+            <div>
+              <div class="fw-semibold">misp-scraper</div>
+              <div class="small text-muted">Articles from RSS feeds and websites, scraped into a MISP.</div>
+            </div>
+            {% if view.scraper %}
+            <span class="badge source-enabled ms-auto"><i class="fas fa-circle-check me-1"></i>Enabled</span>
+            {% else %}
+            <span class="badge source-disabled ms-auto">Not configured</span>
+            {% endif %}
+          </div>
+          {% if view.scraper %}
+          <div class="small font-monospace text-truncate">{{ view.scraper_url }}</div>
+          {% else %}
+          <p class="small text-muted mb-0">Its MISP and Redis are set on the <a href="{{ url_for('collection_sources.index') }}">Sources page</a>.</p>
+          {% endif %}
+        </div>
+
+        <div class="wizard-tile">
+          <div class="wizard-tile-head">
+            <span class="wizard-tile-icon"><i class="fas fa-pen-to-square"></i></span>
+            <div>
+              <div class="fw-semibold">Manual sources</div>
+              <div class="small text-muted">Feeds, portals and newsletters an analyst follows by hand.</div>
+            </div>
+          </div>
+          {% if view.manual is none %}
+          <p class="small text-muted mb-2">MISP could not be reached to list them.</p>
+          {% elif view.manual %}
+          <ul class="wizard-list">
+            {% for source in view.manual %}<li><i class="fas fa-file-lines"></i>{{ source.name }}</li>{% endfor %}
+          </ul>
+          {% else %}
+          <p class="small text-muted mb-2">None yet.</p>
+          {% endif %}
+          <a href="{{ url_for('collection_sources.new') }}" class="btn btn-sm btn-light border shadow-sm">
+            <i class="fas fa-plus me-1"></i> Add a manual source
+          </a>
+        </div>
+      </div>
+
+      <div class="wizard-section">
+        <div class="wizard-section-head">
+          <div>
+            <h3 class="wizard-section-title"><img src="{{ url_for('static', filename='misp-logo.png') }}" alt="" class="wizard-misp-logo">MISP servers</h3>
+            <div class="small text-muted">Events shared with you by other communities, read straight from their MISP.</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-light border shadow-sm" data-wizard-toggle="wz-add-server">
+            <i class="fas fa-plus me-1"></i> Add a MISP server
+          </button>
+        </div>
+        {% if view.servers %}
+        <ul class="wizard-list">
+          {% for s in view.servers %}
+          <li>
+            <i class="fas fa-server"></i><span class="fw-semibold">{{ s.label }}</span>
+            <span class="small text-muted font-monospace text-truncate">{{ s.url }}</span>
+            {% if not s.enabled %}<span class="badge source-disabled ms-auto">Disabled</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="wizard-add" id="wz-add-server" hidden>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label small mb-1" for="wz-server-label">Name</label>
+              <input type="text" id="wz-server-label" class="form-control form-control-sm" placeholder="CIRCL OSINT">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-1" for="wz-server-url">URL</label>
+              <input type="url" id="wz-server-url" class="form-control form-control-sm font-monospace" placeholder="https://misp.example.org">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="wz-server-key">API key</label>
+              <div class="input-group input-group-sm">
+                <input type="password" id="wz-server-key" class="form-control font-monospace api-key-input" autocomplete="new-password">
+                <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1" for="wz-server-days">Events from the last</label>
+              <div class="input-group input-group-sm">
+                <input type="number" id="wz-server-days" class="form-control" value="7" min="1" max="3650">
+                <span class="input-group-text">days</span>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1" for="wz-server-tls">Verify TLS</label>
+              <select id="wz-server-tls" class="form-select form-select-sm">
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            </div>
+          </div>
+          <div class="wizard-add-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="wz-server-save"><i class="fas fa-floppy-disk me-1"></i>Save server</button>
+            <span class="small" id="wz-server-result" role="status"></span>
+          </div>
+          <div class="form-text">Tag and organisation filters are on the Sources page.</div>
+        </div>
+      </div>
+
+      <div class="wizard-section">
+        <div class="wizard-section-head">
+          <div>
+            <h3 class="wizard-section-title"><i class="fas fa-envelope-open-text"></i>Mailboxes and newsletters</h3>
+            <div class="small text-muted">A mailbox that receives threat newsletters, read by the IMAP collector.</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-light border shadow-sm" data-wizard-toggle="wz-add-mailbox">
+            <i class="fas fa-plus me-1"></i> Add a mailbox
+          </button>
+        </div>
+        {% if view.mailboxes %}
+        <ul class="wizard-list">
+          {% for m in view.mailboxes %}
+          <li>
+            <i class="fas fa-inbox"></i><span class="fw-semibold">{{ m.name }}</span>
+            <span class="small text-muted font-monospace">{{ m.host }}</span>
+            {% for n in m.newsletters %}<span class="badge bg-light text-dark border">{{ n }}</span>{% endfor %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="wizard-add" id="wz-add-mailbox" hidden>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label small mb-1" for="wz-mail-name">Name</label>
+              <input type="text" id="wz-mail-name" class="form-control form-control-sm" placeholder="CTI newsletters">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small mb-1" for="wz-mail-host">IMAP server</label>
+              <input type="text" id="wz-mail-host" class="form-control form-control-sm font-monospace" placeholder="imap.example.org">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1" for="wz-mail-port">Port</label>
+              <input type="number" id="wz-mail-port" class="form-control form-control-sm" placeholder="993, or 143 without SSL" min="1" max="65535">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-1" for="wz-mail-user">Username</label>
+              <input type="text" id="wz-mail-user" class="form-control form-control-sm font-monospace" autocomplete="off">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-1" for="wz-mail-password">Password</label>
+              <div class="input-group input-group-sm">
+                <input type="password" id="wz-mail-password" class="form-control font-monospace api-key-input" autocomplete="new-password">
+                <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+              </div>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small mb-1" for="wz-mail-folder">Folder</label>
+              <input type="text" id="wz-mail-folder" class="form-control form-control-sm font-monospace" value="INBOX">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+              <div class="form-check form-switch mb-1">
+                <input class="form-check-input" type="checkbox" id="wz-mail-ssl" checked>
+                <label class="form-check-label small" for="wz-mail-ssl">SSL</label>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="form-label small mb-1">Newsletters in this mailbox</div>
+            {% for parser in view.newsletters %}
+            <div class="wizard-newsletter" data-parser="{{ parser }}">
+              <div class="form-check mb-0">
+                <input class="form-check-input wz-nl-on" type="checkbox" id="wz-nl-{{ loop.index }}">
+                <label class="form-check-label" for="wz-nl-{{ loop.index }}">{{ parser }}</label>
+              </div>
+              <input type="text" class="form-control form-control-sm wz-nl-subject" placeholder="Subject contains" aria-label="Subject contains, for {{ parser }}">
+              <select class="form-select form-select-sm wz-nl-reliability" aria-label="Reliability of {{ parser }}">
+                <option value="">Reliability</option>
+                {% for code, label in view.admiralty_options %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            {% endfor %}
+            <div class="form-text">
+              A newsletter with no subject takes every message in the folder. Senders and manual review are on the Sources page.
+            </div>
+          </div>
+          <div class="wizard-add-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="wz-mail-save"><i class="fas fa-floppy-disk me-1"></i>Save mailbox</button>
+            <span class="small" id="wz-mail-result" role="status"></span>
+          </div>
+        </div>
+      </div>
+
+      <p class="form-text mb-0 mt-3">
+        Filters, limits and the scraper settings are on the
+        <a href="{{ url_for('collection_sources.index') }}">Sources page</a>.
+      </p>
+    </div>
+    {{ footer() }}
+
+    {# ── AI ────────────────────────────────────────────────────────────── #}
+    {% elif current == 'ai' %}
+    <form id="wz-ai-form" data-next="{{ url_for('setup_wizard.step', name=following) }}">
+    <div class="card-body">
+      <p class="wizard-lead">
+        zsazsa uses a language model to judge which articles matter, draft alerts and briefings, and
+        summarise reports. Use OpenAI, a model you run yourself behind an OpenAI-compatible API (Ollama,
+        vLLM, LM Studio), or both. The default is the one every feature uses unless it is set otherwise.
+      </p>
+      <div class="wizard-choice-grid">
+        <div class="wizard-choice {{ 'is-selected' if view.default != 'local' }}" data-provider="openai">
+          <div class="wizard-tile-head">
+            <span class="wizard-tile-icon"><i class="fas fa-cloud"></i></span>
+            <div class="fw-semibold">OpenAI</div>
+            <div class="form-check form-switch ms-auto mb-0">
+              <input class="form-check-input" type="checkbox" id="wz-openai-enabled" {{ 'checked' if view.openai_enabled }}>
+              <label class="form-check-label small" for="wz-openai-enabled">Enabled</label>
+            </div>
+          </div>
+          <label class="form-label small mb-1" for="wz-openai-key">API key</label>
+          <div class="input-group input-group-sm">
+            <input type="password" id="wz-openai-key" class="form-control font-monospace api-key-input"
+                   placeholder="{{ 'Configured, leave blank to keep' if view.openai_key_stored else 'sk-...' }}" autocomplete="new-password">
+            <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+          </div>
+          <label class="form-label small mb-1 mt-3" for="wz-openai-model">Model</label>
+          <input type="text" id="wz-openai-model" class="form-control form-control-sm font-monospace" value="{{ view.openai_model }}" placeholder="gpt-4o-mini">
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="radio" name="wz-default" id="wz-default-openai" value="openai" {{ 'checked' if view.default != 'local' }}>
+            <label class="form-check-label small" for="wz-default-openai">Default provider</label>
+          </div>
+        </div>
+
+        <div class="wizard-choice {{ 'is-selected' if view.default == 'local' }}" data-provider="local">
+          <div class="wizard-tile-head">
+            <span class="wizard-tile-icon"><i class="fas fa-server"></i></span>
+            <div class="fw-semibold">Local LLM</div>
+            <div class="form-check form-switch ms-auto mb-0">
+              <input class="form-check-input" type="checkbox" id="wz-local-enabled" {{ 'checked' if view.local_enabled }}>
+              <label class="form-check-label small" for="wz-local-enabled">Enabled</label>
+            </div>
+          </div>
+          <label class="form-label small mb-1" for="wz-local-url">Network location</label>
+          <input type="url" id="wz-local-url" class="form-control form-control-sm font-monospace" value="{{ view.local_url }}" placeholder="http://127.0.0.1:11434/v1">
+          <label class="form-label small mb-1 mt-3" for="wz-local-key">API key, if it needs one</label>
+          <div class="input-group input-group-sm">
+            <input type="password" id="wz-local-key" class="form-control font-monospace api-key-input"
+                   placeholder="{{ 'Configured, leave blank to keep' if view.local_key_stored }}" autocomplete="new-password">
+            <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+          </div>
+          <label class="form-label small mb-1 mt-3" for="wz-local-model">Model</label>
+          <input type="text" id="wz-local-model" class="form-control form-control-sm font-monospace" value="{{ view.local_model }}" placeholder="llama3.1:8b">
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="radio" name="wz-default" id="wz-default-local" value="local" {{ 'checked' if view.default == 'local' }}>
+            <label class="form-check-label small" for="wz-default-local">Default provider</label>
+          </div>
+        </div>
+      </div>
+      <div id="wz-ai-result" class="small mt-3" role="status"></div>
+      <p class="form-text mb-0 mt-3">
+        Which provider, model and prompt each feature uses is on the
+        <a href="{{ url_for('config_page.index', tab='tab-ai') }}">AI tab</a> of the Settings page.
+      </p>
+    </div>
+    {{ footer(saves=True) }}
+    </form>
+
+    {# ── Focus points ──────────────────────────────────────────────────── #}
+    {% elif current == 'focus' %}
+    {% call settings_form() %}
+    <div class="card-body">
+      <p class="wizard-lead">
+        What matters to your organisation. The analyser checks every new article against these, and
+        one that matches becomes a flash intel draft. One per line; leave a list empty when it does
+        not apply.
+      </p>
+      <div class="wizard-focus-grid">
+        {% for key, label, example, focus_icon, values in view.lists %}
+        <div>
+          <label class="wizard-focus-label" for="wz-{{ key }}"><i class="fas {{ focus_icon }}"></i>{{ label }}</label>
+          <textarea id="wz-{{ key }}" name="{{ key }}" class="form-control font-monospace" rows="{{ [values | length + 1, 4] | max }}"
+                    placeholder="{{ example }}">{{ values | join('\n') }}</textarea>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {{ footer(saves=True) }}
+    {% endcall %}
+
+    {# ── Notifications ─────────────────────────────────────────────────── #}
+    {% elif current == 'notifications' %}
+    <div class="card-body pb-2">
+      <p class="wizard-lead">
+        Where zsazsa tells people about new products and findings: Mattermost channels, and mail
+        addresses through your mail server. Stakeholders subscribe to these channels.
+      </p>
+
+      <div class="wizard-section">
+        <div class="wizard-section-head">
+          <div>
+            <h3 class="wizard-section-title"><i class="fas fa-bullhorn"></i>Channels</h3>
+            <div class="small text-muted">Each channel is saved as soon as you add it.</div>
+          </div>
+          <button type="button" class="btn btn-sm btn-light border shadow-sm" data-wizard-toggle="wz-add-channel">
+            <i class="fas fa-plus me-1"></i> Add a channel
+          </button>
+        </div>
+        {% if view.channels %}
+        <ul class="wizard-list">
+          {% for c in view.channels %}
+          <li>
+            <i class="fas {{ 'fa-envelope' if c.type == 'email' else 'fa-comments' }}"></i><span class="fw-semibold">{{ c.name }}</span>
+            <span class="small text-muted">{{ c.recipient if c.type == 'email' else 'Mattermost' }}</span>
+            {% if not c.enabled %}<span class="badge source-disabled ms-auto">Disabled</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="wizard-add" id="wz-add-channel" hidden>
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label small mb-1" for="wz-channel-type">Type</label>
+              <select id="wz-channel-type" class="form-select form-select-sm">
+                <option value="mattermost">Mattermost</option>
+                <option value="email">E-mail</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1" for="wz-channel-name">Name</label>
+              <input type="text" id="wz-channel-name" class="form-control form-control-sm" placeholder="CTI alerts">
+            </div>
+            <div class="col-md-6" data-channel-type="mattermost">
+              <label class="form-label small mb-1" for="wz-channel-url">Incoming webhook URL</label>
+              <input type="url" id="wz-channel-url" class="form-control form-control-sm font-monospace" placeholder="https://mattermost.example.org/hooks/...">
+            </div>
+            <div class="col-md-6" data-channel-type="email" hidden>
+              <label class="form-label small mb-1" for="wz-channel-recipient">Send to</label>
+              <input type="email" id="wz-channel-recipient" class="form-control form-control-sm font-monospace" placeholder="soc@example.org">
+            </div>
+          </div>
+          <div class="wizard-add-actions">
+            <button type="button" class="btn btn-sm btn-primary" id="wz-channel-save"><i class="fas fa-floppy-disk me-1"></i>Save channel</button>
+            <span class="small" id="wz-channel-result" role="status"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% call settings_form() %}
+    <div class="card-body pt-0">
+      <div class="wizard-section mt-0">
+        <div class="wizard-section-head">
+          <div>
+            <h3 class="wizard-section-title"><i class="fas fa-paper-plane"></i>Mail server</h3>
+            <div class="small text-muted">For the e-mail channels and the products mailed to stakeholders.</div>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label small mb-1" for="wz-smtp-host">SMTP server</label>
+            <input type="text" id="wz-smtp-host" name="SMTP_HOST" class="form-control form-control-sm font-monospace" value="{{ view.smtp_host }}" placeholder="smtp.example.org">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1" for="wz-smtp-port">Port</label>
+            <input type="number" id="wz-smtp-port" name="SMTP_PORT" class="form-control form-control-sm" value="{{ view.smtp_port }}" min="1" max="65535">
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" name="SMTP_USE_TLS" id="wz-smtp-tls" value="true" {{ 'checked' if view.smtp_tls }}>
+              <input type="hidden" name="SMTP_USE_TLS" value="false">
+              <label class="form-check-label small" for="wz-smtp-tls">STARTTLS</label>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1" for="wz-smtp-user">Username</label>
+            <input type="text" id="wz-smtp-user" name="SMTP_USERNAME" class="form-control form-control-sm font-monospace" value="{{ view.smtp_username }}" autocomplete="off">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1" for="wz-smtp-password">Password</label>
+            <div class="input-group input-group-sm">
+              <input type="password" id="wz-smtp-password" name="SMTP_PASSWORD" class="form-control font-monospace api-key-input"
+                     placeholder="{{ 'Configured, leave blank to keep' if view.smtp_password_stored }}" autocomplete="new-password">
+              <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+            </div>
+            {% if view.smtp_password_stored %}{{ remove_secret('SMTP_PASSWORD', 'Remove the stored password') }}{% endif %}
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1" for="wz-smtp-from">Sender</label>
+            <input type="text" id="wz-smtp-from" name="SMTP_FROM" class="form-control form-control-sm font-monospace" value="{{ view.smtp_from }}" placeholder="CTI team &lt;cti@example.org&gt;">
+          </div>
+        </div>
+      </div>
+      <p class="form-text mb-0 mt-3">
+        Testing a channel, flowintel and the mail templates are on the
+        <a href="{{ url_for('config_page.index', tab='tab-notifications') }}">Notifications tab</a> of the Settings page.
+      </p>
+    </div>
+    {{ footer(saves=True) }}
+    {% endcall %}
+
+    {# ── Done ──────────────────────────────────────────────────────────── #}
+    {% else %}
+    <div class="card-body">
+      <p class="wizard-lead">
+        {% if done.sources and done.focus %}
+        zsazsa has what it needs to start. The analyser picks up the sources on its next run.
+        {% else %}
+        The analyser needs at least one data collection source and some focus points before it has
+        anything to work from.
+        {% endif %}
+      </p>
+      <ul class="wizard-summary">
+        {% for name, step_title, step_icon in steps if name != 'done' %}
+        <li class="{{ 'is-done' if done[name] }}">
+          <span class="wizard-summary-icon"><i class="fas {{ 'fa-circle-check' if done[name] else 'fa-circle' }}"></i></span>
+          <span class="flex-grow-1"><i class="fas {{ step_icon }} me-2 text-muted"></i>{{ step_title }}</span>
+          <a href="{{ url_for('setup_wizard.step', name=name) }}" class="btn btn-sm btn-light border shadow-sm">
+            {{ 'Change' if done[name] else 'Set up' }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      <h3 class="wizard-section-title mt-4 mb-2">What comes next</h3>
+      <ul class="wizard-summary">
+        {{ next_item('fa-users', 'Register who you produce intelligence for.', 'Add a stakeholder', url_for('stakeholders.new')) }}
+        {{ next_item('fa-bullseye', 'Write down what they need to know.', 'Define a PIR', url_for('requirements.pir_new')) }}
+        {{ next_item('fa-shield-halved', 'Search public detection rules from the advisories, actor profiles and briefings.',
+                     'Configure Rulezet', url_for('config_page.index', tab='tab-connections')) }}
+        {{ next_item('fa-pen-to-square', 'Change how the AI summarises and drafts, to suit your house style.',
+                     'Adjust the AI prompts', url_for('config_page.index', tab='tab-prompts')) }}
+      </ul>
+    </div>
+    <div class="wizard-footer">
+      <a href="{{ url_for('setup_wizard.step', name=previous) }}" class="btn btn-light border shadow-sm"><i class="fas fa-arrow-left me-1"></i> Back</a>
+      <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary"><i class="fas fa-house me-1"></i> Go to the dashboard</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const value = id => document.getElementById(id).value.trim();
+  const checked = id => document.getElementById(id).checked;
+
+  function show(el, text, ok) {
+    el.textContent = text;
+    el.classList.toggle('text-success', ok);
+    el.classList.toggle('text-danger', !ok);
+  }
+
+  // Saves through an endpoint of the Settings pages, then goes to `next`,
+  // or reloads the step so it lists what was added.
+  function save(url, body, button, result, next) {
+    button.disabled = true;
+    fetch(SCRIPT_ROOT + url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify(body),
+    })
+    .then(zsazsaReadJson)
+    .then(data => {
+      if (!data.ok) throw new Error(data.error || 'the save failed');
+      if (next) window.location.href = next; else window.location.reload();
+    })
+    .catch(err => {
+      button.disabled = false;
+      show(result, 'Not saved: ' + zsazsaErrorText(err), false);
+    });
+  }
+
+  document.querySelectorAll('[data-wizard-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById(btn.dataset.wizardToggle);
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) panel.querySelector('input').focus();
+    });
+  });
+
+  document.querySelectorAll('.api-key-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = btn.parentElement.querySelector('input');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    });
+  });
+
+  const logoUpload = document.getElementById('wz-logo-upload');
+  logoUpload?.addEventListener('click', () => {
+    const file = document.getElementById('wz-logo-file').files[0];
+    const result = document.getElementById('wz-logo-result');
+    if (!file) { show(result, 'Choose a file first.', false); return; }
+    const form = new FormData();
+    form.append('logo', file);
+    logoUpload.disabled = true;
+    fetch(SCRIPT_ROOT + '/config/upload-logo', {method: 'POST', headers: {'X-CSRF-Token': csrfToken}, body: form})
+    .then(zsazsaReadJson)
+    .then(data => {
+      if (!data.ok) throw new Error(data.error || 'the upload failed');
+      const preview = document.getElementById('wz-logo-preview');
+      preview.src = SCRIPT_ROOT + '/config/logo?' + Date.now();
+      preview.hidden = false;
+      show(result, 'Uploaded.', true);
+    })
+    .catch(err => show(result, 'Not uploaded: ' + zsazsaErrorText(err), false))
+    .finally(() => { logoUpload.disabled = false; });
+  });
+
+  const serverSave = document.getElementById('wz-server-save');
+  serverSave?.addEventListener('click', () => {
+    save('/config/sources/save-server', {
+      label: value('wz-server-label'),
+      url: value('wz-server-url'),
+      api_key: value('wz-server-key'),
+      verify_tls: value('wz-server-tls') === 'true',
+      since_days: value('wz-server-days'),
+    }, serverSave, document.getElementById('wz-server-result'));
+  });
+
+  // One collection source per newsletter ticked, named after its parser.
+  const mailSave = document.getElementById('wz-mail-save');
+  mailSave?.addEventListener('click', () => {
+    const sources = [];
+    document.querySelectorAll('.wizard-newsletter').forEach(row => {
+      if (!row.querySelector('.wz-nl-on').checked) return;
+      const subject = row.querySelector('.wz-nl-subject').value.trim();
+      sources.push({
+        name: row.dataset.parser,
+        parser: row.dataset.parser,
+        subjects: subject ? [subject] : [],
+        reliability: row.querySelector('.wz-nl-reliability').value,
+      });
+    });
+    save('/config/sources/save-imap', {
+      name: value('wz-mail-name'),
+      host: value('wz-mail-host'),
+      port: value('wz-mail-port'),
+      ssl: checked('wz-mail-ssl'),
+      username: value('wz-mail-user'),
+      password: document.getElementById('wz-mail-password').value,
+      folder: value('wz-mail-folder'),
+      sources,
+    }, mailSave, document.getElementById('wz-mail-result'));
+  });
+
+  document.querySelectorAll('input[name="wz-default"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      document.querySelectorAll('.wizard-choice').forEach(card => {
+        card.classList.toggle('is-selected', card.dataset.provider === radio.value);
+      });
+    });
+  });
+
+  // Without features in the request the per-feature AI settings stay as they are.
+  const aiForm = document.getElementById('wz-ai-form');
+  aiForm?.addEventListener('submit', event => {
+    event.preventDefault();
+    save('/config/save-ai-features', {
+      default_model: value('wz-openai-model'),
+      providers: {
+        openai: {enabled: checked('wz-openai-enabled'), api_key: value('wz-openai-key')},
+        local: {
+          enabled: checked('wz-local-enabled'),
+          url: value('wz-local-url'),
+          api_key: value('wz-local-key'),
+          model: value('wz-local-model'),
+        },
+        default: aiForm.querySelector('input[name="wz-default"]:checked').value,
+      },
+    }, aiForm.querySelector('button[type="submit"]'), document.getElementById('wz-ai-result'), aiForm.dataset.next);
+  });
+
+  const channelType = document.getElementById('wz-channel-type');
+  channelType?.addEventListener('change', () => {
+    document.querySelectorAll('[data-channel-type]').forEach(el => {
+      el.hidden = el.dataset.channelType !== channelType.value;
+    });
+  });
+  const channelSave = document.getElementById('wz-channel-save');
+  channelSave?.addEventListener('click', () => {
+    const email = channelType.value === 'email';
+    save('/config/save-notification-channel', {
+      type: channelType.value,
+      name: value('wz-channel-name'),
+      url: email ? '' : value('wz-channel-url'),
+      recipient: email ? value('wz-channel-recipient') : '',
+    }, channelSave, document.getElementById('wz-channel-result'));
+  });
+})();
+</script>
+{% endblock %}

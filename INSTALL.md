@@ -74,9 +74,15 @@ bash docs/create_cert.sh zsazsa.example.com
 
 It writes `certs/zsazsa.crt` and `certs/zsazsa.key`, the paths `SSL_CERT` and `SSL_KEY` point at by default, and refuses to run if either already exists, so an existing key is never overwritten. Set `SSL_ENABLED = True` to use it. Leave the hostname off to use this host's own name.
 
+### Docker
+
+To run zsazsa in Docker instead, see [docker/README.md](docker/README.md): `bash docker/setup.sh` asks how MISP, its Redis and misp-scraper run on the host and starts the containers to match.
+
 ### First configuration
 
 `config/__init__.py.example` contains every setting the application requires in the same layout the Settings page produces when it saves. Set at least `MISP_WEBAPP_URL` and `MISP_WEBAPP_KEY`, plus `MISP_URL` and `MISP_KEY` if you run a misp-scraper. If you use single sign-on, set `MISP_SESSION_REDIS_*` here as well, since the web interface does not change them. Everything else can be done via the web interface, by a MISP site admin.
+
+The setup wizard, under Settings or at `/config/setup`, walks a site admin through the rest: the organisation, the data collection sources, AI, the focus points and notifications. It saves to the same settings as the Settings page and can be run again at any time. The dashboard points to it until zsazsa has a data collection source and focus points.
 
 If you want to run zsazsa as a systemd service, use `docs/zsazsa.service.template`.
 
@@ -110,7 +116,7 @@ HOSTNAME = 'zsazsa.example.com'   # or an IP address
 PORT = 5000
 ```
 
-These values can also be changed from the Settings page in the web app (System tab). After saving, restart the application for the port change to take effect (the `HOSTNAME` value is stored for reference; the listener address is always `0.0.0.0`).
+These values can also be changed from the Settings page in the web app (System tab). After saving, restart the application for the port change to take effect (the `HOSTNAME` value is stored for reference). zsazsa listens on `0.0.0.0` unless the environment sets `ZSAZSA_BIND`, and `ZSAZSA_PORT` in the environment takes the place of `PORT`; the Docker setup uses both.
 
 ## Production deployment behind Apache
 
@@ -127,9 +133,10 @@ face the network. For the load a CTI team puts on it, a few analysts and a
 background refresh every fifteen minutes, that is enough.
 
 Its own listener binds to every interface, so port 5000 is reachable directly
-unless you stop it. Keep that port closed on the firewall, or edit `run_webapp.py`
-to bind to `127.0.0.1` as the service template describes. `HOSTNAME` in the
-settings does not change this; it is kept for reference and for building links.
+unless you stop it. Keep that port closed on the firewall, or bind it to
+`127.0.0.1` with `ZSAZSA_BIND=127.0.0.1` in its environment, as the service
+template shows. `HOSTNAME` in the settings does not change this; it is kept
+for reference and for building links.
 
 It also has to stay a single process. Several things live in this one and assume
 it: the data collection cache worker, the requirement cache the collection page

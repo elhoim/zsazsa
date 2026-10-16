@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.0.9 - development
+
+### Added
+
+- zsazsa runs in Docker, with the compose files in `docker/`.
+  `bash docker/setup.sh` asks how MISP, its Redis and misp-scraper run on the
+  host, writes `docker/.env` to match, then builds and starts the web app, the
+  analyser, the IMAP collector and optionally misp-scraper. It works with MISP
+  installed normally or in misp-docker, with or without single sign-on, and
+  can add the `/zsazsa` proxy to MISP's Apache or to misp-core's nginx. The
+  configuration, data and prompts stay in `docker/volumes/`. See
+  docker/README.md. / via @chorsley and @elhoim
+- A setup wizard, under Settings, takes a site admin through what a new
+  zsazsa needs: the organisation and its logo, the data collection sources
+  (MISP servers, mailboxes with their newsletters, manual sources), the AI
+  providers, the focus points and the notification channels with the mail
+  server. It saves to the same settings as the Settings page, can be run
+  again at any time, and the dashboard points to it until zsazsa has sources
+  and focus points.
+- The web app listens on `ZSAZSA_BIND` and `ZSAZSA_PORT` when its environment
+  sets them, so binding it to `127.0.0.1` no longer means editing
+  `run_webapp.py`. The service template has the line.
+
+### Fixed
+
+- HTTPS for the web app, single sign-on's login redirect and STARTTLS for the
+  mail server could be switched on from the Settings page but not off again:
+  an unticked switch sent nothing, so the stored value was kept.
+- The logo upload took files of any size, although the Settings page says
+  2 MB, and left no entry in the audit log.
+- On a MISP without the `zsazsa-flash-intel` template, the analyser filed
+  every flash intel draft without its object, and the log still said the draft
+  was created. The object is now built from the template, and one MISP refuses
+  is logged and noted in the activity log. The `osint:source-type` tag goes on
+  the source event instead of its report, which MISP answered with Invalid
+  Target.
+
 ## 1.0.8
 
 Hardening contributed by @elhoim, and fixes found while reviewing the last

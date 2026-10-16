@@ -332,6 +332,7 @@
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" name="SSL_ENABLED" id="ssl_enabled"
                      value="true" {{ 'checked' if cfg.SSL_ENABLED }}>
+              <input type="hidden" name="SSL_ENABLED" value="false">
               <label class="form-check-label" for="ssl_enabled">Enable SSL / HTTPS</label>
             </div>
             <div class="form-text">
@@ -361,6 +362,7 @@
           <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" name="MISP_SESSION_REDIRECT_TO_LOGIN" id="misp_session_redirect_to_login"
                    value="true" {{ 'checked' if cfg.MISP_SESSION_REDIRECT_TO_LOGIN }}>
+            <input type="hidden" name="MISP_SESSION_REDIRECT_TO_LOGIN" value="false">
             <label class="form-check-label" for="misp_session_redirect_to_login">Require a MISP session</label>
           </div>
           <div class="form-text">
@@ -1146,6 +1148,7 @@
             <div class="col-sm-4">
               <div class="form-check form-switch mt-4">
                 <input class="form-check-input" type="checkbox" name="SMTP_USE_TLS" id="smtp_use_tls" value="true" {{ 'checked' if cfg.SMTP_USE_TLS }}>
+                <input type="hidden" name="SMTP_USE_TLS" value="false">
                 <label class="form-check-label" for="smtp_use_tls">Use STARTTLS</label>
               </div>
             </div>

@@ -184,6 +184,7 @@ def create_app():
     from webapp.routes.api import bp as api_bp
     from webapp.routes.collection_sources import bp as collection_sources_bp
     from webapp.routes.pipeline import bp as pipeline_bp
+    from webapp.routes.setup_wizard import bp as setup_wizard_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(stakeholders_bp, url_prefix="/stakeholders")
@@ -206,6 +207,7 @@ def create_app():
     app.register_blueprint(community_bp)
     app.register_blueprint(collection_sources_bp)
     app.register_blueprint(pipeline_bp)
+    app.register_blueprint(setup_wizard_bp)
 
     def _wants_json() -> bool:
         if request.path.startswith("/api/"):

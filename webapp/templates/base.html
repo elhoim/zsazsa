@@ -48,7 +48,7 @@
 {% set requirements_section_active = (request.endpoint and request.endpoint.startswith('requirements.')) or request.blueprint == 'rfi' %}
 {% set products_section_active = request.blueprint in ('data_collection', 'daily_briefing', 'threat_landscape', 'flash_intel', 'vea', 'products', 'indicator_feed', 'threat_actor_profile') %}
 {% set reporting_section_active = request.blueprint == 'pipeline' or request.endpoint in ('stats.index', 'stats.scope', 'logs.index', 'stakeholders.matrix') %}
-{% set settings_section_active = request.endpoint == 'config_page.index' or request.blueprint == 'collection_sources' %}
+{% set settings_section_active = request.endpoint == 'config_page.index' or request.blueprint in ('collection_sources', 'setup_wizard') %}
 
 <!-- Top navigation (UiBeta theme) -->
 <nav id="topnav" class="navbar navbar-expand-lg">
@@ -141,6 +141,7 @@
         <ul class="dropdown-menu topnav-dropdown-menu">
           <li><a href="{{ url_for('config_page.index') }}" class="dropdown-item {{ 'active' if request.endpoint == 'config_page.index' }}"><i class="fas fa-sliders fa-fw"></i> Configuration</a></li>
           <li><a href="{{ url_for('collection_sources.index') }}" class="dropdown-item {{ 'active' if request.blueprint == 'collection_sources' }}"><i class="fas fa-satellite-dish fa-fw"></i> Collection sources</a></li>
+          <li><a href="{{ url_for('setup_wizard.start') }}" class="dropdown-item {{ 'active' if request.blueprint == 'setup_wizard' }}"><i class="fas fa-wand-magic-sparkles fa-fw"></i> Setup wizard</a></li>
         </ul>
       </li>
       {% endif %}
@@ -324,6 +325,11 @@
       <li>
         <a href="{{ url_for('collection_sources.index') }}" class="{{ 'active' if request.blueprint == 'collection_sources' }}">
           <i class="fas fa-satellite-dish fa-fw"></i> Collection sources
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('setup_wizard.start') }}" class="{{ 'active' if request.blueprint == 'setup_wizard' }}">
+          <i class="fas fa-wand-magic-sparkles fa-fw"></i> Setup wizard
         </a>
       </li>
     </ul>

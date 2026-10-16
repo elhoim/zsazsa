@@ -1,0 +1,12 @@
+# For MISP in misp-docker: the containers join its network, where they reach
+# its Redis, and where misp-core's nginx reaches zsazsa as "zsazsa".
+services:
+  webapp:
+    networks:
+      default:
+        aliases: [zsazsa]
+
+networks:
+  default:
+    name: ${MISP_NETWORK:-misp-docker_default}
+    external: true

@@ -12,6 +12,7 @@ from analyser.reader import load_last_action, load_last_run, save_last_action
 from core.db import log_pipeline_run_start, log_pipeline_run_end
 from webapp import analyser_pipeline, audit, collection_cache
 from webapp import job_store, misp_session, misp_store
+from webapp.routes import setup_wizard
 from webapp.utils import json_body as _json_object, scraper_enabled
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,7 @@ def widgets():
 
     html = render_template(
         "_dashboard_content.html",
+        setup_needed=setup_wizard.needs_setup(),
         pir_count=pir_count,
         gir_count=gir_count,
         stakeholder_count=stakeholder_count,
