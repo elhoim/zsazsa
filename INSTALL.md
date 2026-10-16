@@ -1,5 +1,9 @@
 # Installing zsazsa
 
+<p align="center">
+  <a href="https://zsazsa-project.org/documentation.html#install"><img alt="Quickstart: install" src="https://img.shields.io/badge/Quickstart-Install-0066cc?style=for-the-badge&logo=rocket&logoColor=white"></a>
+</p>
+
 This guide covers installing zsazsa, with Docker or as a standard installation next to MISP, and serving it under MISP's own address. The [quickstart](https://zsazsa-project.org/documentation.html) is the short path through the same steps. Once zsazsa runs, [Configuration](README.md#configuration) in the README describes every setting, and the rest of the [README](README.md) what zsazsa does and how analysts use it.
 
 ## What you need
