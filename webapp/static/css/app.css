@@ -2135,6 +2135,10 @@ body {
   color: #fff;
   box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-blue) 22%, transparent);
 }
+.wizard-hero.is-finished {
+  background: linear-gradient(135deg, var(--accent-green) 0%, color-mix(in srgb, var(--accent-green) 65%, #000) 100%);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-green) 25%, transparent);
+}
 .wizard-hero-icon {
   flex-shrink: 0;
   width: 3.25rem;

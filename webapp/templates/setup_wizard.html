@@ -43,8 +43,21 @@
 
 {% block content %}
 {% set done_count = done.values() | select | list | length %}
+{% set finished = current == 'done' and done.sources and done.focus %}
 <div class="wizard">
 
+  {% if finished %}
+  <div class="wizard-hero is-finished">
+    <div class="wizard-hero-icon"><i class="fas fa-check"></i></div>
+    <div class="flex-grow-1">
+      <h2 class="wizard-hero-title">You're done</h2>
+      <p class="wizard-hero-text mb-0">
+        zsazsa is set up. Every answer can still be changed, here or on the Settings pages, and the
+        wizard stays under Settings.
+      </p>
+    </div>
+  </div>
+  {% else %}
   <div class="wizard-hero">
     <div class="wizard-hero-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
     <div class="flex-grow-1">
@@ -59,13 +72,15 @@
       <div class="wizard-progress-label">{{ done_count }} of {{ done | length }} set up</div>
     </div>
   </div>
+  {% endif %}
 
   <ol class="wizard-steps">
     {% for name, step_title, _ in steps %}
-    <li class="wizard-step {{ 'is-current' if name == current }} {{ 'is-done' if done.get(name) }}">
+    {% set step_done = done.get(name) or (name == 'done' and finished) %}
+    <li class="wizard-step {{ 'is-current' if name == current }} {{ 'is-done' if step_done }}">
       <a href="{{ url_for('setup_wizard.step', name=name) }}">
         <span class="wizard-step-dot">
-          {% if done.get(name) %}<i class="fas fa-check"></i>{% elif name == 'done' %}<i class="fas fa-flag-checkered"></i>{% else %}{{ loop.index }}{% endif %}
+          {% if step_done %}<i class="fas fa-check"></i>{% elif name == 'done' %}<i class="fas fa-flag-checkered"></i>{% else %}{{ loop.index }}{% endif %}
         </span>
         <span class="wizard-step-title">{{ step_title }}</span>
       </a>
@@ -164,7 +179,7 @@
           {% else %}
           <p class="small text-muted mb-2">None yet.</p>
           {% endif %}
-          <a href="{{ url_for('collection_sources.new') }}" class="btn btn-sm btn-light border shadow-sm">
+          <a href="{{ url_for('collection_sources.new', wizard=1) }}" class="btn btn-sm btn-light border shadow-sm">
             <i class="fas fa-plus me-1"></i> Add a manual source
           </a>
         </div>
@@ -525,8 +540,8 @@
     {% else %}
     <div class="card-body">
       <p class="wizard-lead">
-        {% if done.sources and done.focus %}
-        zsazsa has what it needs to start. The analyser picks up the sources on its next run.
+        {% if finished %}
+        The analyser picks up the sources on its next run.
         {% else %}
         The analyser needs at least one data collection source and some focus points before it has
         anything to work from.

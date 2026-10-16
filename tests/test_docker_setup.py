@@ -180,9 +180,17 @@ class SetupScript(unittest.TestCase):
                                'SCRAPER_USED=yes SCR_URL=https://misp.example.org SCR_KEY=k\n'
                                'ask_scraper\nprintf "%s %s" "$SCRAPER_DIR" "$SCRAPER_CLONE" > scraper.txt\n',
                                ["y", "https://github.com/cudeso/misp-scraper", "checkouts/misp-scraper", "y", ""])
-        self.assertIn("not a URL", output)
+        self.assertIn("That is a URL", output)
         # Relative to where the setup runs, which Compose would read from docker/.
         self.assertEqual((self.root / "scraper.txt").read_text(), f"{self.root}/checkouts/misp-scraper yes")
+
+    def test_a_url_an_earlier_run_stored_is_not_offered_as_the_folder(self):
+        (self.root / "docker" / ".env").write_text("SCRAPER_DIR=https://github.com/cudeso/misp-scraper\n")
+        output = self.run_bash('source docker/setup.sh\ninit_answers\n'
+                               'SCRAPER_USED=yes SCR_URL=https://misp.example.org SCR_KEY=k\n'
+                               'ask_scraper\nprintf "%s" "$SCRAPER_DIR" > scraper.txt\n', ["y", "", "y", ""])
+        self.assertNotIn("https://github.com/cudeso/misp-scraper]", output)
+        self.assertEqual((self.root / "scraper.txt").read_text(), f"{Path(self.root).parent}/misp-scraper")
 
     def test_a_relative_import_path_is_made_absolute_for_docker(self):
         """docker run -v takes a relative path for the name of a volume."""

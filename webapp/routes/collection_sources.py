@@ -60,11 +60,17 @@ def index():
 
 @bp.route("/new", methods=["GET", "POST"])
 def new():
+    # Opened from the setup wizard, the form leads back to it. The form posts
+    # to its own URL, so the query string is still there after a submit.
+    if request.args.get("wizard"):
+        back = url_for("setup_wizard.step", name="sources")
+    else:
+        back = url_for("collection_sources.index")
     if request.method == "POST":
         data = _form_data(request.form)
         if not data["name"]:
             flash("Name is required.", "warning")
-            return render_template("collection_sources/form.html", source=None, data=data,
+            return render_template("collection_sources/form.html", source=None, data=data, back=back,
                                    admiralty_options=ADMIRALTY_OPTIONS)
         try:
             uuid = misp_store.create_collection_source(data)
@@ -73,10 +79,10 @@ def new():
             collection_cache.trigger_refresh()
             audit.record("create", "collection_source", entity_id=uuid, entity_label=data["name"])
             flash(f"Source '{data['name']}' created.", "success")
-            return redirect(url_for("collection_sources.index"))
+            return redirect(back)
         except Exception as exc:
             flash(f"Could not create source: {exc}", "warning")
-    return render_template("collection_sources/form.html", source=None, data={},
+    return render_template("collection_sources/form.html", source=None, data={}, back=back,
                            admiralty_options=ADMIRALTY_OPTIONS)
 
 

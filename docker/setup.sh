@@ -161,6 +161,8 @@ absolute() {
     printf '%s' "$path"
 }
 
+is_url() { [[ "$1" == *://* || "$1" == *@*:* ]]; }
+
 # ── Reading an existing configuration ─────────────────────────────────────────
 
 # What a config file sets a key to, without quotes, or nothing.
@@ -501,20 +503,21 @@ ask_scraper() {
     [[ "$SCRAPER_USED" == yes ]] || return 0
 
     echo
-    hint "misp-scraper is a separate project. Here it can run as a Docker container."
+    hint "misp-scraper is a separate project. Here it runs as a Docker container, built from its"
+    hint "code in a folder on this host. The setup clones it there when the folder does not exist yet."
     yes_no "Run misp-scraper in Docker on this host?" "N" || return 0
     SCRAPER=yes
     SCRAPER_DIR=$(config_value SCRAPER_DIR "$ENV_FILE")
     while true; do
-        SCRAPER_DIR=$(ask "Folder of misp-scraper (cloned there if missing)" \
-            "${SCRAPER_DIR:-$(cd "$ROOT/.." && pwd)/misp-scraper}") || exit 1
-        [[ "$SCRAPER_DIR" != *://* && "$SCRAPER_DIR" != *@*:* ]] && break
-        warn "Enter a folder on this host, not a URL. The setup clones $SCRAPER_REPO into it."
-        SCRAPER_DIR=""
+        # An earlier run of the setup may have stored a URL.
+        is_url "$SCRAPER_DIR" && SCRAPER_DIR=""
+        SCRAPER_DIR=$(ask "Folder for misp-scraper's code" "${SCRAPER_DIR:-$(cd "$ROOT/.." && pwd)/misp-scraper}") || exit 1
+        is_url "$SCRAPER_DIR" || break
+        warn "That is a URL. Enter a folder on this host; the setup clones $SCRAPER_REPO into it."
     done
     SCRAPER_DIR=$(absolute "$SCRAPER_DIR")
     if [[ ! -f "$SCRAPER_DIR/docker/Dockerfile" ]]; then
-        if [[ -e "$SCRAPER_DIR" ]] || ! command -v git > /dev/null || ! yes_no "Not found. Clone it there?" "Y"; then
+        if [[ -e "$SCRAPER_DIR" ]] || ! command -v git > /dev/null || ! yes_no "$SCRAPER_DIR does not exist. Clone misp-scraper there?" "Y"; then
             fail "$SCRAPER_DIR/docker/Dockerfile not found."
             exit 1
         fi

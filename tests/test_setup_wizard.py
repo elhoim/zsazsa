@@ -140,6 +140,26 @@ class SetupWizard(unittest.TestCase):
                         MATTERMOST_ENABLED=True)
         self.assertTrue(setup_wizard.status()["notifications"])
 
+    def test_a_manual_source_added_from_the_wizard_goes_back_to_it(self):
+        """The form posts to its own URL, and the wizard's link has wizard=1 in it."""
+        self.assertIn("/config/sources/new?wizard=1", self.client.get("/config/setup/sources").get_data(as_text=True))
+        form = self.client.get("/config/sources/new?wizard=1").get_data(as_text=True)
+        self.assertIn('href="/config/setup/sources"', form)
+        with mock.patch.object(misp_store, "create_collection_source", return_value="u" * 36) as create, \
+             mock.patch.object(collection_cache, "trigger_refresh"):
+            from_wizard = self.client.post("/config/sources/new?wizard=1", data={"csrf_token": "token", "name": "Portal"})
+            from_sources = self.client.post("/config/sources/new", data={"csrf_token": "token", "name": "Portal"})
+        self.assertEqual(create.call_count, 2)
+        self.assertTrue(from_wizard.headers["Location"].endswith("/config/setup/sources"))
+        self.assertTrue(from_sources.headers["Location"].endswith("/config/sources/"))
+
+    def test_the_last_step_says_so_once_sources_and_focus_points_are_in(self):
+        self.configured(**dict(NOTHING_SET_UP, MISP_SERVERS=SECRETS["MISP_SERVERS"]))
+        self.assertNotIn("You're done", self.client.get("/config/setup/done").get_data(as_text=True))
+        self.configured(FOCUS_POINTS_SECTORS=["Energy"])
+        self.assertIn("You're done", self.client.get("/config/setup/done").get_data(as_text=True))
+        self.assertNotIn("You're done", self.client.get("/config/setup/focus").get_data(as_text=True))
+
     def test_the_dashboard_sends_a_site_admin_to_the_wizard_until_setup_is_done(self):
         for setup_needed, admin, shown in ((True, True, True), (True, False, False), (False, True, False)):
             with self.subTest(setup_needed=setup_needed, admin=admin), self.app.test_request_context("/"), \
