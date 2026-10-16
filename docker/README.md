@@ -83,4 +83,4 @@ On a Mac, Docker Desktop containers do not share the Mac's `127.0.0.1`. A MISP o
 
 ## Credits
 
-The Docker setup builds on the work of Chris Horsley (@chorsley) and elhoim (PR #43).
+The Docker setup builds on the work of Chris Horsley (@chorsley) and @elhoim (PR #43).
