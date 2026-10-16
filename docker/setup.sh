@@ -152,6 +152,15 @@ ask_port() {
     done
 }
 
+# A path as typed, made absolute: relative, docker run -v reads it as a volume
+# name and Compose reads it from docker/, not from where setup.sh was started.
+absolute() {
+    local path="$1"
+    [[ "$path" == "~/"* ]] && path="$HOME/${path#"~/"}"
+    [[ "$path" == /* ]] || path="$PWD/$path"
+    printf '%s' "$path"
+}
+
 # ── Reading an existing configuration ─────────────────────────────────────────
 
 # What a config file sets a key to, without quotes, or nothing.
@@ -283,6 +292,7 @@ ask_config_source() {
         if yes_no "Import an existing configuration (from an earlier install, Docker or not)?" "N"; then
             while true; do
                 IMPORT=$(ask "Path of the config file" "$default") || exit 1
+                IMPORT=$(absolute "$IMPORT")
                 [[ -f "$IMPORT" ]] && break
                 warn "$IMPORT does not exist."
             done
@@ -495,7 +505,14 @@ ask_scraper() {
     yes_no "Run misp-scraper in Docker on this host?" "N" || return 0
     SCRAPER=yes
     SCRAPER_DIR=$(config_value SCRAPER_DIR "$ENV_FILE")
-    SCRAPER_DIR=$(ask "misp-scraper checkout" "${SCRAPER_DIR:-$(cd "$ROOT/.." && pwd)/misp-scraper}")
+    while true; do
+        SCRAPER_DIR=$(ask "Folder of misp-scraper (cloned there if missing)" \
+            "${SCRAPER_DIR:-$(cd "$ROOT/.." && pwd)/misp-scraper}") || exit 1
+        [[ "$SCRAPER_DIR" != *://* && "$SCRAPER_DIR" != *@*:* ]] && break
+        warn "Enter a folder on this host, not a URL. The setup clones $SCRAPER_REPO into it."
+        SCRAPER_DIR=""
+    done
+    SCRAPER_DIR=$(absolute "$SCRAPER_DIR")
     if [[ ! -f "$SCRAPER_DIR/docker/Dockerfile" ]]; then
         if [[ -e "$SCRAPER_DIR" ]] || ! command -v git > /dev/null || ! yes_no "Not found. Clone it there?" "Y"; then
             fail "$SCRAPER_DIR/docker/Dockerfile not found."

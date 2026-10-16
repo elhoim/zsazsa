@@ -174,6 +174,23 @@ class SetupScript(unittest.TestCase):
                       ["y", str(other / "old.py")])
         self.assertEqual((self.root / "copied.txt").read_text(), f"{other} old.py")
 
+    def test_a_url_for_the_scraper_folder_is_asked_again(self):
+        """git clone took the URL for the folder to clone into, and failed."""
+        output = self.run_bash('source docker/setup.sh\ninit_answers\n'
+                               'SCRAPER_USED=yes SCR_URL=https://misp.example.org SCR_KEY=k\n'
+                               'ask_scraper\nprintf "%s %s" "$SCRAPER_DIR" "$SCRAPER_CLONE" > scraper.txt\n',
+                               ["y", "https://github.com/cudeso/misp-scraper", "checkouts/misp-scraper", "y", ""])
+        self.assertIn("not a URL", output)
+        # Relative to where the setup runs, which Compose would read from docker/.
+        self.assertEqual((self.root / "scraper.txt").read_text(), f"{self.root}/checkouts/misp-scraper yes")
+
+    def test_a_relative_import_path_is_made_absolute_for_docker(self):
+        """docker run -v takes a relative path for the name of a volume."""
+        (self.root / "old.py").write_text("MISP_WEBAPP_URL = 'https://misp.example.org'\n")
+        self.run_bash('source docker/setup.sh\ninit_answers\nask_config_source\nprintf "%s" "$IMPORT" > import.txt\n',
+                      ["y", "old.py"])
+        self.assertEqual((self.root / "import.txt").read_text(), f"{self.root}/old.py")
+
     def test_the_scraper_check_passes_a_marker_with_a_space_as_one_value(self):
         self.run_bash('source docker/setup.sh\ninit_answers\n'
                       'zpy() { printf "starting\\nzsazsa:source=\\"misp scraper\\"\\nurls\\n"; }\n'
