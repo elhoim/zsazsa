@@ -11,6 +11,7 @@ the collection sources page shows it back.
     python -m unittest tests.test_config_form
 """
 
+import re
 import shutil
 import tempfile
 import unittest
@@ -130,6 +131,31 @@ class ConfigSave(unittest.TestCase):
         for kept in ("PRODUCT_TYPES", "FOCUS_POINTS_SECTORS", "THREAT_ACTOR_TYPES",
                      "RECOMMENDED_ACTIONS_IMMEDIATE"):
             self.assertEqual(after[kept], before[kept], kept)
+
+    def test_an_unticked_switch_turns_its_setting_off(self):
+        """A browser leaves an unticked box out of the form and sends only the
+        hidden "false" behind it; ticked, it sends "true" first."""
+        switches = ("SSL_ENABLED", "MISP_SESSION_REDIRECT_TO_LOGIN", "SMTP_USE_TLS")
+        for value in (True, False):
+            with self.subTest(ticked=value):
+                form = self.full_form()
+                for name in switches:
+                    form[name] = ["true", "false"] if value else "false"
+                self.client.post("/config", data=form)
+                after = self.saved()
+                for name in switches:
+                    self.assertIs(after[name], value, name)
+
+    def test_every_switch_on_the_page_is_followed_by_its_false(self):
+        """Without it, a switch of the settings page can be turned on but never off.
+        The setup wizard posts its switches to the same form handler."""
+        for template, least in (("config_page.html", 3), ("setup_wizard.html", 1)):
+            page = Path("webapp/templates", template).read_text()
+            switches = re.findall(r'type="checkbox" name="([A-Z_]+)"[^>]*\s+value="true"', page)
+            self.assertGreaterEqual(len(switches), least, template)
+            for name in switches:
+                self.assertRegex(page, rf'name="{name}"[^>]*value="true"[^>]*>\s*<input type="hidden" name="{name}" value="false">',
+                                 f"{template}: {name}")
 
     def test_edits_and_deliberate_clearing_both_land(self):
         form = self.full_form()

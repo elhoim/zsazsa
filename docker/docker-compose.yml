@@ -1,0 +1,70 @@
+# zsazsa in Docker. setup.sh writes .env with the values used below, and adds
+# docker-compose.host.yml or docker-compose.misp-docker.yml for the network
+# MISP's Redis needs. Run docker compose from this folder.
+name: zsazsa
+
+x-zsazsa: &zsazsa
+  image: zsazsa:latest
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  restart: unless-stopped
+  volumes:
+    - ./volumes/config:/app/config:z
+    - ./volumes/data:/app/data:z
+    - ./volumes/prompts:/app/zsazsaprompts:z
+
+services:
+  webapp:
+    <<: *zsazsa
+    environment:
+      # Inside the container; the port on this host is the one under ports.
+      ZSAZSA_BIND: 0.0.0.0
+      ZSAZSA_PORT: "5000"
+    ports:
+      - "${ZSAZSA_BIND:-127.0.0.1}:${ZSAZSA_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['ZSAZSA_PORT'] + '/static/favicon.svg', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+
+  # The runs INSTALL.md schedules from cron, as loops. A failed run is logged
+  # and tried again on the next pass.
+  analyser:
+    <<: *zsazsa
+    profiles: [scheduled]
+    init: true
+    environment:
+      INTERVAL: ${ANALYSER_INTERVAL:-3600}
+    command: ["sh", "-c", "while true; do python run_analyser.py || echo 'analyser run failed'; sleep \"$$INTERVAL\"; done"]
+
+  imap-collector:
+    <<: *zsazsa
+    profiles: [scheduled]
+    init: true
+    environment:
+      INTERVAL: ${IMAP_COLLECTOR_INTERVAL:-900}
+    command: ["sh", "-c", "while true; do python run_imap_collector.py || echo 'IMAP collector run failed'; sleep \"$$INTERVAL\"; done"]
+
+  # misp-scraper, built from its own checkout. It reads its configuration from
+  # volumes/scraper-config and its Redis from the environment.
+  scraper-subscribe: &scraper
+    image: misp-scraper:latest
+    build:
+      context: ${SCRAPER_DIR:-../../misp-scraper}
+      dockerfile: docker/Dockerfile
+    profiles: [scraper]
+    restart: on-failure
+    command: ["subscribe"]
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-127.0.0.1}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      CRON_INTERVAL: ${SCRAPER_CRON_INTERVAL:-3600}
+    volumes:
+      - ./volumes/scraper-config:/config:z
+
+  scraper-cron:
+    <<: *scraper
+    command: ["cron-loop"]

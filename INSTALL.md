@@ -1,18 +1,18 @@
-# Installing and configuring zsazsa
+# Installing zsazsa
 
-This guide covers everything you need to install zsazsa. For what zsazsa does and how analysts use it, see [README.md](README.md).
+This guide covers installing zsazsa, with Docker or as a standard installation next to MISP, and serving it under MISP's own address. The [quickstart](https://zsazsa-project.org/documentation.html) is the short path through the same steps. Once zsazsa runs, [Configuration](README.md#configuration) in the README describes every setting, and the rest of the [README](README.md) what zsazsa does and how analysts use it.
 
-## What you need before installing
+## What you need
 
 zsazsa sits on top of MISP and requires:
 
-- **A MISP server to store CTI program data.** This is where zsazsa saves its objects: stakeholders, PIRs, GIRs, flash intel alerts, advisories, briefings, and so on. This is the server you point `MISP_WEBAPP_URL` at.
+- **A MISP server to store CTI program data.** This is where zsazsa saves its objects: stakeholders, PIRs, GIRs, flash intel alerts, advisories, briefings, and so on. This is the server you point `MISP_WEBAPP_URL` at. The API key zsazsa uses for it also looks up a user's role for the settings pages, so it has to be allowed to view users: a site admin key, or an org admin key when everyone using zsazsa is in that organisation.
 
-- **A MISP server running misp-scraper (optional).** The scraper feeds threat events into a MISP instance that zsazsa polls for the data collection and the analyser pipeline. This is the server you point `MISP_URL` at. It can be the same server as above. Leave `MISP_URL` and `MISP_KEY` empty to run without one, in which case collection comes from the other MISP servers and the manual sources, and the analyser pipeline has nothing to process.
+- **A MISP server running misp-scraper (optional).** The scraper feeds threat events into a MISP instance that zsazsa polls for the data collection and the analyser pipeline. This is the server you point `MISP_URL` at. It can be the same server as above. Leave `MISP_URL` and `MISP_KEY` empty, or set `MISP_SCRAPER_ENABLED = False`, to run without one, in which case collection comes from the other MISP servers and the manual sources, and the analyser pipeline has nothing to process.
 
 - **One or more additional MISP servers (optional, and the only collection source if you run without the scraper).** zsazsa can pull threat events from other MISP servers configured under Collection sources.
 
-zsazsa does not install MISP or misp-scraper. Follow the installation guides for those projects first.
+zsazsa does not install MISP or misp-scraper. Follow the installation guides for those projects first. The Docker setup can run misp-scraper for you, from its own checkout.
 
 ### Redis
 
@@ -24,20 +24,38 @@ zsazsa uses Redis.
 | Background jobs | `JOB_REDIS_*` (`config/__init__.py` only) | Running-job states |
 | misp-scraper queue | `SCRAPER_REDIS_*` (Settings page) | Sending newsletter article URLs to the scraper |
 
-All three default to `127.0.0.1:6379`, database `0`, no password, so a single
-local Redis instance with no configuration needed is enough for most installs.
-`JOB_REDIS_*` is not exposed on the Settings page: only set it in
-`config/__init__.py` directly if background job state needs a different Redis
-target than the rest of the application.
+All three default to `127.0.0.1:6379`, database `0`, no password, so a single local Redis instance, such as the one MISP already uses, is enough for most installs. The Docker setup asks for MISP's Redis once and sets all three.
+
+## Docker or a standard installation
+
+**Docker** is the quickest way in. `docker/setup.sh` asks how MISP, its Redis and misp-scraper run on the host, then builds and starts the web app, the analyser and the IMAP collector, each in a container of its own, and optionally misp-scraper. It can add the `/zsazsa` proxy to MISP's Apache or to misp-core's nginx in misp-docker. Your configuration and data stay in `docker/volumes/`.
+
+The **standard installation** runs zsazsa from a Python virtual environment in MISP's custom directory, as MISP's web user. You add the proxy to MISP's Apache, the service to systemd and the analyser and IMAP collector to cron yourself.
+
+Both end in the same place: zsazsa under MISP's address, as `https://misp.example.com/zsazsa`, configured from the setup wizard.
+
+## Installing with Docker
+
+You need Docker with the compose plugin (`docker compose version` should answer). From a checkout of zsazsa:
+
+```bash
+git clone https://github.com/zsazsa-project/zsazsa.git
+cd zsazsa
+bash docker/setup.sh
+```
+
+The script asks its questions first and changes nothing until you answer yes to "Go ahead?". When it is done, go on with [Configuring zsazsa](#configuring-zsazsa). [docker/README.md](docker/README.md) explains what the setup changes, where your files are, the everyday commands and what to check when something does not work.
+
+## Standard installation
 
 ### System packages
 
 zsazsa needs **Python 3.10** or later, with `venv` and `pip`, plus the native
 libraries [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation)
-uses to render PDFs (every CTI product - flash alerts, advisories, briefings,
-reports - is exported through it). `pip install -r requirements.txt` succeeds
-without these; WeasyPrint only fails, with an import error, the first time a
-PDF is actually rendered, so install them upfront.
+uses to render PDFs (every CTI product, from flash alerts and advisories to
+briefings and reports, is exported through it). `pip install -r requirements.txt`
+succeeds without these; WeasyPrint only fails, with an import error, the first
+time a PDF is actually rendered, so install them upfront.
 
 On Debian/Ubuntu:
 
@@ -53,13 +71,15 @@ above cannot find it, install the package matching `python3 --version`.
 On Fedora/RHEL/CentOS the equivalent packages are `python3-devel`, `cairo`,
 `pango`, `gdk-pixbuf2`, `libffi-devel` and `shared-mime-info`.
 
-## Installation
+### Installing
 
-Installation is recommended in the MISP custom directory and best is to run it under the same web user as MISP. On Ubuntu this means `www-data`:
+Install zsazsa in the MISP custom directory and run it under the same web user as MISP. On Ubuntu this means `www-data`:
 
 ```bash
+sudo mkdir -p /var/www/MISP/misp-custom
+sudo chown www-data:www-data /var/www/MISP/misp-custom
 cd /var/www/MISP/misp-custom
-sudo -u www-data git clone <this-repo> zsazsa
+sudo -u www-data git clone https://github.com/zsazsa-project/zsazsa.git zsazsa
 cd zsazsa
 sudo -u www-data bash docs/install.sh
 ```
@@ -74,49 +94,33 @@ bash docs/create_cert.sh zsazsa.example.com
 
 It writes `certs/zsazsa.crt` and `certs/zsazsa.key`, the paths `SSL_CERT` and `SSL_KEY` point at by default, and refuses to run if either already exists, so an existing key is never overwritten. Set `SSL_ENABLED = True` to use it. Leave the hostname off to use this host's own name.
 
-### First configuration
+### The MISP connection
 
-`config/__init__.py.example` contains every setting the application requires in the same layout the Settings page produces when it saves. Set at least `MISP_WEBAPP_URL` and `MISP_WEBAPP_KEY`, plus `MISP_URL` and `MISP_KEY` if you run a misp-scraper. If you use single sign-on, set `MISP_SESSION_REDIS_*` here as well, since the web interface does not change them. Everything else can be done via the web interface, by a MISP site admin.
+`config/__init__.py` has every setting the application requires, in the same layout the Settings page produces when it saves. Set at least `MISP_WEBAPP_URL` and `MISP_WEBAPP_KEY`, plus `MISP_URL` and `MISP_KEY` if you run a misp-scraper, or `MISP_SCRAPER_ENABLED = False` if you do not:
 
-If you want to run zsazsa as a systemd service, use `docs/zsazsa.service.template`.
+```python
+MISP_WEBAPP_URL = 'https://misp.example.com'
+MISP_WEBAPP_KEY = '<API key>'
+MISP_WEBAPP_VERIFYCERT = True
+```
 
-## Configuration
+If you use single sign-on, set `MISP_SESSION_REDIS_*` here as well, since the web interface does not change them. Everything else can be done from the web interface, by a MISP site admin.
 
-Main settings are in `config/__init__.py`. Collection sources are in at `/config/sources/`. The config file is backed up automatically before each save.
-
-## Running zsazsa
+### Running zsazsa
 
 ```bash
 source venv/bin/activate
 python run_webapp.py
 ```
 
-zsazsa listens on `http://0.0.0.0:5000` by default, or on `https://` when `SSL_ENABLED` is on. 
+zsazsa listens on `http://0.0.0.0:5000` by default, or on `https://` when `SSL_ENABLED` is on. `ZSAZSA_BIND` in the environment changes the address and `ZSAZSA_PORT` takes the place of `PORT`. `HOSTNAME` and `PORT` are on the Settings page (System tab); restart zsazsa after changing the port. `HOSTNAME` does not change the listener: it is kept for reference and for building links.
 
-Run the analyser pipeline from cron:
+Run the analyser pipeline and the IMAP collector from the web user's crontab:
 
 ```bash
 15 * * * * cd /var/www/MISP/misp-custom/zsazsa && venv/bin/python run_analyser.py
-```
-
-```bash
 */15 * * * * cd /var/www/MISP/misp-custom/zsazsa && venv/bin/python run_imap_collector.py
 ```
-
-The hostname zsazsa listens on, as well as the port, are configurable in `config/__init__.py`:
-
-```python
-HOSTNAME = 'zsazsa.example.com'   # or an IP address
-PORT = 5000
-```
-
-These values can also be changed from the Settings page in the web app (System tab). After saving, restart the application for the port change to take effect (the `HOSTNAME` value is stored for reference; the listener address is always `0.0.0.0`).
-
-## Production deployment behind Apache
-
-zsazsa is designed to run alongside MISP and can be served under a subpath of the MISP Apache virtual host, for example `https://misp.example.com/zsazsa`. The application adapts to any subpath automatically, so `/cti`, `/cti-program`, or any other value works without changing the application.
-
-Serving zsazsa under the MISP host is also what makes single sign-on possible: the browser only sends MISP's session cookie to zsazsa when both are on the same host.
 
 ### The server zsazsa runs on
 
@@ -127,9 +131,9 @@ face the network. For the load a CTI team puts on it, a few analysts and a
 background refresh every fifteen minutes, that is enough.
 
 Its own listener binds to every interface, so port 5000 is reachable directly
-unless you stop it. Keep that port closed on the firewall, or edit `run_webapp.py`
-to bind to `127.0.0.1` as the service template describes. `HOSTNAME` in the
-settings does not change this; it is kept for reference and for building links.
+unless you stop it. Keep that port closed on the firewall, or bind it to
+`127.0.0.1` with `ZSAZSA_BIND=127.0.0.1` in its environment, as the service
+template shows.
 
 It also has to stay a single process. Several things live in this one and assume
 it: the data collection cache worker, the requirement cache the collection page
@@ -137,6 +141,14 @@ matches against, and the lock that hands out the next PIR, GIR, RFI, FEED and TA
 number. Running zsazsa under gunicorn or uWSGI with more than one worker gives
 you a cache refresh per worker and lets two workers allocate the same requirement
 id. If you move to such a server, run exactly one worker.
+
+## Serving zsazsa under MISP's address
+
+zsazsa is designed to run alongside MISP and is served under a subpath of the MISP Apache virtual host, for example `https://misp.example.com/zsazsa`. The application adapts to any subpath automatically, so `/cti`, `/cti-program`, or any other value works without changing the application.
+
+Serving zsazsa under the MISP host is also what makes single sign-on possible: the browser only sends MISP's session cookie to zsazsa when both are on the same host.
+
+The Docker setup offers to add this proxy for you. The steps below are for the standard installation, and for a MISP on another host than zsazsa.
 
 ### 1. Systemd
 
@@ -149,19 +161,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now zsazsa.service
 ```
 
-For production, bind the listener to localhost so it is only reachable through Apache. In `run_webapp.py`, change:
-
-```python
-app.run(host="0.0.0.0", ...)
-```
-
-to:
-
-```python
-app.run(host="127.0.0.1", ...)
-```
-
-Leave it as `0.0.0.0` for development if you need direct access from other machines on the network.
+For production, uncomment the `Environment=ZSAZSA_BIND=127.0.0.1` line in the service file, so zsazsa is only reachable through Apache. Leave it commented out for development if you need direct access from other machines on the network.
 
 ### 2. Enable the required Apache modules
 
@@ -186,9 +186,29 @@ ProxyPassReverse /zsazsa  http://127.0.0.1:5000/
 
 The value in `RequestHeader set X-Forwarded-Prefix` must match the path used in `ProxyPass` and `ProxyPassReverse`. To use a different subpath, change all three occurrences. No application restart is needed for subpath changes, only an Apache reload (`systemctl reload apache2`). The application reads `X-Forwarded-Prefix` at runtime to construct links and AJAX call paths, and reads `X-Forwarded-Proto` to build correct `https://` URLs in Mattermost notifications and product preview links. When run directly without a proxy, both headers are absent and the application behaves exactly as before.
 
+A MISP behind nginx needs the same three things: the prefix stripped from the path, `X-Forwarded-Prefix` and `X-Forwarded-Proto`. [docker/misp-docker/zsazsa-nginx.sh](docker/misp-docker/zsazsa-nginx.sh) has the `location` block the Docker setup adds to misp-core.
+
+### 4. Single sign-on
+
+With zsazsa under MISP's address, switch on **Require a MISP session** in the Single sign-on card of Settings > Configuration > System, save, and check it with **Test single sign-on**. PHP has to keep MISP's sessions in Redis for this to work. [Single sign-on against MISP](README.md#single-sign-on-against-misp) in the README explains the requirements and the permissions zsazsa takes from MISP.
+
+## Configuring zsazsa
+
+Open zsazsa as a MISP site admin. The setup wizard, under Settings or at `/config/setup`, walks you through the rest: the organisation, the data collection sources, AI, the focus points and notifications. It saves to the same settings as the Settings page and can be run again at any time. The dashboard points to it until zsazsa has a data collection source and focus points.
+
+Everything the wizard does not cover is on Settings > Configuration and Settings > Collection sources, and described in [Configuration](README.md#configuration) in the README.
+
 ## Upgrading
 
-Go to the installation directory and pull as the web user:
+Read [CHANGELOG.md](CHANGELOG.md) first: a release can come with a migration you need to run.
+
+With Docker, from the `docker` folder:
+
+```bash
+git pull && docker compose up -d --build
+```
+
+For a standard installation, go to the installation directory and pull as the web user:
 
 ```bash
 cd /var/www/MISP/misp-custom/zsazsa
@@ -203,341 +223,11 @@ sudo systemctl restart zsazsa.service
 ```
 
 After restarting, open Configuration > System and run any migration listed there that
-you have not run before. They are dry-run first and safe to run twice. Upgrading to
-1.0.0 needs **Align requirement scope and scope items**: before it, a technology,
-vendor, incident or campaign was written to only one of the two places a requirement
-keeps its scope, so it was either invisible on the detail page or matched nothing.
-
-## Configuration settings
-
-Almost all runtime settings are in `config/__init__.py`, and most of them can be changed from the web interface Saving regenerates the whole file from a fixed template rather than editing lines in place. Anything you added by hand that the template does not know about is dropped.
-
-The Configuration and Collection sources pages are for MISP site admins only (`perm_site_admin` on the user's role), and the Settings menu is hidden from everyone else. Without single sign-on everyone works as the same identity and the pages stay open to all. See the single sign-on section under System for when zsazsa treats single sign-on as in use.
-
-Keys and passwords are never shown again once saved. A field holding one reads "Configured, leave blank to keep": type a new value to replace it, or leave it empty to keep it. Where a secret can be left unset, such as the SMTP password or an LLM key, a "Remove" box under the field clears it. A stored secret stays with the address it was entered for: changing a URL or host means entering its key or password again, and the connection tests only use a stored secret against its own address.
-
-### Connections
-
-This tab covers the MISP server zsazsa uses as its own **data store**, configured through `MISP_WEBAPP_URL`, `MISP_WEBAPP_KEY` and `MISP_WEBAPP_VERIFYCERT`.
-
-| Setting | Description |
-|---|---|
-| `MISP_WEBAPP_URL` | URL of the MISP server zsazsa uses to store its own program data |
-| `MISP_WEBAPP_KEY` | API key for the webapp MISP server. It also looks up a user's role for the settings pages, so it has to be allowed to view users |
-| `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate. On by default; see below for a MISP whose certificate comes from your own CA |
-| `RULEZET_URL` | Base URL of a [Rulezet](https://rulezet.org) instance. Product forms search it for public detection rules by CVE ID or MITRE ATT&CK technique, and a product page reads a saved rule back from it. A detection engineering request also validates its draft rule against it. Leave empty to disable the lookup |
-
-zsazsa checks a MISP server's certificate against the CA list that ships with Python's requests package, not the host's. For a MISP whose certificate comes from your own CA, leave verification on: add the CA to the host (on Debian or Ubuntu, copy it to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`), then set `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` for the web app (an `Environment=` line in the systemd unit) and in front of the analyser and IMAP collector cron entries. Point it at the host's whole bundle rather than at your CA alone, or the public services zsazsa calls stop verifying. Turning verification off instead sends the API key to whatever answers at that address.
-
-### Products
-
-The Products tab covers how products and requirements are categorised and summarised. `PRODUCT_TYPES` defines the catalogue of CTI product types offered when creating a product. `DAILY_BRIEFING_TITLE_EXCLUSIONS` lists story titles or phrases that the daily briefing analyser should ignore when proposing stories. The five `FOCUS_POINTS_*` lists (geographies, sectors, technologies, threat types and threat actors) define the organisation-wide focus points used when previewing relevance against scraper events and when generating AI summaries. `THREAT_ACTOR_TYPES` is a small table of threat actor type names and descriptions, based on the ENISA taxonomy, used when classifying threat actors in products and requirements.
-
-| Setting | Description |
-|---|---|
-| `PRODUCT_TYPES` | Catalogue of CTI product types offered when creating a product |
-| `DAILY_BRIEFING_TITLE_EXCLUSIONS` | Story titles or phrases the daily briefing analyser should ignore |
-| `FOCUS_POINTS_GEOGRAPHIES` | Organisation-wide geography focus points |
-| `FOCUS_POINTS_SECTORS` | Organisation-wide sector focus points |
-| `FOCUS_POINTS_TECHNOLOGIES` | Organisation-wide technology focus points |
-| `FOCUS_POINTS_THREAT_TYPES` | Organisation-wide threat type focus points |
-| `FOCUS_POINTS_THREAT_ACTORS` | Organisation-wide threat actor focus points |
-| `THREAT_ACTOR_TYPES` | Threat actor type names and descriptions (ENISA taxonomy) |
-
-Renaming a product type does not rename it in the stakeholder subscriptions already stored in MISP. The System tab carries a migration for the one rename that shipped with zsazsa ("Vulnerability exploitation advisory" to "Vulnerability advisory").
-
-### System
-
-The System tab holds six cards.
-
-**MISP event distribution** sets `MISP_EVENT_DISTRIBUTION`, the distribution level given to every event zsazsa creates in MISP.
-
-**Analyser** contains `POLL_WINDOW_HOURS` (how far back the analyser looks for new events on each run), `EVENT_LOG_RETENTION_DAYS` (how long rows in the `event_log` table are kept) and `PIPELINE_RUN_LOG_RETENTION_DAYS` (how long pipeline run history is kept). **Logging** sets `LOG_LEVEL`. **Web server** covers `HOSTNAME` and `PORT`, plus `SSL_ENABLED`, `SSL_CERT` and `SSL_KEY` for running the built-in server with TLS. After changing the port or SSL settings, restart the application for the change to take effect; the listener address itself is always `0.0.0.0` regardless of the `HOSTNAME` value, which is kept mainly for reference and for building links.
-
-**Single sign-on** is described in its own section below.
-
-**Migration** lists the one-off maintenance scripts that rewrite existing data in MISP. Each one runs as a dry-run first and reports what it would change, then applies the change when you run it for real. The scripts are `scripts/make_zsazsa_tags_local.py` (re-attach `zsazsa:` namespace tags as local tags so they never sync to connected instances), `scripts/rename_vea_subscription_product.py` (rewrite the old VEA product name in stakeholder subscriptions), `scripts/backfill_product_source_log.py` (record the source events of products created before source logging existed), `scripts/convert_url_attributes_to_link.py` (retype the external references on manual collection entries) `scripts/align_requirement_scope_focus_points.py` (give a PIR or GIR the scope items its scope lists imply, and the other way round) and `scripts/restore_rfi_ids.py` (put back the id of an RFI that lost it when its feedback was saved before 1.0.0). Only these can be launched from the page, and the browser only ever sends a migration id, never a path.
-
-| Setting | Description |
-|---|---|
-| `MISP_EVENT_DISTRIBUTION` | Distribution level for events zsazsa creates: 0 your organisation, 1 this community, 2 connected communities, 3 all communities |
-| `POLL_WINDOW_HOURS` | How far back the analyser looks for new events on each run |
-| `EVENT_LOG_RETENTION_DAYS` | How long rows in the `event_log` table are kept |
-| `PIPELINE_RUN_LOG_RETENTION_DAYS` | How long pipeline run history is kept |
-| `LOG_LEVEL` | Logging verbosity |
-| `HOSTNAME` | Hostname or IP shown for reference and used to build links |
-| `PORT` | Port the application listens on |
-| `SSL_ENABLED` | Whether the built-in server uses TLS |
-| `SSL_CERT` | Path to the TLS certificate file |
-| `SSL_KEY` | Path to the TLS private key file |
-
-#### Single sign-on against MISP
-
-zsazsa has no user accounts of its own. It identifies the analyst from MISP's own session. This only works when zsazsa is served under the same host as MISP. The cookie is named `MISP-<instance uuid>` and is therefore unique per install. You do not need to look it up: enable single sign-on and save, and zsazsa queries the MISP server for its instance UUID and stores the resulting name in `MISP_SESSION_COOKIE_NAME`. The name is derived from, and the login redirect points at, the MISP server configured as `MISP_WEBAPP_URL`, which is the instance zsazsa is served behind and whose session cookie the browser sends. The misp-scraper instance in `MISP_URL` is not involved.
-
-SSO against MISP requires three things:
-
-- **PHP must keep MISP's sessions in Redis**, since that is where zsazsa reads them. Set `session.save_handler = redis` and `session.save_path = "tcp://localhost:6379"` in your PHP configuration, and point `MISP_SESSION_REDIS_*` in `config/__init__.py` at the same instance. With sessions in files instead, zsazsa finds nothing and treats every visitor as unauthenticated.
-- **The database has to match.** PHP writes its sessions to the database named in `session.save_path`, which is `0` when it names none. That is not the `redis_database` in MISP's settings, which is `13` by default and is for MISP's own caching. Setting `MISP_SESSION_REDIS_DB` to `13` points zsazsa at a database with no sessions in it.
-- **The cookie name has to match.** `MISP-<instance uuid>` is what current MISP uses, but the name comes from MISP's own configuration, and installs that leave it at the CakePHP default send `CAKEPHP`. Set `MISP_SESSION_COOKIE_NAME` by hand when it differs.
-
-All three failures look the same from the outside: nobody is ever identified, and with the redirect on it resembles a login loop. The **Test single sign-on** button in the Single sign-on section tells them apart. It reports which cookie name zsazsa expects, which cookies your browser actually sent, whether Redis is reachable and on which database, and whether a session was found. When the sessions turn out to be in another database of the same Redis, it names that database and the setting to change.
-
-With `MISP_SESSION_REDIRECT_TO_LOGIN` on, a visitor without a valid MISP session is redirected to MISP's login page. With it off, such requests fall back to the `admin@admin.test`. Users seen through a session are recorded and listed on the community page. Two URLs stay reachable without a session because they are meant to be handed out. The public indicator feed URL has a random token per feed. The URL of the Diamond Model image that a Mattermost notification shows is signed with `SECRET_KEY`, works only for a published profile, and stops working when `SECRET_KEY` changes.
-
-Approving, publishing and (re)sending a product, delivering an indicator feed or switching its public URL on or off, and setting a stakeholder's product to automated delivery, take MISP's own **publish** permission (`perm_publish` on the user's role). The Configuration and Collection sources pages take **site admin** (`perm_site_admin`).
-
-MISP keeps the role a user had when they logged in, so the publish check and the Settings menu only follow a role change after the user logs in to MISP again. The settings pages themselves ask MISP for the current role on every visit, so making someone site admin, or taking it away, counts straight away. For that, `MISP_WEBAPP_KEY` has to be allowed to look up users: use a site admin key, or an org admin key when everyone using zsazsa is in that organisation. When MISP cannot be asked, the settings stay closed and the zsazsa log says why.
-
-Both checks need to know who you are. zsazsa treats single sign-on as in use when `MISP_SESSION_REDIRECT_TO_LOGIN` is on, when `MISP_SESSION_COOKIE_NAME` is set, or once it has recognised anyone through a MISP session (they are listed on the community page). From then on, a request without a user may not publish or open the settings. That covers the `admin@admin.test` fallback and a session Redis that is down, so leaving the cookie out never gets anyone past the checks.
-
-Without single sign-on, everyone works as the same trusted identity and can do everything. To go back to that mode after using it, clear `MISP_SESSION_COOKIE_NAME`, turn the redirect off, empty the list of recognised users with `sqlite3 data/analyser.db 'DELETE FROM sso_users'` (or the `DB_FILE` you set), and restart zsazsa.
-
-| Setting | Description |
-|---|---|
-| `MISP_SESSION_REDIRECT_TO_LOGIN` | Redirect visitors without a MISP session to MISP's login page |
-| `MISP_SESSION_COOKIE_NAME` | MISP's session cookie name, detected automatically when left empty |
-| `MISP_SESSION_REDIS_HOST` | Host of the Redis instance MISP stores its sessions in |
-| `MISP_SESSION_REDIS_PORT` | Port of that Redis instance |
-| `MISP_SESSION_REDIS_DB` | Database PHP writes the sessions to, from `session.save_path` and `0` when it names none. Not MISP's own `redis_database`. |
-| `MISP_SESSION_REDIS_USERNAME` | Username, when the instance uses ACLs |
-| `MISP_SESSION_REDIS_PASSWORD` | Password, if the instance requires one |
-
-The `MISP_SESSION_REDIS_*` settings decide who every visitor is, so they are set in `config/__init__.py` only. The System tab shows them read-only, a save from the interface keeps them as they are, and zsazsa needs a restart to pick up a change.
-
-### Prompts
-
-This tab lists every prompt template file found in `zsazsaprompts/`. 
-
-| Prompt file | Constraint |
-|---|---|
-| `summarise_misp_report` | Must keep its `**Targeted sector:**`, `**Geographic scope:**`, `**MITRE ATT&CK techniques:**`, `**Threat actor:**` and `**Vendor/Technology:**` headings |
-| `flash_intel_generate` | Must keep its overall section and field structure, since the "Generate AI draft" feature reads it line by line |
-| `flash_intel_relevance` | Must keep returning the `relevant`, `matched_focus_points`, `source_type`, `confidence` and `reason` JSON keys |
-| `daily_briefing_story` | Must keep the five-line structure followed by the `Threat actor type: <type>` line, which is parsed out separately |
-| `daily_briefing_relevance` | Must keep returning only the `include` and `reason` JSON keys |
-| `daily_briefing_overlap` | Must keep returning the `summary` and `overlaps` JSON structure, with 1-based story indexes |
-| `daily_briefing_summary` | Must keep returning one plain paragraph, since it is rendered as-is at the top of the briefing preview, mail and PDF |
-| `vea_draft`, `threat_actor_profile_draft`, `threat_landscape_trends`, `product_qa_review` | Must keep returning the JSON keys they list, since each key fills a named form field or panel |
-
-Changing these headings or structure will cause the corresponding feature to fail silently.
-
-Three prompts support the drafting and review buttons on the products themselves. `threat_actor_profile_draft` fills the narrative fields of a threat actor profile from the selected actors, the MISP galaxy context and any notes already on the form, and only ever writes into fields the analyst left empty. `threat_landscape_trends` drafts the threat landscape report from the events in its dataset, or from the queue for a new report, counting the events behind each trend and leaving `[ANALYST]` markers where the organisational judgement belongs. `product_qa_review` backs the "QA check against source" button on flash intel alert and vulnerability advisory drafts: it audits the draft against the report content of its source events and returns a verdict with the claims a reviewer should fix before publishing.
-
-### AI
-
-The AI tab starts with the LLM providers card, one section per provider. **OpenAI** takes an API key and a default model, and shows its token usage. **Local LLM** takes the network location of a server that speaks the OpenAI API, an API key for servers that require one, and its own default model. The network location is the base URL of the endpoint, for example `http://127.0.0.1:11434` for a local [Ollama](https://ollama.com/); the `/v1` path is appended automatically when it is missing. Ollama ignores the API key, so leave it empty unless the server is behind a proxy that checks it.
-
-Each provider has its own enable switch, and one provider is marked as the default with the "Default provider" button. A provider cannot be disabled while features still point at it.
-
-Below the providers, a table lists each AI-assisted feature (for example summarising a report or generating a Flash Intel Alert draft) with the provider it uses, an optional per-feature model override, a sampling temperature, and the prompt file it uses. An empty model field means the feature uses the default model of its provider. An empty temperature leaves sampling to the model, which for a locally hosted model can mean a value as high as 1.0; since almost every feature here is parsed back into structured data, a low temperature between 0 and 0.2 keeps that output stable. OpenAI reasoning models only accept their own default, so the temperature is not sent to them. This feature-level configuration is stored separately, in `data/ai_features.json`, rather than in `config/__init__.py`, and is therefore untouched by a Settings save and not covered by the config backup.
-
-Token usage is recorded per provider in the `llm_usage` table of the analyser database and shown in each provider's section. Rows written before local LLM support are counted as OpenAI usage.
-
-| Setting | Description |
-|---|---|
-| `LLM_DEFAULT_PROVIDER` | Provider used by features that do not choose one: `openai` or `local` |
-| `OPENAI_ENABLED` | Whether OpenAI can be used by AI features |
-| `OPENAI_API_KEY` | API key used for OpenAI-based AI features |
-| `OPENAI_MODEL` | Default OpenAI model used by AI features that don't specify their own |
-| `LOCAL_LLM_ENABLED` | Whether the local LLM can be used by AI features |
-| `LOCAL_LLM_URL` | Base URL of the OpenAI-compatible endpoint, for example `http://127.0.0.1:11434` |
-| `LOCAL_LLM_API_KEY` | API key for the local endpoint, empty when it needs none |
-| `LOCAL_LLM_MODEL` | Default local model used by AI features that don't specify their own |
-| Per-feature provider, model, temperature and prompt (`data/ai_features.json`) | Overrides for each AI-assisted feature |
-
-### Context elements
-
-This tab covers zsazsa's MISP tags and tag presets. The entity type markers `TAG_STAKEHOLDER`, `TAG_PIR`, `TAG_GIR` and `TAG_RFI` identify the corresponding zsazsa entities in MISP. The product classification tags `TAG_FLASH_INTEL`, `TAG_VEA`, `TAG_BRIEFING`, `TAG_TLR`, `TAG_INDICATOR_FEED`, `TAG_THREAT_ACTOR_PROFILE` and `TAG_DETECTION_ENG` mark products by type. `SCRAPER_MARKER_TAG` is the tag the analyser and the data collection page use to recognise events coming from the misp-scraper instance, `TAG_COLLECTION_FOLLOWUP` flags collection items for analyst follow-up, and `TAG_COLLECTION_DISMISSED` marks events from another MISP server that an analyst set aside, since their workflow state belongs to that server. `RECOMMENDED_ACTIONS_IMMEDIATE` and `RECOMMENDED_ACTIONS_NEAR_TERM` are organisation-wide presets offered as one-click insert buttons in the Flash Intel and VEA wizards. Finally, `COLLECTION_TAG_STRIP_PREFIXES` and `COLLECTION_TAG_HIDE_PREFIXES` control how tags are shortened or hidden when displaying events on the data collection page.
-
-Everything zsazsa writes in the `zsazsa:` namespace is attached as a local tag, so it never syncs to connected MISP instances.
-
-| Setting | Description |
-|---|---|
-| `TAG_STAKEHOLDER` | Marks stakeholder events |
-| `TAG_PIR` | Marks PIR events |
-| `TAG_GIR` | Marks GIR events |
-| `TAG_RFI` | Marks RFI events |
-| `TAG_FLASH_INTEL` | Marks published Flash Intel Alert products |
-| `TAG_VEA` | Marks published VEA products |
-| `TAG_BRIEFING` | Marks published daily briefing products |
-| `TAG_TLR` | Marks published threat landscape report products |
-| `TAG_INDICATOR_FEED` | Marks indicator feed products |
-| `TAG_THREAT_ACTOR_PROFILE` | Marks threat actor profile products |
-| `TAG_DETECTION_ENG` | Marks detection engineering request products |
-| `SCRAPER_MARKER_TAG` | Identifies events coming from the misp-scraper instance |
-| `TAG_COLLECTION_FOLLOWUP` | Flags collection items for analyst follow-up |
-| `TAG_COLLECTION_DISMISSED` | Marks events from another MISP server that an analyst set aside |
-| `RECOMMENDED_ACTIONS_IMMEDIATE` | Preset immediate actions offered as one-click inserts |
-| `RECOMMENDED_ACTIONS_NEAR_TERM` | Preset near-term actions offered as one-click inserts |
-| `COLLECTION_TAG_STRIP_PREFIXES` | Tag prefixes shortened on the data collection page |
-| `COLLECTION_TAG_HIDE_PREFIXES` | Tag prefixes hidden on the data collection page |
-
-The tab also shows the **product source markers**, the local tags applied to a scraper event when it is used as the source of a product: `zsazsa:product="daily-briefing"`, `zsazsa:product="flash-intel"`, `zsazsa:product="vea"` and `zsazsa:product="threat-landscape-report"`. These are fixed in the code, shown read-only with a link to browse the tagged events in MISP, and are not configuration settings.
-
-### Notifications
-
-The Notifications tab manages `NOTIFICATION_CHANNELS`, a list of named channels, and `FLOWINTEL_INSTANCES`. A **Mattermost** channel carries a webhook URL, an **email** channel carries a recipient address. Stakeholders are subscribed to one or more of these channels under Stakeholder management, so published products and requirement updates reach the right destinations. For backwards compatibility, the legacy `MATTERMOST_ENABLED` and `MATTERMOST_WEBHOOK_URL` settings are derived automatically from the first enabled Mattermost channel and do not need to be set by hand.
-
-Email channels share one SMTP server, configured in the same tab and stored in the `SMTP_*` settings. The "Test connection" button checks the SMTP host and credentials without sending anything; each email channel also has a button to send a test message to its recipient. For Gmail and similar providers, use an account-specific app password rather than the normal account password.
-
-**Flowintel** instances are the third kind of destination. Each instance carries a name, URL, API key, TLS verification setting and enable switch, and can be reached with a connectivity test. Per instance, a table maps CTI products to Flowintel case templates: enable a product, choose the case template and optionally an initial task, and publishing that product to a stakeholder subscribed to the instance creates the case. Flash intel alerts and vulnerability advisories are the products that can be mapped. Templates and tasks are read live from the Flowintel instance, so the instance must be reachable while you configure it.
-
-| Setting | Description |
-|---|---|
-| `NOTIFICATION_CHANNELS` | Named channels. Mattermost: name, URL, TLS verification, enabled flag. Email: name, recipient address, enabled flag |
-| `MATTERMOST_ENABLED` (legacy) | Derived automatically from the first enabled Mattermost channel |
-| `MATTERMOST_WEBHOOK_URL` (legacy) | Derived automatically from the first enabled Mattermost channel |
-| `SMTP_HOST`, `SMTP_PORT` | SMTP server address and port (for example `smtp.gmail.com` and `587`) |
-| `SMTP_USE_TLS` | Use STARTTLS on the connection |
-| `SMTP_USERNAME`, `SMTP_PASSWORD` | SMTP credentials (use an app password where the provider requires one) |
-| `SMTP_FROM` | From address shown on outgoing mail |
-| `FLOWINTEL_INSTANCES` | Flowintel instances: name, URL, API key, TLS verification, enabled flag and the per-product `case_templates` mapping |
-
-Delivery itself runs as a background job.
-
-### Styling
-
-The Styling tab covers branding used in PDF exports and notifications: `BRAND_COMPANY` and `BRAND_DEPARTMENT` (shown in PDF headers and footers), `BRAND_LOGO` (uploaded here and stored in `data/uploads/`, with the setting holding just the file name), and the three brand colours `BRAND_COLOR_1`, `BRAND_COLOR_2` and `BRAND_COLOR_3`, used throughout generated PDFs and Mattermost message styling.
-
-The same tab also chooses the **UI theme**. Three themes ship with zsazsa: **Overmind** (a MISP-style theme with a top navigation bar, the default on a new install), **UiBeta** (a MISP-style light theme, also top navigation), and **Zsazsa legacy** (the original navy theme with the side menu).
-
-| Setting | Description |
-|---|---|
-| `THEME` | UI theme: `overmind` (default), `uibeta` or `default` (Zsazsa legacy navy) |
-| `BRAND_COMPANY` | Company name shown in PDF headers and footers |
-| `BRAND_DEPARTMENT` | Department name shown in PDF headers and footers |
-| `BRAND_LOGO` | File name of the logo in `data/uploads/`, used in generated PDFs and notifications |
-| `BRAND_COLOR_1` | Primary brand colour |
-| `BRAND_COLOR_2` | Secondary brand colour |
-| `BRAND_COLOR_3` | Tertiary brand colour |
-
-### Settings not exposed in the interface
-
-A small number of settings are only set by editing `config/__init__.py` directly. `SECRET_KEY` is the Flask session secret and should be unique per installation; it can also be supplied through the environment, which takes precedence over the config file. `STATE_FILE`, `DB_FILE` and `LOG_FILE` are filesystem paths for the analyser state, the SQLite database and the log file respectively. All four are carried over unchanged when the configuration is saved from the interface, and so are the `MISP_SESSION_REDIS_*` settings described under single sign-on. `COLLECTION_SOURCES` is rebuilt automatically from the scraper and the additional MISP servers every time the configuration is loaded, so it should not be edited by hand.
-
-`COLLECTION_CACHE_INTERVAL` sets how many minutes the data collection cache worker waits between refresh cycles, defaulting to 15, and it is not part of the file the Settings page writes, so a save from the interface removes it and the default applies again.
-
-| Setting | Description |
-|---|---|
-| `SECRET_KEY` | Flask session secret, should be unique per installation |
-| `STATE_FILE` | Path to the analyser state file |
-| `DB_FILE` | Path to the SQLite database holding the analyser log, audit log, organisations and SSO users |
-| `LOG_FILE` | Path to the log file, rotated at 5 MB with three generations kept |
-| `COLLECTION_CACHE_INTERVAL` | Minutes between data collection cache refreshes (default 15), dropped on a Settings save |
-| `COLLECTION_SOURCES` | Auto-derived list of collection sources, do not edit by hand |
-
-The data collection cache lives in `data/collection_cache.db`, whose path is fixed in the code and not configurable.
-
-### Background jobs
-
-| Setting | Description |
-|---|---|
-| `JOB_REDIS_HOST` | Redis host holding the job state (default `127.0.0.1`) |
-| `JOB_REDIS_PORT` | Redis port (default `6379`) |
-| `JOB_REDIS_DB` | Redis database number (default `0`) |
-| `JOB_REDIS_USERNAME` | Username, when the instance uses ACLs |
-| `JOB_REDIS_PASSWORD` | Password, if the instance requires one |
-| `JOB_REDIS_KEY` | Hash the jobs are stored under (default `zsazsa:jobs`) |
-
-## Creating data collection sources
-
-The `/config/sources/` page is where every source the analyser and the data collection view can pull from is configured: the misp-scraper connection, the queue manual sources push into, any additional MISP servers, manual collection sources for material that is not collected automatically, and the IMAP mailboxes newsletters arrive in.
-
-### MISP scraper connection
-
-The "MISP scraper (collection pipeline)" card holds the connection to the misp-scraper instance: its URL, API key, whether to verify TLS, the maximum number of events to pull per run (`MISP_SCRAPER_LIMIT`), and how many days back to pull (`MISP_SCRAPER_SINCE_DAYS`). This source is optional, the same as the other MISP servers. Turn **Enabled** off to switch it off while keeping its URL and API key, or leave those empty; either way zsazsa runs without a scraper, and the card reads "Disabled" or "Not configured" accordingly. The "Test connection" button checks the URL and API key against the MISP server, and "Pull estimate" reports how many events currently match the scraper marker tag, which is itself configured on the Context elements tab of `/config`. The "Show query" link displays the underlying `misp.search()` call for reference.
-
-| Field | Description |
-|---|---|
-| Enabled | Switch for collecting from the scraper at all, as each other MISP server has (`MISP_SCRAPER_ENABLED`) |
-| URL | Address of the misp-scraper MISP instance (`MISP_URL`); empty means no scraper |
-| API key | API key for the scraper MISP instance (`MISP_KEY`); empty means no scraper |
-| Verify TLS | Whether to verify the scraper MISP server's TLS certificate (`MISP_VERIFYCERT`). On by default; see "Connections" above for a certificate from your own CA |
-| Max events | Maximum number of events pulled per run (`MISP_SCRAPER_LIMIT`) |
-| Events from last (days) | Only pull scraper events from the last N days (`MISP_SCRAPER_SINCE_DAYS`); 0 disables the date window |
-
-**Running without a scraper.** Turn Enabled off, or clear the URL and the API key, and save. The scraper disappears from the Data collection page, taking the IMAP mailbox labels shown under it with it, and its cached events are dropped on the next refresh. It also stops being offered as a collection source on PIRs and GIRs, stops being counted on the dashboard and reads "Not configured" on the pipeline page. Everything that does not come from the scraper carries on: the other MISP servers, the manual sources, newsletters (which are archived on the webapp MISP; only the pushing of their article URLs needs a scraper), and all the CTI products. The analyser has no events to process without a scraper, but a run still refreshes the indicator feed caches and exits cleanly, so keep its cron entry if you publish indicator feeds. Without it a cached feed is simply rebuilt on demand the next time someone fetches it.
-
-**Why both "Max events" and "Events from last (days)" matter.** The cache worker fetches up to `MISP_SCRAPER_LIMIT` marker-tagged events in a single page, so the data collection view never holds more than that many scraper events. Without a date window, once the scraper accumulates more tagged events than the limit, the surplus is dropped from the cache and may include the most recent events, so newly scraped items stop appearing on the Data collection page even though the refresh log reports a successful run (for example `scraper done - 800 events` every cycle, exactly at the limit). The tell-tale sign is a refresh count that sits permanently at the configured limit. `MISP_SCRAPER_SINCE_DAYS` avoids this by restricting the pull to a recent window, so growth past the limit drops the oldest events rather than hiding the newest; keep the window small enough that the tagged events within it stay under `MISP_SCRAPER_LIMIT`. Compare "Pull estimate" (or filter the scraper MISP by `SCRAPER_MARKER_TAG`) against the limit to size both settings. Setting the window to 0 restores the old pull-by-limit behaviour.
-
-### Manual sources pushing to scraper
-
-Some manual sources do not store events directly but send article links to the misp-scraper. This is how the newsletter importer works: the selected article URLs are published to the scraper's Redis channel, and the events that come back behave like ordinary scraper events.
-
-| Field | Description |
-|---|---|
-| Redis host | Host of the misp-scraper Redis (`SCRAPER_REDIS_HOST`) |
-| Port | Redis port (`SCRAPER_REDIS_PORT`) |
-| Password | Redis password, if the instance requires one (`SCRAPER_REDIS_PASSWORD`) |
-| Channel | Publish/subscribe channel the scraper subscribes to (`SCRAPER_REDIS_CHANNEL`, default `urls`) |
-
-The scraper's own `subscribe` service must be running against this Redis. Publishing is fire and forget, so a channel nobody listens on loses the URLs silently.
-
-### Additional MISP servers
-
-The "Other MISP servers" card lists any extra MISP instances configured in `MISP_SERVERS`, such as community MISP servers. Use "Add MISP server" to create a new entry, then fill in a label, an optional ID (used as a URL slug, generated from the label if left blank), the server URL, API key and TLS verification setting. Only published events are fetched from these servers. Filtering is controlled with three tag fields, tags that an event must have any of, tags it must have all of, and tags that exclude it, plus an optional organisation filter that can either restrict results to a set of organisation UUIDs or exclude them. "Events from last (days)" sets how far back to look based on the event date, and "Max events" caps how many events are pulled. As with the scraper, each server can be tested, given a pull estimate, and have its query previewed before saving. Each server is saved individually with its own "Save server" button, can be enabled or disabled with the power icon, and can be deleted. Disabling or deleting a server that is referenced by a PIR or GIR as a collection source will warn you first, since the reference itself is not removed.
-
-| Field | Description |
-|---|---|
-| Label | Display name for the server |
-| ID | URL slug, generated from the label if left blank |
-| URL | Address of the MISP server |
-| API key | API key for the MISP server |
-| Verify TLS | Whether to verify the server's TLS certificate |
-| Tags OR | Fetch events with any of these tags |
-| Tags AND | Fetch events with all of these tags |
-| Tags NOT | Exclude events with any of these tags |
-| Organisation filter | Include only, or exclude, events from the given organisation UUIDs |
-| Events from last (days) | How far back to look, based on the event date |
-| Max events | Maximum number of events pulled per query |
-| Enabled | Whether the server is active and offered as a filter option |
-
-### Manual collection sources
-
-The "Manual sources" card lists collection sources that are not MISP servers, for example a newsletter, a partner portal, or any other feed an analyst monitors by hand. Selecting "Add manual source" opens a form with a name, an owner (the person or team responsible for monitoring it), a location (a URL, file path or physical location), a description of what the source covers and why it matters, and a source reliability rating on the Admiralty scale.
-
-| Field | Description |
-|---|---|
-| Name | Name shown in PIR and GIR collection source dropdowns |
-| Owner | Person or team responsible for monitoring the source |
-| Location | URL, file path or physical location of the source |
-| Description | What the source covers and why it matters |
-| Source reliability | Admiralty scale rating, applied as an `admiralty-scale:source-reliability` tag |
-
-Each manual source is itself stored as a `zsazsa-collection-source` event in the webapp MISP, and can be edited, enabled or disabled, or deleted from the list. As with additional MISP servers, disabling or deleting a manual source that is referenced by a PIR or GIR will prompt for confirmation first, since the reference itself is not removed.
-
-### IMAP mailboxes
-
-The "IMAP mailboxes" card configures mailboxes that `run_imap_collector.py` polls for forwarded newsletters (covered in "Collecting newsletters from a mailbox (IMAP)" in [README.md](README.md)). The configuration nests: a mailbox holds the connection, and within it one or more newsletter sources say which mail to pick up and how to treat it. Everything is stored in `config.IMAP_SOURCES`.
-
-The mailbox itself:
-
-| Field | Description |
-|---|---|
-| Mailbox name | Display name for the mailbox |
-| IMAP host / Port / SSL | Connection to the mail server (default port 993 with SSL) |
-| Folder | Mailbox folder to read (default `INBOX`) |
-| Username / Password | Mailbox credentials (use an app password where the provider requires one) |
-| Enabled | Whether the mailbox is polled |
-
-Each newsletter source inside it:
-
-| Field | Description |
-|---|---|
-| Name | Display name, and the collection source recorded on the events created from it |
-| Parser | Which newsletter parser to apply to matched mail |
-| Mode | `Automatic` (push articles to the scraper immediately) or `Manual review` (park for human approval) |
-| Match subjects | Subject substrings, one per line; a match on any one selects the mail |
-| Match senders | Sender substrings, one per line; matched against the From header and a forwarded message's original sender |
-| Reliability | Admiralty scale rating recorded for the source |
-| Enabled | Whether this source is applied when the mailbox is polled |
-
-"Test connection" opens the mailbox with the entered settings without reading or changing any mail. Polling never deletes mail; a message is flagged with the `zsazsaProcessed` IMAP keyword only once it has been archived, so a failure retries on the next run instead of losing the newsletter.
-
-Subject and sender filters cannot prove a message is genuine. In automatic mode, the scraper fetches its links, so zsazsa only forwards links whose hosts resolve to public addresses. This also applies to links pasted in by hand. Private or internal links are skipped. Newsletters with no eligible links wait for review. Use `Manual review` for mailboxes external senders can reach.
-
-The check runs before the separate scraper fetches a link, so it cannot prevent redirects or DNS changes from reaching internal addresses. Restrict the scraper host's outbound access until its subscriber validates destinations too.
+you have not run before. They are dry-run first and safe to run twice. Upgrading from
+a release before 1.0.0 needs **Align requirement scope and scope items**: before it, a
+technology, vendor, incident or campaign was written to only one of the two places a
+requirement keeps its scope, so it was either invisible on the detail page or matched
+nothing.
 
 ## Optional post-installation steps
 
@@ -545,6 +235,8 @@ The MITRE ATT&CK technique list used in product forms and briefing stories is re
 
 ```bash
 venv/bin/python scripts/fetch_mitre_galaxy.py
+# or, in Docker, from the docker folder:
+docker compose exec webapp python scripts/fetch_mitre_galaxy.py
 ```
 
 Re-run it periodically to pick up new techniques. The application notices the new file without a restart.

@@ -1,0 +1,33 @@
+# What a working checkout has that must not end up in the image.
+
+# Keys and certificates. Only the example config goes in.
+config/*
+!config/__init__.py.example
+certs
+# Anywhere, docker/.env included: setup.sh writes the Redis password there.
+**/.env
+**/*.env
+
+# Runtime state. data/ is a volume; the image keeps only the shipped files.
+data/*
+!data/.gitkeep
+!data/ai_features.json
+!data/mitre-attack-pattern.json
+
+# Not part of the application.
+.git
+.github
+.claude
+**/CLAUDE.md
+input
+prompts
+tests
+docs
+venv
+.venv
+**/__pycache__
+**/*.py[cod]
+.ruff_cache
+
+# This host's configuration and data.
+docker/volumes

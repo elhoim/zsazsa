@@ -73,8 +73,8 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     source_type = relevance.get("source_type", "blog-post")
     logger.info("Event %s relevant, matched: %s", event.uuid, matched)
 
-    if reports:
-        tagger.add_tag(misp, reports[0], f'osint:source-type="{source_type}"')
+    # MISP cannot tag an event report (it answers Invalid Target), so the source type goes on the event.
+    tagger.add_tag(misp, event, f'osint:source-type="{source_type}"')
 
     fia_content = llm.generate_flash_intel(
         article_content,
@@ -133,13 +133,15 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     # Add a minimal zsazsa-flash-intel object so the webapp wizard can edit
     # the draft. The summary seeds with the LLM body; analyst refines fields
     # before approving and publishing.
-    _add_flash_intel_object(misp_webapp, product_event, fia_id, event, fia_content, matched)
+    object_saved = _add_flash_intel_object(misp_webapp, product_event, fia_id, event, fia_content, matched)
 
     # Mark the source event as routed for review (not yet complete). If that
     # does not take, the event still reads as incomplete and the next run makes
     # a second draft for it, so the activity log has to say so.
     routed = tagger.set_workflow_state(misp, event, "ongoing")
     detail = fia_id if routed else f"{fia_id} (source event still marked incomplete)"
+    if not object_saved:
+        detail += " (draft object not saved)"
 
     recipients = _automated_subscribers()
     auto = bool(recipients)
@@ -215,10 +217,11 @@ def _auto_publish(misp_webapp, product_event, fia_id, content, recipients):
 
 
 def _add_flash_intel_object(misp_webapp, product_event, fia_id, source_event, content, matched):
-    """Attach a draft zsazsa-flash-intel object to the product event."""
-    from pymisp import MISPObject
+    """Attach a draft zsazsa-flash-intel object to the product event. False when MISP refused it."""
+    from webapp import misp_store
 
-    obj = MISPObject("zsazsa-flash-intel", strict=False)
+    # Built from the template, which has the meta-category MISP needs for an object it does not know.
+    obj = misp_store._build_obj("zsazsa-flash-intel")
 
     def add(rel, value):
         if value:
@@ -235,7 +238,11 @@ def _add_flash_intel_object(misp_webapp, product_event, fia_id, source_event, co
     add("author", "analyser")
     if matched:
         add("affected-assets", ", ".join(matched))
-    misp_webapp.add_object(product_event, obj)
+    reply = misp_webapp.add_object(product_event, obj)
+    if isinstance(reply, dict) and reply.get("errors"):
+        logger.error("Could not add the flash intel object to %s: %s", fia_id, reply["errors"])
+        return False
+    return True
 
 
 def _extract_section(content, heading):
