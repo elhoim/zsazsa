@@ -7,7 +7,7 @@
 # Production note: when running behind an Apache reverse proxy, uncomment
 # ZSAZSA_BIND below so the app listens on 127.0.0.1 instead of 0.0.0.0
 # and is not directly reachable on port 5000 from the network.
-# See the "Production deployment behind Apache" section in README.md.
+# See "Serving zsazsa under MISP's address" in INSTALL.md.
 #
 # Assume installation in /var/www/MISP/misp-custom/zsazsa
 

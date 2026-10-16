@@ -34,7 +34,7 @@ You can also write `.env` yourself from `env.example` and start zsazsa with `doc
 
 ## Reaching zsazsa
 
-Analysts open zsazsa under MISP's own address, as `https://your-misp/zsazsa/`. That needs a proxy rule on MISP's web server, and single sign-on only works that way, because the browser sends MISP's session cookie only to MISP's address. The setup offers to add the rule for you: to MISP's Apache virtual host (after making a backup, with sudo if the file needs it), or to the nginx inside misp-core. For misp-docker the rule is in `docker/misp-docker/`, and misp-core applies it again on every start. If MISP runs on another host, add it there yourself; INSTALL.md has the lines.
+Analysts open zsazsa under MISP's own address, as `https://your-misp/zsazsa/`. That needs a proxy rule on MISP's web server, and single sign-on only works that way, because the browser sends MISP's session cookie only to MISP's address. The setup offers to add the rule for you: to MISP's Apache virtual host (after making a backup, with sudo if the file needs it), or to the nginx inside misp-core. For misp-docker the rule is in `docker/misp-docker/`, and misp-core applies it again on every start. If MISP runs on another host, add it there yourself; [Serving zsazsa under MISP's address](../INSTALL.md#serving-zsazsa-under-misps-address) in INSTALL.md has the lines.
 
 zsazsa itself listens on `127.0.0.1:5000` by default, so only MISP's web server on the same host can reach it. You can choose `0.0.0.0` instead, but without single sign-on everyone who reaches that port can use zsazsa with full rights. On a Mac, port 5000 is taken by AirPlay Receiver, so pick another port there.
 
@@ -60,13 +60,14 @@ Run these from the `docker` folder, where Compose finds `.env`:
 ```bash
 docker compose ps                                    # what is running
 docker compose logs -f webapp                        # follow the web app
+tail -f volumes/data/analyser.log                    # zsazsa's own log
 docker compose restart                               # after editing the configuration
 docker compose exec webapp python run_analyser.py    # run the analyser now
 git pull && docker compose up -d --build             # upgrade
 docker compose down                                  # stop; docker/volumes is kept
 ```
 
-Most settings are changed on the Settings page, as without Docker. To edit the configuration by hand, open `docker/volumes/config/__init__.py` (with sudo if needed) and restart.
+Most settings are changed on the Settings page, as without Docker; [Configuration](../README.md#configuration) in the README describes each one. To edit the configuration by hand, open `docker/volumes/config/__init__.py` (with sudo if needed) and restart. zsazsa never reads `docker/.env`: that file only tells Docker Compose how to run the containers, so a MISP address or Redis password changed there does not reach zsazsa. The one exception is misp-scraper, which takes its Redis from `.env`; keep its `REDIS_PASSWORD` equal to the `*_REDIS_PASSWORD` settings in the configuration.
 
 ## When something does not work
 
@@ -74,7 +75,7 @@ zsazsa cannot reach MISP: the containers have a localhost of their own, so a MIS
 
 `CERTIFICATE_VERIFY_FAILED` in the log: MISP's certificate comes from a CA the container does not know, such as a private one. Set `MISP_WEBAPP_VERIFYCERT = False` in `docker/volumes/config/__init__.py`, and `MISP_VERIFYCERT = False` if the scraper's MISP has the same certificate, then restart.
 
-Single sign-on does not recognise you: check that zsazsa is opened under MISP's address, that the proxy rule is in place, and that MISP keeps its PHP sessions in Redis (`session.save_handler = redis`). The Settings page has a "Test single sign-on" button.
+Single sign-on does not recognise you, and zsazsa sends you to MISP's login page, which sends you on to MISP's home page: check that zsazsa is opened under MISP's address, that the proxy rule is in place, and that MISP keeps its PHP sessions in Redis (`session.save_handler = redis`). `docker/volumes/data/analyser.log` says why a request was not recognised; `WRONGPASS` there means `MISP_SESSION_REDIS_PASSWORD` in the configuration is not the password of MISP's Redis. The Settings page has a "Test single sign-on" button.
 
 Scraper events never reach the analyser: zsazsa recognises them by `SCRAPER_MARKER_TAG`, and misp-scraper has to set that tag. When the setup runs misp-scraper, it starts from `docker/scraper.py.zsazsa`, which sets zsazsa's default tag, and checks that the tag and the Redis channel match zsazsa's configuration. A scraper elsewhere needs the tag in its own `scraper.py`, under `misp_scraper_tags_local`.
 

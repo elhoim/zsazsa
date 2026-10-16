@@ -23,6 +23,14 @@
   sets them, so binding it to `127.0.0.1` no longer means editing
   `run_webapp.py`. The service template has the line.
 
+### Changed
+
+- The documentation is reorganised. The quickstart moved to
+  zsazsa-project.org and covers Docker and the standard installation, the
+  setup wizard and a first briefing. INSTALL.md is about installing only, and
+  the configuration reference moved from INSTALL.md to the "Configuration"
+  section of the README, which now opens with links to both.
+
 ### Fixed
 
 - HTTPS for the web app, single sign-on's login redirect and STARTTLS for the
