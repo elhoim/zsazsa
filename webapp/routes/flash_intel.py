@@ -170,17 +170,6 @@ def _seed_from_sources(source_uuids, source_hints=None):
     return seed, source_events
 
 
-def _eligible_flash_recipients(fia):
-    allowed = {
-        r.get("uuid")
-        for r in misp_store.recipient_preview("Flash intel alert", fia.tlp, fia.audience)
-        if r.get("status") == "green" and r.get("uuid")
-    }
-    if not allowed:
-        return []
-    return [s for s in misp_store.list_stakeholders() if getattr(s, "uuid", None) in allowed]
-
-
 @bp.route("/")
 def review():
     state_filter = (request.args.get("state") or "").strip() or None
@@ -537,7 +526,7 @@ def _deliver_flash_intel(uuid, preview_url, reason):
         if fia is None:
             return False, "the alert could not be loaded"
 
-        stakeholders = _eligible_flash_recipients(fia)
+        stakeholders = misp_store.eligible_recipients("Flash intel alert", fia.tlp, fia.audience)
         content = misp_store.render_fia_markdown(fia, fia.fia_id, include_source_links=True,
                                                  preview_url=preview_url)
         log(f"{reason}: {len(stakeholders)} eligible recipient(s).")

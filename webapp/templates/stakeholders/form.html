@@ -236,7 +236,7 @@
         <label class="form-label">Products subscribed</label>
         <div class="product-checklist">
           {% for p in products | sort(case_sensitive=False) %}
-          {% set current_mode = (stakeholder.product_modes.get(p) if is_edit and stakeholder.product_modes else default_subscription_mode) %}
+          {% set current_mode = stakeholder.product_modes.get(p, default_subscription_mode) if is_edit else default_subscription_mode %}
           <div class="form-check d-flex align-items-center gap-2 mb-2">
             <input class="form-check-input mt-0" type="checkbox" name="products" value="{{ p }}" id="prod_{{ loop.index }}"
               {{ 'checked' if is_edit and p in stakeholder.products }}>

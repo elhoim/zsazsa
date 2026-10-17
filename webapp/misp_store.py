@@ -964,22 +964,6 @@ def _is_event_id(value) -> bool:
     return bool(_UUID_RE.fullmatch(value)) or value.isdigit()
 
 
-def _stakeholder_event(uuid):
-    if not _is_event_id(uuid):
-        return None
-    misp = _misp()
-    event = misp.get_event(uuid, pythonify=True)
-    if isinstance(event, dict) or event is None:
-        return None
-    if not _event_has_tag(event, config.TAG_STAKEHOLDER):
-        logger.warning("Event %s is not tagged as a stakeholder", uuid)
-        return None
-    if _get_obj(event, "zsazsa-stakeholder") is None:
-        logger.warning("Event %s is missing stakeholder object", uuid)
-        return None
-    return event
-
-
 def _is_record(event, object_name, tag):
     """Whether an event is a zsazsa record of one type: it has that type's
     zsazsa object or its tag. Either is enough, since flash intel alerts from
@@ -1054,8 +1038,9 @@ def _stakeholder_ns(event):
             contacts.append({"type": "Email", "value": old_email, "preferred": True})
         if old_contact:
             contacts.append({"type": "Other", "value": old_contact, "preferred": False})
-    # derive convenience email for backward-compat display (e.g. distribution picker)
-    preferred = next((c for c in contacts if c.get("preferred")), None)
+    # The lists and the distribution picker link this with mailto, so it is an
+    # e-mail contact even when the preferred one is a phone number.
+    preferred = next((c for c in contacts if c.get("type") == "Email" and c.get("preferred")), None)
     email_contact = next((c for c in contacts if c.get("type") == "Email"), None)
     display_email = (preferred or email_contact or {}).get("value", "")
     return SimpleNamespace(
@@ -1403,10 +1388,8 @@ def list_stakeholders():
 
 
 def get_stakeholder(uuid):
-    event = _stakeholder_event(uuid)
-    if event is None:
-        return None
-    return _stakeholder_ns(event)
+    event = _zsazsa_event(uuid, "zsazsa-stakeholder", config.TAG_STAKEHOLDER)
+    return None if event is None else _stakeholder_ns(event)
 
 
 def create_stakeholder(data):
@@ -1421,27 +1404,25 @@ def create_stakeholder(data):
 
 
 def update_stakeholder(uuid, data):
-    """Update stakeholder fields. If the MISP event was deleted, recreates it.
+    """Save the form over an existing stakeholder.
 
-    Returns the UUID to use for subsequent redirects (may differ if recreated).
+    A stakeholder that has gone is not created again: PIRs, GIRs and
+    distribution lists point at its UUID, and a new event would have another.
     """
+    event = _zsazsa_event(uuid, "zsazsa-stakeholder", config.TAG_STAKEHOLDER)
+    if event is None:
+        raise ValueError(f"stakeholder {uuid} not found")
     misp = _misp()
-    event = misp.get_event(uuid, pythonify=True)
-    if isinstance(event, dict):
-        logger.warning("Stakeholder event %s not found; recreating", uuid)
-        return create_stakeholder(data)
-    if not _event_has_tag(event, config.TAG_STAKEHOLDER) or _get_obj(event, "zsazsa-stakeholder") is None:
-        raise ValueError(f"Event {uuid} is not a stakeholder")
     _sync_object_attributes(misp, event, "zsazsa-stakeholder", _stakeholder_obj(data), "stakeholder")
     misp.update_event({"Event": {"id": event.id, "info": f"[zsazsa:stakeholder] {data['name']}"}})
-    return uuid
 
 
 def delete_stakeholder(uuid):
-    misp = _misp()
-    if _stakeholder_event(uuid) is None:
-        raise ValueError(f"Stakeholder {uuid} not found")
-    _check(misp.delete_event(uuid), "delete stakeholder")
+    """Delete a stakeholder, unless a PIR, GIR or RFI still names it as owner."""
+    owned = records_owned_by_stakeholders().get(uuid)
+    if owned:
+        raise ValueError(f"it owns {', '.join(owned)}")
+    _delete_record(uuid, "zsazsa-stakeholder", config.TAG_STAKEHOLDER, "stakeholder")
 
 
 def rename_subscription_product(old_name: str, new_name: str, apply: bool = False) -> list[str]:
@@ -3454,6 +3435,21 @@ def girs_for_stakeholder(stakeholder_uuid):
     return [g for g in list_girs() if g.owner_uuid == stakeholder_uuid]
 
 
+def records_owned_by_stakeholders():
+    """{stakeholder UUID: ids of the PIRs, GIRs and RFIs it owns}.
+
+    An owner is kept by UUID, so a stakeholder in here cannot be deleted
+    without leaving those records pointing at nothing.
+    """
+    owned = {}
+    for owner_uuid, record_id in ([(p.owner_uuid, p.pir_id) for p in list_pirs()]
+                                  + [(g.owner_uuid, g.gir_id) for g in list_girs()]
+                                  + [(r.owner_uuid, r.rfi_id) for r in list_rfis()]):
+        if owner_uuid:
+            owned.setdefault(owner_uuid, []).append(record_id)
+    return owned
+
+
 def _matches_distribution_entry(entries, stakeholder_uuid, stakeholder_name="", stakeholder_email=""):
     """Return True when a stakeholder is explicitly listed in a distribution list.
 
@@ -3490,41 +3486,24 @@ def girs_distributed_to_stakeholder(stakeholder_uuid, stakeholder_name="", stake
     ]
 
 
-def products_for_stakeholder(stakeholder_uuid, stakeholder_name="", stakeholder_email="", limit=20):
-    """Return analyser-MISP product events whose linked PIR/GIR ID appears
-    in the event info or as a tag value, where the PIR/GIR is either owned by
-    the given stakeholder or distributed to that stakeholder.
-    """
-    owned_pirs = pirs_for_stakeholder(stakeholder_uuid)
-    owned_girs = girs_for_stakeholder(stakeholder_uuid)
-    distributed_pirs = pirs_distributed_to_stakeholder(stakeholder_uuid, stakeholder_name, stakeholder_email)
-    distributed_girs = girs_distributed_to_stakeholder(stakeholder_uuid, stakeholder_name, stakeholder_email)
-    all_pirs = owned_pirs + distributed_pirs
-    all_girs = owned_girs + distributed_girs
+def products_for_stakeholder(stakeholder, pirs, girs, limit=20):
+    """The recent products on a stakeholder's page.
 
-    needles = [
-        value
-        for value in (
-            [p.pir_id for p in all_pirs if p.pir_id]
-            + [g.gir_id for g in all_girs if g.gir_id]
-            + [p.uuid for p in all_pirs if p.uuid]
-            + [g.uuid for g in all_girs if g.uuid]
-        )
-    ]
-    needles = list(dict.fromkeys(needles))
-    if not needles:
-        return []
-    misp = _misp()
-    try:
-        events = _search_all(
-            misp, tags=['zsazsa:ctiproduct="%"'],
-            metadata=False, pythonify=True,
-        )
-    except Exception as exc:
-        logger.warning("products_for_stakeholder MISP search failed: %s", exc)
-        return []
-    if not events or isinstance(events, dict):
-        return []
+    ``pirs`` and ``girs`` are the requirements the stakeholder owns or is on the
+    distribution of. A product is listed when its title or a tag names one of
+    them, or when it is an approved alert or advisory, or a published briefing,
+    of a type the stakeholder subscribes to.
+    """
+    needles = {p.pir_id for p in pirs} | {g.gir_id for g in girs} | {r.uuid for r in pirs + girs}
+    needles.discard("")
+    events = []
+    if needles:
+        try:
+            events = _search_all(_misp(), tags=['zsazsa:ctiproduct="%"'], metadata=False, pythonify=True)
+        except Exception as exc:
+            logger.warning("products_for_stakeholder MISP search failed: %s", exc)
+        if isinstance(events, dict):
+            events = []
 
     matches = []
     for ev in events:
@@ -3544,8 +3523,7 @@ def products_for_stakeholder(stakeholder_uuid, stakeholder_name="", stakeholder_
                 misp_url=f"{config.MISP_WEBAPP_URL}/events/view/{ev.uuid}",
             ))
     # Include directly delivered products for subscribed product types.
-    stakeholder = get_stakeholder(stakeholder_uuid)
-    subscribed_products = set(getattr(stakeholder, "products", []) or [])
+    subscribed_products = set(stakeholder.products)
 
     if "Daily threat briefing" in subscribed_products:
         for briefing in list_briefings():
@@ -5422,6 +5400,17 @@ def stakeholders_on_automated_mode(product_type: str, tlp: str) -> list:
             if (s.product_modes or {}).get(product_type) == "automated"]
 
 
+def _audiences(audience_str: str) -> set:
+    return {_canonical_role(a) for a in (audience_str or "").split(",") if _canonical_role(a)}
+
+
+def eligible_recipients(product_type: str, tlp: str, audience_str: str) -> list:
+    """The stakeholders a product is delivered to: the ones recipient_preview() marks green."""
+    audiences = _audiences(audience_str)
+    return [s for s in stakeholders_cleared_for(product_type, tlp)
+            if _canonical_role(s.role or "") in audiences]
+
+
 def recipient_preview(product_type: str, tlp: str, audience_str: str) -> list:
     """Return eligibility data for all stakeholders for a given product.
 
@@ -5429,16 +5418,12 @@ def recipient_preview(product_type: str, tlp: str, audience_str: str) -> list:
     Green = all conditions met. Yellow = subscribed but TLP or audience blocks delivery.
     Grey = not subscribed to this product type.
     """
-    audiences = {
-        _canonical_role(a)
-        for a in (audience_str or "").split(",")
-        if _canonical_role(a)
-    }
+    audiences = _audiences(audience_str)
     result = []
     for s in list_stakeholders():
         subscribed = product_type in (s.products or [])
         tlp_ok = _tlp_cleared(s.tlp_clearance, tlp)
-        audience_ok = bool(audiences) and (_canonical_role(s.role or "") in audiences)
+        audience_ok = _canonical_role(s.role or "") in audiences
         if subscribed and tlp_ok and audience_ok:
             status = "green"
             reason = "Receives this product (subscribed, TLP ok, audience match)"

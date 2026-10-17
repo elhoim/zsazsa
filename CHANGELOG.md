@@ -30,6 +30,7 @@
   setup wizard and a first briefing. INSTALL.md is about installing only, and
   the configuration reference moved from INSTALL.md to the "Configuration"
   section of the README, which now opens with links to both.
+- A stakeholder who owns a PIR, GIR or RFI can no longer be deleted.
 
 ### Fixed
 
@@ -49,6 +50,7 @@
   4122 UUID". The template had a version 7 UUID, which only newer MISP
   accepts; it now has a version 4 one, like the other templates. #64, reported
   by @angolion
+- Saving a stakeholder MISP could not load no longer creates a duplicate.
 
 ### Security
 

@@ -209,13 +209,6 @@ def _form_data(form, tlr_id=""):
     }
 
 
-def _eligible_recipients(tlr):
-    """The stakeholders who receive the report: subscribed, cleared for its TLP and in its audience."""
-    green = {r["uuid"] for r in misp_store.recipient_preview(PRODUCT_NAME, tlr.tlp, tlr.audience)
-             if r["status"] == "green" and r.get("uuid")}
-    return [s for s in misp_store.list_stakeholders() if s.uuid in green]
-
-
 def _start_delivery(tlr, reason):
     """Send a published report to its channels on a background job.
 
@@ -230,7 +223,7 @@ def _start_delivery(tlr, reason):
         report = misp_store.get_tlr(uuid)
         if report is None:
             return False, "the report could not be loaded"
-        stakeholders = _eligible_recipients(report)
+        stakeholders = misp_store.eligible_recipients(PRODUCT_NAME, report.tlp, report.audience)
         markdown = misp_store.render_tlr_markdown(report, _linked_pirs(report), preview_url)
         log(f"{reason}: {len(stakeholders)} eligible recipient(s).")
         ok, detail = dispatcher.delivery_outcome(

@@ -65,6 +65,20 @@ class Eligibility(unittest.TestCase):
             rows = misp_store.recipient_preview(_PRODUCT, "amber", "SOC")
         self.assertEqual([r["name"] for r in rows], ["Receiving", "Blocked", "Unsubscribed"])
 
+    def test_delivery_goes_to_the_green_rows_and_nobody_else(self):
+        """The product pages deliver to eligible_recipients() and show
+        recipient_preview(), so the two may not disagree."""
+        people = [_stakeholder("Receiving"), _stakeholder("Alias", role="soc"),
+                  _stakeholder("Blocked", clearance="green"), _stakeholder("Elsewhere", role="IT Security"),
+                  _stakeholder("Unsubscribed", products=[])]
+        for audience in ("SOC", "", "SOC, IT Security"):
+            with self.subTest(audience=audience), \
+                 mock.patch.object(misp_store, "list_stakeholders", return_value=people):
+                green = [r["name"] for r in misp_store.recipient_preview(_PRODUCT, "amber", audience)
+                         if r["status"] == "green"]
+                delivered = [s.name for s in misp_store.eligible_recipients(_PRODUCT, "amber", audience)]
+            self.assertEqual(sorted(delivered), sorted(green))
+
 
 class BriefingRecipients(unittest.TestCase):
     """The daily briefing names no audience, so recipient_preview would block

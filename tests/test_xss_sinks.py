@@ -74,7 +74,7 @@ def _offline_patches(tmp):
              "date": "2026-10-01", "source_id": "scraper", "source_label": "Scraper"}
     source = SimpleNamespace(uuid="66666666-7777-8888-9999-000000000000",
                              name=SOURCE_NAME, enabled=True)
-    stakeholder = SimpleNamespace(id="sh-1", name=BREAKOUT, organization="",
+    stakeholder = SimpleNamespace(id="sh-1", name=BREAKOUT, organization="", email="",
                                   tlp_clearance="amber", influence=5, interest=5)
     feed = SimpleNamespace(uuid="f" * 36, id="f" * 36, feed_id="FEED-001", name=BREAKOUT,
                            tlp="clear", review_state="draft", cache_interval="")
@@ -105,6 +105,7 @@ def _offline_patches(tmp):
         list_collection_sources=mock.Mock(return_value=[source]),
         list_stakeholders=mock.Mock(return_value=[stakeholder]),
         get_stakeholder=mock.Mock(return_value=stakeholder),
+        records_owned_by_stakeholders=mock.Mock(return_value={}),
         list_indicator_feeds=mock.Mock(return_value=[feed]),
         list_briefings=mock.Mock(return_value=[briefing]),
         get_briefing=mock.Mock(return_value=briefing),

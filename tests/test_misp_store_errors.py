@@ -21,9 +21,11 @@ _GONE = {"errors": (404, {"message": "Invalid attribute."})}
 class DeleteFailures(unittest.TestCase):
     def setUp(self):
         self.misp = mock.MagicMock()
-        # The event each delete is pointed at is a record of the right type.
+        # The event each delete is pointed at is a record of the right type, and
+        # no stakeholder owns a requirement that would keep it.
         for patcher in (mock.patch.object(misp_store, "_misp", return_value=self.misp),
-                        mock.patch.object(misp_store, "_zsazsa_event", return_value=mock.Mock())):
+                        mock.patch.object(misp_store, "_zsazsa_event", return_value=mock.Mock()),
+                        mock.patch.object(misp_store, "records_owned_by_stakeholders", return_value={})):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -32,7 +34,8 @@ class DeleteFailures(unittest.TestCase):
         for delete in (misp_store.delete_pir, misp_store.delete_gir, misp_store.delete_rfi,
                        misp_store.delete_briefing, misp_store.delete_tlr,
                        misp_store.delete_indicator_feed, misp_store.delete_fia,
-                       misp_store.delete_vea, misp_store.delete_threat_actor_profile):
+                       misp_store.delete_vea, misp_store.delete_threat_actor_profile,
+                       misp_store.delete_stakeholder):
             with self.subTest(delete=delete.__name__):
                 with self.assertRaises(RuntimeError):
                     delete("u" * 36)
@@ -40,13 +43,6 @@ class DeleteFailures(unittest.TestCase):
     def test_a_successful_event_delete_is_quiet(self):
         self.misp.delete_event.return_value = {"message": "Event deleted."}
         misp_store.delete_pir("u" * 36)
-
-    def test_a_refused_stakeholder_delete_raises(self):
-        self.misp.delete_event.return_value = _ERROR
-        with mock.patch.object(misp_store, "_stakeholder_event",
-                               return_value=SimpleNamespace(uuid="u" * 36)):
-            with self.assertRaises(RuntimeError):
-                misp_store.delete_stakeholder("u" * 36)
 
     def test_a_refused_attribute_delete_raises(self):
         self.misp.delete_attribute.return_value = _ERROR

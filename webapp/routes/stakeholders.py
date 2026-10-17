@@ -1,32 +1,9 @@
-import config as _config
-
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
+from notifier import dispatcher
 from webapp import audit, misp_session, misp_store, org_store
 from webapp.models import cti_products, STAKEHOLDER_ROLES, TLP_LEVELS
-from webapp.utils import normalize_notification_channels, product_detail_url
-
-
-def _notification_channels() -> list[dict]:
-    """Return all configured notification channels (Mattermost + Flowintel)."""
-    from core import flowintel_client
-
-    channels = normalize_notification_channels(
-        getattr(_config, "NOTIFICATION_CHANNELS", []),
-        legacy_url=getattr(_config, "MATTERMOST_WEBHOOK_URL", ""),
-        legacy_enabled=getattr(_config, "MATTERMOST_ENABLED", False),
-    )
-    return channels + flowintel_client.notification_channels()
-
-
-def _active_notification_channels() -> list[dict]:
-    """Return enabled notification channels from config."""
-    return [c for c in _notification_channels() if c.get("enabled")]
-
-
-def _notification_channel_names() -> dict[str, str]:
-    """Return a mapping of notification channel id to display name."""
-    return {c["id"]: c["name"] for c in _notification_channels() if c.get("id")}
+from webapp.utils import product_detail_url
 
 bp = Blueprint("stakeholders", __name__)
 
@@ -89,7 +66,7 @@ def _parse_notification_channels(form, subscribed: list | None = None) -> list[s
     unsubscribe the stakeholder, and re-enabling the channel would not bring the
     subscription back. Channels that were deleted outright do fall away here.
     """
-    channels = _notification_channels()
+    channels = dispatcher.notification_channels()
     active = {c["id"] for c in channels if c.get("id") and c.get("enabled")}
     hidden = [c["id"] for c in channels if c.get("id") and not c.get("enabled")]
     selected = [cid for cid in form.getlist("notification_channels") if cid in active]
@@ -103,6 +80,42 @@ def _parse_scale(form, name, default=5):
     except (TypeError, ValueError):
         return default
     return max(1, min(10, value))
+
+
+def _form_data(form, stakeholder=None):
+    """The stakeholder as the form describes it. ``stakeholder`` is the stored
+    one when editing, whose automated modes and hidden channels are kept."""
+    products, product_modes = _parse_subscriptions(form, getattr(stakeholder, "product_modes", None))
+    return {
+        "name": form.get("name", "").strip(),
+        "role": form.get("role"),
+        "organization": form.get("organization"),
+        "stakeholder_type": form.get("stakeholder_type", "External"),
+        "contacts": _parse_contacts(form),
+        "tlp_clearance": form.get("tlp_clearance", "amber"),
+        "notes": form.get("notes"),
+        "products": products,
+        "product_modes": product_modes,
+        "notification_channels": _parse_notification_channels(
+            form, getattr(stakeholder, "notification_channels", None)),
+        "influence": _parse_scale(form, "influence"),
+        "interest": _parse_scale(form, "interest"),
+        "engagement_strategy": form.get("engagement_strategy"),
+    }
+
+
+def _render_form(stakeholder=None):
+    return render_template(
+        "stakeholders/form.html",
+        stakeholder=stakeholder,
+        roles=STAKEHOLDER_ROLES,
+        products=cti_products(),
+        tlp_levels=TLP_LEVELS,
+        subscription_modes=misp_store.SUBSCRIPTION_MODES,
+        default_subscription_mode=misp_store.DEFAULT_SUBSCRIPTION_MODE,
+        notification_channels=[c for c in dispatcher.notification_channels() if c.get("enabled")],
+        organisations=org_store.list_organisations(),
+    )
 
 
 QUADRANTS = {
@@ -183,6 +196,7 @@ def list_stakeholders():
     return render_template(
         "stakeholders/list.html",
         stakeholders=stakeholders,
+        owned_records=misp_store.records_owned_by_stakeholders(),
         org_map=org_map,
         org_options=org_options,
         type_filter=type_filter,
@@ -203,22 +217,10 @@ def matrix():
 @bp.route("/new", methods=["GET", "POST"])
 def new():
     if request.method == "POST":
-        products, product_modes = _parse_subscriptions(request.form)
-        data = {
-            "name": request.form["name"],
-            "role": request.form.get("role"),
-            "organization": request.form.get("organization"),
-            "stakeholder_type": request.form.get("stakeholder_type", "External"),
-            "contacts": _parse_contacts(request.form),
-            "tlp_clearance": request.form.get("tlp_clearance", "amber"),
-            "notes": request.form.get("notes"),
-            "products": products,
-            "product_modes": product_modes,
-            "notification_channels": _parse_notification_channels(request.form),
-            "influence": _parse_scale(request.form, "influence"),
-            "interest": _parse_scale(request.form, "interest"),
-            "engagement_strategy": request.form.get("engagement_strategy"),
-        }
+        data = _form_data(request.form)
+        if not data["name"]:
+            flash("Name is required.", "warning")
+            return _render_form()
         try:
             uuid = misp_store.create_stakeholder(data)
             audit.record("create", "stakeholder", entity_id=uuid, entity_label=data['name'])
@@ -226,18 +228,7 @@ def new():
             return redirect(url_for("stakeholders.detail", id=uuid))
         except Exception as exc:
             flash(f"Could not create stakeholder: {exc}", "warning")
-
-    return render_template(
-        "stakeholders/form.html",
-        stakeholder=None,
-        roles=STAKEHOLDER_ROLES,
-        products=cti_products(),
-        tlp_levels=TLP_LEVELS,
-        subscription_modes=misp_store.SUBSCRIPTION_MODES,
-        default_subscription_mode=misp_store.DEFAULT_SUBSCRIPTION_MODE,
-        notification_channels=_active_notification_channels(),
-        organisations=org_store.list_organisations(),
-    )
+    return _render_form()
 
 
 @bp.route("/<string:id>")
@@ -247,22 +238,11 @@ def detail(id):
         return "Stakeholder not found", 404
     _place_on_matrix(stakeholder)
     owned_pirs = misp_store.pirs_for_stakeholder(id)
-    distributed_pirs = misp_store.pirs_distributed_to_stakeholder(
-        id,
-        stakeholder_name=getattr(stakeholder, "name", ""),
-        stakeholder_email=getattr(stakeholder, "email", ""),
-    )
+    distributed_pirs = misp_store.pirs_distributed_to_stakeholder(id, stakeholder.name, stakeholder.email)
     owned_girs = misp_store.girs_for_stakeholder(id)
-    distributed_girs = misp_store.girs_distributed_to_stakeholder(
-        id,
-        stakeholder_name=getattr(stakeholder, "name", ""),
-        stakeholder_email=getattr(stakeholder, "email", ""),
-    )
+    distributed_girs = misp_store.girs_distributed_to_stakeholder(id, stakeholder.name, stakeholder.email)
     recent_products = misp_store.products_for_stakeholder(
-        id,
-        stakeholder_name=getattr(stakeholder, "name", ""),
-        stakeholder_email=getattr(stakeholder, "email", ""),
-    )
+        stakeholder, owned_pirs + distributed_pirs, owned_girs + distributed_girs)
     for ev in recent_products:
         ev.app_url = product_detail_url(getattr(ev, "product_type", ""), getattr(ev, "uuid", ""), fallback_url=getattr(ev, "misp_url", ""))
     return render_template(
@@ -273,8 +253,9 @@ def detail(id):
         owned_girs=owned_girs,
         distributed_girs=distributed_girs,
         recent_products=recent_products,
+        owned_records=misp_store.records_owned_by_stakeholders().get(id, []),
         org_map=org_store.org_map(),
-        notification_channel_names=_notification_channel_names(),
+        notification_channel_names={c["id"]: c["name"] for c in dispatcher.notification_channels() if c.get("id")},
     )
 
 
@@ -284,43 +265,18 @@ def edit(id):
     if stakeholder is None:
         return "Stakeholder not found", 404
     if request.method == "POST":
-        products, product_modes = _parse_subscriptions(
-            request.form, getattr(stakeholder, "product_modes", None))
-        data = {
-            "name": request.form["name"],
-            "role": request.form.get("role"),
-            "organization": request.form.get("organization"),
-            "stakeholder_type": request.form.get("stakeholder_type", "External"),
-            "contacts": _parse_contacts(request.form),
-            "tlp_clearance": request.form.get("tlp_clearance", "amber"),
-            "notes": request.form.get("notes"),
-            "products": products,
-            "product_modes": product_modes,
-            "notification_channels": _parse_notification_channels(
-                request.form, getattr(stakeholder, "notification_channels", None)),
-            "influence": _parse_scale(request.form, "influence"),
-            "interest": _parse_scale(request.form, "interest"),
-            "engagement_strategy": request.form.get("engagement_strategy"),
-        }
+        data = _form_data(request.form, stakeholder)
+        if not data["name"]:
+            flash("Name is required.", "warning")
+            return _render_form(stakeholder)
         try:
-            new_id = misp_store.update_stakeholder(id, data)
+            misp_store.update_stakeholder(id, data)
             audit.record("update", "stakeholder", entity_id=id, entity_label=data['name'])
             flash(f"Stakeholder {data['name']} updated.", "success")
-            return redirect(url_for("stakeholders.detail", id=new_id))
+            return redirect(url_for("stakeholders.detail", id=id))
         except Exception as exc:
             flash(f"Could not update stakeholder: {exc}", "warning")
-
-    return render_template(
-        "stakeholders/form.html",
-        stakeholder=stakeholder,
-        roles=STAKEHOLDER_ROLES,
-        products=cti_products(),
-        tlp_levels=TLP_LEVELS,
-        subscription_modes=misp_store.SUBSCRIPTION_MODES,
-        default_subscription_mode=misp_store.DEFAULT_SUBSCRIPTION_MODE,
-        notification_channels=_active_notification_channels(),
-        organisations=org_store.list_organisations(),
-    )
+    return _render_form(stakeholder)
 
 
 @bp.route("/<string:id>/delete", methods=["POST"])

@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 # once any_recorded() is true it stays true, and need not be asked every request.
 _recognised_in = set()
 
+# Organisations of recognised users this process has already registered or
+# tried to. A sighting is recorded on every request, and one MISP cannot look
+# up would otherwise cost each of them a call to MISP and a warning.
+_organisations_tried = set()
+
 
 def init_db():
     with _conn() as db:
@@ -50,13 +55,15 @@ def record_sighting(user):
     org = user.get("Organisation") or {}
     organisation = org.get("name", "")
     organisation_uuid = org.get("uuid", "")
-    role = user.get("Role", {}).get("name", "")
+    role = (user.get("Role") or {}).get("name", "")
 
-    if organisation_uuid and not org_store.get_organisation(organisation_uuid):
-        try:
-            org_store.add_organisation(organisation_uuid)
-        except ValueError as exc:
-            logger.warning("could not register organisation %s: %s", organisation_uuid, exc)
+    if organisation_uuid and organisation_uuid not in _organisations_tried:
+        _organisations_tried.add(organisation_uuid)
+        if not org_store.get_organisation(organisation_uuid):
+            try:
+                org_store.add_organisation(organisation_uuid)
+            except ValueError as exc:
+                logger.warning("could not register organisation %s: %s", organisation_uuid, exc)
 
     with _conn() as db:
         db.execute("""

@@ -90,21 +90,6 @@ def _wizard_context(vea=None, source_events=None):
     }
 
 
-def _eligible_vea_recipients(vea):
-    allowed = {
-        r.get("uuid")
-        for r in misp_store.recipient_preview(
-            "Vulnerability advisory",
-            vea.tlp,
-            vea.audience,
-        )
-        if r.get("status") == "green" and r.get("uuid")
-    }
-    if not allowed:
-        return []
-    return [s for s in misp_store.list_stakeholders() if getattr(s, "uuid", None) in allowed]
-
-
 def _deliver_vea(uuid, preview_url, reason):
     """Build the closure that sends an advisory to its channels and Flowintel.
 
@@ -120,7 +105,7 @@ def _deliver_vea(uuid, preview_url, reason):
         if vea is None:
             return False, "the advisory could not be loaded"
 
-        stakeholders = _eligible_vea_recipients(vea)
+        stakeholders = misp_store.eligible_recipients("Vulnerability advisory", vea.tlp, vea.audience)
         markdown = misp_store.render_vea_markdown(vea, preview_url=preview_url)
         log(f"{reason}: {len(stakeholders)} eligible recipient(s).")
 

@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from flask import Blueprint, Response
 
-from webapp import audit, misp_store
+from webapp import audit, misp_store, org_store
 
 bp = Blueprint("export", __name__)
 
@@ -244,6 +244,9 @@ def _rfis_markdown():
 
 def _stakeholders_markdown():
     stakeholders = misp_store.list_stakeholders()
+    org_map = org_store.org_map()
+    pirs = misp_store.list_pirs()
+    girs = misp_store.list_girs()
     lines = [
         "# Stakeholders",
         f"Exported: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
@@ -254,10 +257,8 @@ def _stakeholders_markdown():
             f"## {s.name}",
             "",
             f"**Role:** {s.role or '-'}",
-            f"**Organisation:** {s.organization or '-'}",
+            f"**Organisation:** {org_map.get(s.organization, s.organization) or '-'}",
         ]
-        if s.email:
-            lines.append(f"**Email:** {s.email}")
         contacts = list(getattr(s, "contacts", []) or [])
         if contacts:
             rendered_contacts = []
@@ -273,8 +274,8 @@ def _stakeholders_markdown():
         lines.append(f"**TLP clearance:** TLP:{s.tlp_clearance.upper()}")
         if s.products:
             lines += ["", f"**Products subscribed:** {', '.join(s.products)}"]
-        owned_pirs = misp_store.pirs_for_stakeholder(s.uuid)
-        owned_girs = misp_store.girs_for_stakeholder(s.uuid)
+        owned_pirs = [p for p in pirs if p.owner_uuid == s.uuid]
+        owned_girs = [g for g in girs if g.owner_uuid == s.uuid]
         if owned_pirs:
             lines += ["", "**Owned PIRs:**"]
             for pir in owned_pirs:

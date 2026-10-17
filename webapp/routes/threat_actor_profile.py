@@ -322,11 +322,7 @@ def notify(id):
         profile = misp_store.get_threat_actor_profile(id)
         if profile is None:
             return False, "the profile could not be loaded"
-        # Deliver to the green set: subscribed, TLP cleared, audience match.
-        green = {r["uuid"] for r in misp_store.recipient_preview(
-            PRODUCT_NAME, profile.tlp, profile.audience)
-            if r["status"] == "green" and r.get("uuid")}
-        recipients = [s for s in misp_store.list_stakeholders() if s.uuid in green]
+        recipients = misp_store.eligible_recipients(PRODUCT_NAME, profile.tlp, profile.audience)
         pir = misp_store.get_pir(profile.linked_pir_uuid) if profile.linked_pir_uuid else None
         markdown = _markdown(profile, pir) + _linked_feeds_markdown(profile)
         # Last, so it sits below any embedded feed rather than in front of one.

@@ -51,10 +51,13 @@
                       <i class="fas fa-rotate"></i>
                     </button>
                   </form>
-                  {% if o.uuid in sso_org_uuids %}
-                  <button class="btn btn-xs btn-outline-danger" title="Cannot remove: in use by a zsazsa user" disabled>
-                    <i class="fas fa-trash"></i>
-                  </button>
+                  {% if o.uuid in stakeholder_org_uuids or o.uuid in sso_org_uuids %}
+                  <span title="Cannot remove: in use by {{ 'a stakeholder' if o.uuid in stakeholder_org_uuids else 'a zsazsa user' }}"
+                        style="cursor:not-allowed;" class="d-inline-block">
+                    <button class="btn btn-xs btn-outline-danger" disabled style="pointer-events:none;">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </span>
                   {% else %}
                   <form method="post" action="{{ url_for('community.organisations_delete', uuid=o.uuid) }}"
                         data-submit-confirm="Remove organisation {{ o.name }}?">

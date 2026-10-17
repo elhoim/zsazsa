@@ -10,6 +10,17 @@ from webapp.utils import normalize_notification_channels
 logger = logging.getLogger(__name__)
 
 
+def notification_channels() -> list[dict]:
+    """Every channel a stakeholder can subscribe to, enabled or not, flowintel instances included."""
+    from core import flowintel_client
+
+    return normalize_notification_channels(
+        getattr(config, "NOTIFICATION_CHANNELS", []),
+        legacy_url=getattr(config, "MATTERMOST_WEBHOOK_URL", ""),
+        legacy_enabled=getattr(config, "MATTERMOST_ENABLED", False),
+    ) + flowintel_client.notification_channels()
+
+
 def _channels_by_type(stakeholders: list) -> dict[str, set[str]]:
     """Return channel-id sets grouped by channel type from stakeholder preferences.
 
@@ -18,16 +29,9 @@ def _channels_by_type(stakeholders: list) -> dict[str, set[str]]:
     that id to a sender would have it reach nothing and report the publish as
     failed, when in fact there is nothing to deliver to and nothing wrong.
     """
-    from core import flowintel_client
-
-    channels = normalize_notification_channels(
-        getattr(config, "NOTIFICATION_CHANNELS", []),
-        legacy_url=getattr(config, "MATTERMOST_WEBHOOK_URL", ""),
-        legacy_enabled=getattr(config, "MATTERMOST_ENABLED", False),
-    ) + flowintel_client.notification_channels()
     configured = {
         (c.get("id") or "").strip(): (c.get("type") or "mattermost").strip().lower()
-        for c in channels
+        for c in notification_channels()
         if c.get("enabled") and (c.get("id") or "").strip()
     }
 

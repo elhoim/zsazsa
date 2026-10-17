@@ -2,11 +2,13 @@
 
 Organisations are verified against the MISP webapp store by UUID before
 being stored. They serve as a controlled vocabulary for the stakeholder
-organisation field and cannot be deleted while linked to a stakeholder.
+organisation field and cannot be deleted while a stakeholder or a recognised
+SSO user belongs to one.
 """
 
 import logging
 from types import SimpleNamespace
+from uuid import UUID
 
 from core.db import row_connection as _conn
 
@@ -54,6 +56,13 @@ def add_organisation(uuid):
     uuid = (uuid or "").strip()
     if not uuid:
         raise ValueError("UUID is required")
+    # MISP would also find an organisation by its numeric id, and the UUID it
+    # answers with, which is the one stored, is in lower case. The duplicate
+    # check below has to compare the same form.
+    try:
+        uuid = str(UUID(uuid))
+    except ValueError:
+        raise ValueError(f"{uuid!r} is not a UUID") from None
 
     with _conn() as db:
         if db.execute("SELECT 1 FROM organisations WHERE uuid = ?", (uuid,)).fetchone():
@@ -127,16 +136,11 @@ def sync_all_organisations():
     updated_count = 0
     failed_count = 0
     for org in list_organisations():
-        info = _misp_lookup(org.uuid)
-        if info is None:
+        try:
+            sync_organisation(org.uuid)
+            updated_count += 1
+        except ValueError:
             failed_count += 1
-            continue
-        with _conn() as db:
-            db.execute(
-                "UPDATE organisations SET name = ?, sector = ?, country = ? WHERE uuid = ?",
-                (info["name"], info["sector"], info["country"], org.uuid),
-            )
-        updated_count += 1
     return updated_count, failed_count
 
 

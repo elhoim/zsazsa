@@ -1,6 +1,6 @@
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
-from webapp import audit, org_store, sso_users
+from webapp import audit, misp_store, org_store, sso_users
 
 bp = Blueprint("community", __name__, url_prefix="/community")
 
@@ -9,7 +9,9 @@ bp = Blueprint("community", __name__, url_prefix="/community")
 def organisations():
     orgs = org_store.list_organisations()
     sso_org_uuids = sso_users.organisation_uuids_in_use()
-    return render_template("community/organisations.html", orgs=orgs, sso_org_uuids=sso_org_uuids)
+    stakeholder_org_uuids = {s.organization for s in misp_store.list_stakeholders()}
+    return render_template("community/organisations.html", orgs=orgs, sso_org_uuids=sso_org_uuids,
+                           stakeholder_org_uuids=stakeholder_org_uuids)
 
 
 @bp.route("/organisations/add", methods=["POST"])

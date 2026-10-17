@@ -83,15 +83,17 @@ class Delivery(unittest.TestCase):
         app.register_blueprint(threat_landscape.bp)
         self.app = app
 
-    def deliver(self, report, preview):
+    def deliver(self, report):
         """Start a delivery and run the job's work in this thread instead."""
         with self.app.test_request_context(), \
              mock.patch.object(threat_landscape.notify_jobs, "start") as start:
             threat_landscape._start_delivery(report, "publish")
         work = start.call_args.args[2]
-        stakeholders = [SimpleNamespace(uuid="s1"), SimpleNamespace(uuid="s2")]
+        product = [threat_landscape.PRODUCT_NAME]
+        stakeholders = [SimpleNamespace(uuid="s1", role="SOC", tlp_clearance="red", products=product),
+                        SimpleNamespace(uuid="s2", role="SOC", tlp_clearance="amber", products=product),
+                        SimpleNamespace(uuid="s3", role="SOC", tlp_clearance="red", products=[])]
         with mock.patch.object(misp_store, "get_tlr", return_value=report), \
-             mock.patch.object(misp_store, "recipient_preview", return_value=preview), \
              mock.patch.object(misp_store, "list_stakeholders", return_value=stakeholders), \
              mock.patch.object(dispatcher, "send_threat_landscape_report", return_value={}) as send, \
              mock.patch.object(dispatcher, "delivery_outcome", return_value=(True, "sent")):
@@ -99,8 +101,7 @@ class Delivery(unittest.TestCase):
         return send
 
     def test_only_the_cleared_and_subscribed_stakeholders_receive_it(self):
-        preview = [{"uuid": "s1", "status": "green"}, {"uuid": "s2", "status": "yellow"}]
-        send = self.deliver(_report(), preview)
+        send = self.deliver(_report())
         report, markdown, stakeholders = send.call_args.args
         self.assertEqual([s.uuid for s in stakeholders], ["s1"])
         self.assertIn("**Classification:** TLP:RED", markdown)

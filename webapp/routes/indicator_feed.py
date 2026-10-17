@@ -602,10 +602,7 @@ def notify(id):
     csv_bytes = misp_store.indicator_export(rows, "csv").encode("utf-8")
 
     def deliver(log):
-        green = {r["uuid"] for r in misp_store.recipient_preview(
-            PRODUCT_NAME, feed.tlp, feed.audience)
-            if r["status"] == "green" and r.get("uuid")}
-        recipients = [s for s in misp_store.list_stakeholders() if s.uuid in green]
+        recipients = misp_store.eligible_recipients(PRODUCT_NAME, feed.tlp, feed.audience)
         log(f"{len(recipients)} eligible recipient(s), {len(rows)} indicator(s).")
         summary = dispatcher.send_indicator_feed(feed, markdown, csv_bytes, recipients)
         ok, detail = dispatcher.delivery_outcome(summary)

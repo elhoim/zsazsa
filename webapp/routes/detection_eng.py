@@ -82,21 +82,6 @@ def _wizard_context(der=None, source_events=None):
     }
 
 
-def _eligible_der_recipients(der):
-    allowed = {
-        r.get("uuid")
-        for r in misp_store.recipient_preview(
-            "Detection engineering request",
-            der.tlp,
-            der.audience,
-        )
-        if r.get("status") == "green" and r.get("uuid")
-    }
-    if not allowed:
-        return []
-    return [s for s in misp_store.list_stakeholders() if getattr(s, "uuid", None) in allowed]
-
-
 def _deliver_der(uuid, preview_url, reason):
     """Build the closure that sends a request to its channels.
 
@@ -111,7 +96,7 @@ def _deliver_der(uuid, preview_url, reason):
         if der is None:
             return False, "the request could not be loaded"
 
-        stakeholders = _eligible_der_recipients(der)
+        stakeholders = misp_store.eligible_recipients("Detection engineering request", der.tlp, der.audience)
         markdown = misp_store.render_der_markdown(der, preview_url=preview_url)
         log(f"{reason}: {len(stakeholders)} eligible recipient(s).")
 

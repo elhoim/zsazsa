@@ -87,11 +87,20 @@
             <a href="{{ url_for('stakeholders.edit', id=s.id) }}" class="btn btn-xs btn-outline-secondary me-1" title="Edit">
               <i class="fas fa-pen"></i>
             </a>
+            {% if s.uuid in owned_records %}
+            <span title="Cannot be deleted while it owns {{ owned_records[s.uuid] | join(', ') }}. Give them another owner or delete them first."
+                  style="cursor:not-allowed;" class="d-inline-block">
+              <button class="btn btn-xs btn-outline-danger" disabled style="pointer-events:none;">
+                <i class="fas fa-trash"></i>
+              </button>
+            </span>
+            {% else %}
             <form method="post" action="{{ url_for('stakeholders.delete', id=s.id) }}" class="d-inline" data-submit-confirm="Delete {{ s.name }}?">
               <button class="btn btn-xs btn-outline-danger" title="Delete">
                 <i class="fas fa-trash"></i>
               </button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
