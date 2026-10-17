@@ -1,0 +1,18 @@
+# For a Redis that only listens on 127.0.0.1 of this host, such as a MISP
+# installed here: the containers use the host's network, and zsazsa listens on
+# ZSAZSA_BIND:ZSAZSA_PORT itself.
+services:
+  webapp:
+    network_mode: host
+    ports: !reset []
+    environment:
+      ZSAZSA_BIND: ${ZSAZSA_BIND:-127.0.0.1}
+      ZSAZSA_PORT: ${ZSAZSA_PORT:-5000}
+  analyser:
+    network_mode: host
+  imap-collector:
+    network_mode: host
+  scraper-subscribe:
+    network_mode: host
+  scraper-cron:
+    network_mode: host

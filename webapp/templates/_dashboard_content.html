@@ -2,14 +2,28 @@
    Everything here needs MISP/DB queries; keeping it out of the initial page
    render lets the shell (action bar) paint immediately. #}
 
-{# Onboarding helper: appears until both a stakeholder and a PIR exist #}
-{% if stakeholder_count == 0 or pir_count == 0 %}
+{# Onboarding helper: appears until zsazsa has sources and focus points, and
+   both a stakeholder and a PIR exist. Only a site admin can open the wizard. #}
+{% set show_wizard = setup_needed and is_site_admin %}
+{% if show_wizard or stakeholder_count == 0 or pir_count == 0 %}
 <div class="card content-card mb-4 border-primary">
   <div class="card-header bg-primary text-white">
     <i class="fas fa-rocket me-2"></i>Get started
   </div>
   <div class="card-body">
     <ol class="onboarding-steps mb-0" style="list-style:none;padding:0;display:flex;gap:1.5rem;flex-wrap:wrap;margin:0;">
+      {% if show_wizard %}
+      <li class="d-flex align-items-start gap-3" style="flex:1 1 280px;">
+        <div style="font-size:1.5rem;color:var(--accent-blue);"><i class="fas fa-wand-magic-sparkles"></i></div>
+        <div>
+          <div class="fw-semibold">Finish setting up zsazsa</div>
+          <p class="text-muted small mb-2">Tell zsazsa where its events come from and what matters to you, and set up AI and notifications.</p>
+          <a href="{{ url_for('setup_wizard.start') }}" class="btn btn-sm btn-primary">
+            <i class="fas fa-play me-1"></i> Open the setup wizard
+          </a>
+        </div>
+      </li>
+      {% endif %}
       <li class="d-flex align-items-start gap-3" style="flex:1 1 280px;">
         <div style="font-size:1.5rem;color:{{ 'var(--accent-green)' if stakeholder_count > 0 else 'var(--accent-blue)' }};">
           {% if stakeholder_count > 0 %}

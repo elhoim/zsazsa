@@ -18,6 +18,7 @@ from core.atomic_write import write_atomically
 from webapp import audit, misp_session, misp_store, newsletter_parsers
 from webapp.collection_cache import _split_tags, filter_events_by_org
 from webapp.rate_limit import rate_limited
+from webapp.routes import setup_wizard
 from webapp.utils import (
     json_body as _json_object,
     normalize_notification_channels as _normalize_notification_channels,
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).parent.parent.parent
 _UPLOADS_DIR = _ROOT / "data" / "uploads"
+_LOGO_MAX_BYTES = 2 * 1024 * 1024
 _CONFIG_FILE = _ROOT / "config" / "__init__.py"
 _BACKUP_FILE = _ROOT / "config" / "__init__.py.backup"
 _PROMPTS_DIR = _ROOT / "zsazsaprompts"
@@ -346,7 +348,9 @@ def _form_bool(name: str) -> bool:
 
     The stakes are one-sided here: an absent field reading as False turns off
     TLS verification, SMTP encryption or the login redirect without anyone
-    asking for it.
+    asking for it. A browser sends nothing for an unticked box, so each one is
+    followed by a hidden field of the same name holding "false": a ticked box
+    comes first in the form and wins.
     """
     raw = request.form.get(name)
     return raw == "true" if raw is not None else bool(getattr(_config, name, False))
@@ -879,10 +883,17 @@ def index():
         active_tab = request.form.get("active_tab", "tab-connections")
         if active_tab not in _CONFIG_TABS:
             active_tab = "tab-connections"
+        # A step of the setup wizard posts here too: saved, it goes on to the
+        # next step; refused, it stays where it was.
+        back = refused = url_for("config_page.index", tab=active_tab)
+        wizard_step = request.form.get("wizard_step")
+        if wizard_step in setup_wizard.STEP_NAMES:
+            refused = url_for("setup_wizard.step", name=wizard_step)
+            back = url_for("setup_wizard.step", name=setup_wizard.next_step(wizard_step))
         for key, what in (("MISP_WEBAPP_KEY", "MISP API key"), ("SMTP_PASSWORD", "SMTP password")):
             if values[key] is None:
                 flash(_reenter_message(what), "warning")
-                return redirect(url_for("config_page.index", tab=active_tab))
+                return redirect(refused)
         try:
             _write(values)
             importlib.reload(_config)
@@ -896,7 +907,8 @@ def index():
             logger.exception("config save failed")
             audit.record("update", "config", details="save failed")
             flash("Could not save configuration.", "warning")
-        return redirect(url_for("config_page.index", tab=active_tab))
+            return redirect(refused)
+        return redirect(back)
 
     cfg = _read()
     active_tab = request.args.get("tab", "tab-connections")
@@ -1774,15 +1786,20 @@ def upload_logo():
     ext = Path(f.filename).suffix.lower()
     if ext not in (".png", ".jpg", ".jpeg"):
         return jsonify({"ok": False, "error": "Only PNG and JPG files are accepted"}), 400
+    # One byte more than the limit is enough to know it is too large.
+    content = f.read(_LOGO_MAX_BYTES + 1)
+    if len(content) > _LOGO_MAX_BYTES:
+        return jsonify({"ok": False, "error": "The logo is larger than 2 MB"}), 400
     _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     for old in _UPLOADS_DIR.glob("logo.*"):
         old.unlink(missing_ok=True)
     dest = _UPLOADS_DIR / f"logo{ext}"
-    f.save(str(dest))
+    dest.write_bytes(content)
     current = _read()
     current["BRAND_LOGO"] = dest.name
     _write(current)
     importlib.reload(_config)
+    audit.record("update", "config", details="logo uploaded")
     return jsonify({"ok": True, "filename": dest.name})
 
 
@@ -1834,15 +1851,18 @@ def save_ai_features():
     data, err = _json_object()
     if err:
         return err
+    # The setup wizard saves the providers only. Its request has no features,
+    # and the per-feature settings stay as they are.
     features = data.get("features")
-    if not isinstance(features, dict):
+    providers_only = features is None and isinstance(data.get("providers"), dict)
+    if not providers_only and not isinstance(features, dict):
         return jsonify({"ok": False, "error": "Invalid payload"}), 400
     try:
         from core.ai_config import save as _ai_save, FEATURES, PROVIDERS
         # Validate: only accept known feature IDs and safe field values.
         # ai_config.save() falls back to OpenAI for an unknown provider.
         clean = {}
-        for fid, vals in features.items():
+        for fid, vals in (features or {}).items():
             if fid not in FEATURES or not isinstance(vals, dict):
                 continue
             model = (vals.get("model") or "").strip()
@@ -1888,8 +1908,11 @@ def save_ai_features():
             _write(current)
             importlib.reload(_config)
 
-        _ai_save(clean)
-        audit.record("update", "ai_features", details=f"{len(clean)} feature(s) saved")
+        if providers_only:
+            audit.record("update", "ai_features", details="AI providers saved")
+        else:
+            _ai_save(clean)
+            audit.record("update", "ai_features", details=f"{len(clean)} feature(s) saved")
         return jsonify({"ok": True})
     except Exception:
         logger.exception("save_ai_features failed")

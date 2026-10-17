@@ -27,3 +27,8 @@
 7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:9151
 7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:34154
 7f24e1cd04c80cccce710a240ce059c874fe497d:data/analyser.log.1:mattermost-webhook:34499
+
+# docker/scraper.py.zsazsa, committed in 6464f16, had misp-scraper's example
+# Flask secret key (from its scraper.py.default), not a key of any install.
+# setup.sh now writes a random one into each Docker install's scraper.py.
+6464f16e0b4080be990d208f618e92486f0e88d4:docker/scraper.py.zsazsa:generic-api-key:10

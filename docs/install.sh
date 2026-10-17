@@ -144,7 +144,7 @@ echo ""
 echo "A self-signed certificate is only needed when the built-in web server serves"
 echo "HTTPS itself. Behind an Apache reverse proxy, Apache terminates TLS instead."
 read -r -p "Generate a self-signed SSL certificate? [y/N] " ssl_answer
-if [[ "${ssl_answer,,}" == "y" ]]; then
+if [[ "$ssl_answer" =~ ^[Yy]$ ]]; then
     read -r -p "Hostname for the certificate [this host]: " ssl_hostname
     if command -v openssl &>/dev/null; then
         bash docs/create_cert.sh "$ssl_hostname"

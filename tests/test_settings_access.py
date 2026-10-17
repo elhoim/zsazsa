@@ -25,7 +25,7 @@ ADMIN_ROLE = {"name": "Site Admin", "perm_publish": True, "perm_site_admin": Tru
 ANALYST = {"id": "7", "email": "analyst@example.org", "Role": USER_ROLE}
 SITE_ADMIN = {"id": "1", "email": "admin@example.org", "Role": ADMIN_ROLE}
 
-SETTINGS_BLUEPRINTS = ("config_page", "collection_sources")
+SETTINGS_BLUEPRINTS = ("config_page", "collection_sources", "setup_wizard")
 
 
 class SettingsAccess(unittest.TestCase):

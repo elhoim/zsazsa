@@ -52,6 +52,15 @@
         <span class="badge source-disabled ms-auto" style="font-size:.7rem;"><i class="fas fa-circle-pause me-1"></i>Disabled</span>
         {% endif %}
       </label>
+      {# Not a setting: a feed never returns zsazsa's own records, whatever the
+         query, since they hold the tokens of the other feeds' public URLs. #}
+      {% if s.store %}
+      <div class="small text-muted ps-3" title="This is always the case and cannot be changed.">
+        <i class="fas fa-lock me-1"></i>zsazsa's own records (indicator feeds, stakeholders,
+        requirements, RFIs and products) are always left out. Collected events on this
+        MISP, such as manual entries and newsletters, are searched.
+      </div>
+      {% endif %}
       {% endfor %}
     </div>
     <div class="form-text">

@@ -4,7 +4,7 @@
 {% block page_title %}{{ 'Edit collection source' if source else 'Add collection source' }}{% endblock %}
 
 {% block topbar_actions %}
-<a href="{{ url_for('collection_sources.index') }}" class="btn btn-sm btn-outline-secondary">
+<a href="{{ back or url_for('collection_sources.index') }}" class="btn btn-sm btn-outline-secondary">
   <i class="fas fa-arrow-left me-1"></i> Back
 </a>
 {% endblock %}
@@ -57,7 +57,7 @@
             <button type="submit" class="btn btn-primary">
               <i class="fas fa-save me-1"></i> {{ 'Save changes' if source else 'Create source' }}
             </button>
-            <a href="{{ url_for('collection_sources.index') }}" class="btn btn-outline-secondary">Cancel</a>
+            <a href="{{ back or url_for('collection_sources.index') }}" class="btn btn-outline-secondary">Cancel</a>
           </div>
         </form>
       </div>

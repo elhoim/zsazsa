@@ -1,0 +1,5 @@
+# Written by setup.sh for this host: your answers, with the Redis password.
+.env
+
+# The configuration (API keys), data and prompts of this host.
+volumes/
