@@ -14,7 +14,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 from flask import Flask
+from pymisp import MISPEvent
 
+from webapp import misp_store
 from webapp.routes import requirements
 
 
@@ -24,6 +26,17 @@ def _app():
     app.secret_key = "test"
     app.register_blueprint(requirements.bp)
     return app
+
+
+def _pir(**fields):
+    """A PIR as get_pir returns one: an edit lays the form over all of it."""
+    event = MISPEvent()
+    event.uuid = "u" * 36
+    event.date = "2026-10-01"
+    event.add_object(misp_store._pir_obj({"pir_id": "PIR-00001", "question": "q", "status": "Active"}))
+    pir = misp_store._pir_ns(event)
+    vars(pir).update(fields)
+    return pir
 
 
 class CreatingAndEditing(unittest.TestCase):
@@ -38,8 +51,7 @@ class CreatingAndEditing(unittest.TestCase):
             captured.update(args[-1] if isinstance(args[-1], dict) else {})
             return "u" * 36
 
-        existing = SimpleNamespace(uuid="u" * 36, pir_id="PIR-00001", gir_id="GIR-00001",
-                                   question="q", topic="t", focus_points=[], status="Active")
+        existing = _pir(gir_id="GIR-00001", topic="t")
         with mock.patch.object(requirements.misp_store, "list_stakeholders", return_value=[]), \
              mock.patch.object(requirements.misp_store, "get_pir", return_value=existing), \
              mock.patch.object(requirements.misp_store, "get_gir", return_value=existing), \
@@ -91,8 +103,7 @@ class FocusPointsSurviveAnEdit(unittest.TestCase):
 
     def edit(self, focus_points, **fields):
         captured = {}
-        pir = SimpleNamespace(uuid="u" * 36, pir_id="PIR-00001", question="q",
-                              status="Active", focus_points=focus_points)
+        pir = _pir(focus_points=focus_points)
 
         def remember(uuid, data):
             captured.update(data)

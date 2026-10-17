@@ -1,4 +1,5 @@
-"""Helpers for parsing and normalising MISP source event references."""
+"""Helpers the product wizards share, mostly for parsing and normalising MISP
+source event references."""
 
 import re
 from urllib.parse import urlparse
@@ -106,6 +107,17 @@ def parse_source_tokens(tokens: list[str]) -> tuple[list[str], dict[str, str], l
             source_hints[uuid] = source_id
         source_pairs.append((uuid, source_id))
     return source_uuids, source_hints, source_pairs
+
+
+def linked_pir_uuid(product):
+    """The PIR a draft is linked to, whether it came from MISP or from the form.
+
+    A wizard is rendered from a namespace when a product is opened and from the
+    posted form dict when validation sends it back, so both have to answer.
+    """
+    if isinstance(product, dict):
+        return product.get("linked_pir_uuid") or ""
+    return getattr(product, "linked_pir_uuid", "") or ""
 
 
 def _product_source_events(product):

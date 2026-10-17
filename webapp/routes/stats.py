@@ -59,6 +59,7 @@ def _program_metrics(pirs, girs):
         events = []
 
     pir_ids = {p.pir_id for p in pirs if p.pir_id}
+    pir_ids_by_uuid = {p.uuid: p.pir_id for p in pirs if p.pir_id}
     now_ts = datetime.now(timezone.utc).timestamp()
     pirs_covered = set()
     for ev in events or []:
@@ -74,7 +75,8 @@ def _program_metrics(pirs, girs):
                 metrics["products"]["by_type"].get(ptype, 0) + 1
             )
         info = ev.info or ""
-        matched_pirs = [pid for pid in pir_ids if pid in info]
+        matched_pirs = ({pid for pid in pir_ids if pid in info}
+                        | {pir_ids_by_uuid[u] for u in misp_store.linked_pir_uuids(ev) if u in pir_ids_by_uuid})
         if matched_pirs:
             metrics["products"]["with_pir_link"] += 1
             pub_ts = getattr(ev, "publish_timestamp", None) or getattr(ev, "timestamp", None)

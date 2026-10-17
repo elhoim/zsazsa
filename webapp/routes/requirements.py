@@ -240,6 +240,77 @@ def _sub_questions(form):
     return result
 
 
+def _pir_form_data(form, stakeholders, focus_points=()):
+    """The PIR as its form describes it, for a new PIR and an edit alike.
+    ``focus_points`` are the stored ones, whose notes the form cannot carry."""
+    owner_uuid, owner_name, owner_role = _owner_fields(form, stakeholders)
+    return {
+        "question": form["question"],
+        "context": form.get("context"),
+        "intel_level": [v for v in form.getlist("intel_level") if v.strip()],
+        "owner_uuid": owner_uuid,
+        "owner_name": owner_name,
+        "owner_role": owner_role,
+        "decision_supported": form.get("decision_supported"),
+        "decision_maker": [v for v in form.getlist("decision_maker") if v.strip()],
+        "consequence": [v for v in form.getlist("consequence") if v.strip()],
+        "deadline": form.get("deadline"),
+        "priority_justification": form.get("priority_justification"),
+        "sub_questions": _sub_questions(form),
+        "priority": form.get("priority", "Should have"),
+        "time_sensitivity": form.get("time_sensitivity", "Standard (<1 month)"),
+        "geographic_scope": dedup_lower(form.getlist("geographic_scope")),
+        "time_frame": form.get("time_frame"),
+        "threat_types": form.getlist("threat_types"),
+        "threat_actors": dedup_lower(form.getlist("threat_actors")),
+        "sectors": dedup_lower(form.getlist("sectors")),
+        "out_of_scope": form.getlist("out_of_scope"),
+        "technology": form.getlist("technology"),
+        "vendor": form.getlist("vendor"),
+        "incident": form.getlist("incident"),
+        "campaign": form.getlist("campaign"),
+        "collection_sources": form.getlist("collection_sources"),
+        "output_format": [v.strip() for v in form.getlist("output_format") if v.strip()],
+        "distribution": _distribution_ids(form, stakeholders),
+        "focus_points": _scope_focus_points(form, focus_points),
+        "resolution_note": form.get("resolution_note"),
+        "next_review": form.get("next_review") or None,
+        "mitre_attack_techniques": form.getlist("mitre_attack_techniques"),
+    }
+
+
+def _gir_form_data(form, stakeholders, focus_points=()):
+    """The GIR as its form describes it, as _pir_form_data does for a PIR."""
+    owner_uuid, owner_name, owner_role = _owner_fields(form, stakeholders)
+    return {
+        "topic": form["topic"],
+        "description": form.get("description"),
+        "owner_uuid": owner_uuid,
+        "owner_name": owner_name,
+        "owner_role": owner_role,
+        "review_cycle": form.get("review_cycle", "Quarterly"),
+        "collection_sources": form.getlist("collection_sources"),
+        "geographic_scope": dedup_lower(form.getlist("geographic_scope")),
+        "sectors": dedup_lower(form.getlist("sectors")),
+        "threat_types": form.getlist("threat_types"),
+        "threat_actors": dedup_lower(form.getlist("threat_actors")),
+        "out_of_scope": form.getlist("out_of_scope"),
+        "technology": form.getlist("technology"),
+        "vendor": form.getlist("vendor"),
+        "incident": form.getlist("incident"),
+        "campaign": form.getlist("campaign"),
+        "output_format": [v.strip() for v in form.getlist("output_format") if v.strip()],
+        "distribution": _distribution_ids(form, stakeholders),
+        "deadline": form.get("deadline"),
+        "priority_justification": form.get("priority_justification"),
+        "sub_questions": _sub_questions(form),
+        "focus_points": _scope_focus_points(form, focus_points),
+        "next_review": form.get("next_review") or None,
+        "intel_level": form.getlist("intel_level"),
+        "mitre_attack_techniques": form.getlist("mitre_attack_techniques"),
+    }
+
+
 # ── PIRs ──────────────────────────────────────────────────────────────────────
 
 PIR_TRIAGE_CHECKLIST = [
@@ -250,6 +321,9 @@ PIR_TRIAGE_CHECKLIST = [
     ("sources_available", "Collection sources are available or can be identified to address the question."),
 ]
 
+
+# A PIR that was rejected or already merged away cannot take another one in.
+_NOT_MERGE_TARGETS = ("rejected", "merged")
 
 PIR_STATUS_ORDER = ["Pending", "Active", "In Development", "Under Evaluation", "Implemented", "Retired"]
 GIR_STATUS_ORDER = ["Pending", "Active", "Retired"]
@@ -279,12 +353,7 @@ def pir_list():
         "pir_id", "question", PIR_STATUS_ORDER,
     )
     scope_counts = {p.uuid: _scope_item_count(p) for p in pirs}
-    # Viable merge targets for the inline triage form: any PIR not itself
-    # rejected or already merged away.
-    not_viable = {"rejected", "merged"}
-    merge_targets = [
-        p for p in pirs if getattr(p, "intake_status", "submitted") not in not_viable
-    ]
+    merge_targets = [p for p in pirs if p.intake_status not in _NOT_MERGE_TARGETS]
     return render_template(
         "requirements/pir_list.html",
         pirs=pirs,
@@ -311,43 +380,10 @@ def pir_new():
                 "distribution": [owner.uuid],
             }
     if request.method == "POST":
-        output_format = [v.strip() for v in request.form.getlist("output_format") if v.strip()]
-        owner_uuid, owner_name, owner_role = _owner_fields(request.form, stakeholders)
-        data = {
-            # Placeholder; create_pir allocates the authoritative pir_id atomically.
-            "pir_id": "",
-            "question": request.form["question"],
-            "context": request.form.get("context"),
-            "intel_level": [v for v in request.form.getlist("intel_level") if v.strip()],
-            "owner_uuid": owner_uuid,
-            "owner_name": owner_name,
-            "owner_role": owner_role,
-            "decision_supported": request.form.get("decision_supported"),
-            "decision_maker": [v for v in request.form.getlist("decision_maker") if v.strip()],
-            "consequence": [v for v in request.form.getlist("consequence") if v.strip()],
-            "deadline": request.form.get("deadline"),
-            "priority_justification": request.form.get("priority_justification"),
-            "sub_questions": _sub_questions(request.form),
-            "priority": request.form.get("priority", "Should have"),
-            "time_sensitivity": request.form.get("time_sensitivity", "Standard (<1 month)"),
-            "status": "Pending",  # always starts Pending until triage is complete
-            "geographic_scope": dedup_lower(request.form.getlist("geographic_scope")),
-            "time_frame": request.form.get("time_frame"),
-            "threat_types": request.form.getlist("threat_types"),
-            "threat_actors": dedup_lower(request.form.getlist("threat_actors")),
-            "sectors": dedup_lower(request.form.getlist("sectors")),
-            "out_of_scope": request.form.getlist("out_of_scope"),
-            "technology": request.form.getlist("technology"),
-            "vendor": request.form.getlist("vendor"),
-            "incident": request.form.getlist("incident"),
-            "campaign": request.form.getlist("campaign"),
-            "collection_sources": request.form.getlist("collection_sources"),
-            "output_format": output_format,
-            "distribution": _distribution_ids(request.form, stakeholders),
-            "focus_points": _scope_focus_points(request.form),
-            "next_review": request.form.get("next_review") or None,
-            "mitre_attack_techniques": request.form.getlist("mitre_attack_techniques"),
-        }
+        data = _pir_form_data(request.form, stakeholders)
+        # Placeholder; create_pir allocates the authoritative pir_id atomically.
+        data["pir_id"] = ""
+        data["status"] = "Pending"  # always starts Pending until triage is complete
         try:
             uuid = misp_store.create_pir(data)
             pir_id = data["pir_id"]
@@ -414,61 +450,16 @@ def pir_edit(id):
         return redirect(url_for("requirements.pir_detail", id=id))
     stakeholders = misp_store.list_stakeholders()
     if request.method == "POST":
-        output_format = [v.strip() for v in request.form.getlist("output_format") if v.strip()]
-        owner_uuid, owner_name, owner_role = _owner_fields(request.form, stakeholders)
-        data = {
-            "pir_id": pir.pir_id,
-            "question": request.form["question"],
-            "context": request.form.get("context"),
-            "intel_level": [v for v in request.form.getlist("intel_level") if v.strip()],
-            "owner_uuid": owner_uuid,
-            "owner_name": owner_name,
-            "owner_role": owner_role,
-            "decision_supported": request.form.get("decision_supported"),
-            "decision_maker": [v for v in request.form.getlist("decision_maker") if v.strip()],
-            "consequence": [v for v in request.form.getlist("consequence") if v.strip()],
-            "deadline": request.form.get("deadline"),
-            "priority_justification": request.form.get("priority_justification"),
-            "sub_questions": _sub_questions(request.form),
-            "priority": request.form.get("priority", "Should have"),
-            "time_sensitivity": request.form.get("time_sensitivity", "Standard (<1 month)"),
-            "status": request.form.get("status", "Pending"),
-            "geographic_scope": dedup_lower(request.form.getlist("geographic_scope")),
-            "time_frame": request.form.get("time_frame"),
-            "threat_types": request.form.getlist("threat_types"),
-            "threat_actors": dedup_lower(request.form.getlist("threat_actors")),
-            "sectors": dedup_lower(request.form.getlist("sectors")),
-            "out_of_scope": request.form.getlist("out_of_scope"),
-            "technology": request.form.getlist("technology"),
-            "vendor": request.form.getlist("vendor"),
-            "incident": request.form.getlist("incident"),
-            "campaign": request.form.getlist("campaign"),
-            "collection_sources": request.form.getlist("collection_sources"),
-            "output_format": output_format,
-            "distribution": _distribution_ids(request.form, stakeholders),
-            "focus_points": _scope_focus_points(request.form, pir.focus_points),
-            "resolution_note": request.form.get("resolution_note"),
-            "next_review": request.form.get("next_review") or None,
-            "mitre_attack_techniques": request.form.getlist("mitre_attack_techniques"),
-            # Carry intake fields forward - the edit form does not touch them
-            "intake_status": getattr(pir, "intake_status", "submitted") or "submitted",
-            "acknowledged_at": getattr(pir, "acknowledged_at", "") or "",
-            "acknowledged_by": getattr(pir, "acknowledged_by", "") or "",
-            "triaged_at": getattr(pir, "triaged_at", "") or "",
-            "triaged_by": getattr(pir, "triaged_by", "") or "",
-            "decision_at": getattr(pir, "decision_at", "") or "",
-            "decision_by": getattr(pir, "decision_by", "") or "",
-            "rejection_reason": getattr(pir, "rejection_reason", "") or "",
-            "deferral_reason": getattr(pir, "deferral_reason", "") or "",
-            "linked_pir_uuid": getattr(pir, "linked_pir_uuid", "") or "",
-            "triage_checklist": list(getattr(pir, "triage_checklist", []) or []),
-        }
+        # The status and the intake record are kept as stored: they change
+        # through triage and the status board, not this form.
+        data = {**misp_store.pir_to_data(pir),
+                **_pir_form_data(request.form, stakeholders, pir.focus_points)}
         try:
-            new_id = misp_store.update_pir(id, data)
+            misp_store.update_pir(id, data)
             audit.record("update", "pir", entity_id=id, entity_label=pir.pir_id)
             _matching.invalidate_cache()
             flash(f"{pir.pir_id} updated.", "success")
-            return redirect(url_for("requirements.pir_detail", id=new_id))
+            return redirect(url_for("requirements.pir_detail", id=id))
         except Exception as exc:
             logger.exception("Could not update PIR %s", id)
             flash(f"Could not update PIR: {exc}", "warning")
@@ -507,6 +498,10 @@ def pir_triage(id):
     pir = misp_store.get_pir(id)
     if pir is None:
         return "PIR not found", 404
+    # The PIR list offers triage only to these.
+    if pir.status != "Pending" or pir.intake_status == "rejected":
+        flash(f"{pir.pir_id} has already been triaged.", "warning")
+        return redirect(url_for("requirements.pir_list"))
 
     decision = request.form.get("decision", "").strip()
     valid_decisions = [s for s in PIR_INTAKE_STATUSES if s not in ("submitted", "triaged")]
@@ -519,10 +514,13 @@ def pir_triage(id):
         flash("A reason is required when rejecting or deferring.", "warning")
         return redirect(url_for("requirements.pir_list"))
 
-    linked_uuid = request.form.get("linked_pir_uuid", "").strip()
-    if decision == "merged" and not linked_uuid:
-        flash("Select the PIR to merge into.", "warning")
-        return redirect(url_for("requirements.pir_list"))
+    target = None
+    if decision == "merged":
+        linked_uuid = request.form.get("linked_pir_uuid", "").strip()
+        target = misp_store.get_pir(linked_uuid) if linked_uuid else None
+        if target is None or target.uuid == pir.uuid or target.intake_status in _NOT_MERGE_TARGETS:
+            flash("Select the PIR to merge into.", "warning")
+            return redirect(url_for("requirements.pir_list"))
 
     checklist = request.form.getlist("triage_checklist")
     try:
@@ -530,13 +528,17 @@ def pir_triage(id):
             id,
             decision,
             reason=reason or None,
-            linked_pir_uuid=linked_uuid or None,
+            linked_pir_uuid=target.uuid if target else None,
             checklist=checklist,
         )
         audit.record("triage", "pir", entity_id=id, entity_label=pir.pir_id)
+        # Approving or merging changes whether the PIR is matched against events.
+        _matching.invalidate_cache()
         try:
-            from notifier import mattermost as mm
-            mm.send_pir_intake_notification(pir, decision, reason or None)
+            from notifier import dispatcher
+            stakeholders = misp_store.list_stakeholders()
+            recipients = _selected_distribution_stakeholders([pir.owner_uuid, *pir.distribution], stakeholders)
+            dispatcher.send_pir_intake(pir, decision, reason or None, recipients)
         except Exception as exc:
             logger.warning("PIR intake notification failed for %s: %s", pir.pir_id, exc)
         if decision in ("acknowledged", "deferred"):
@@ -654,38 +656,10 @@ def gir_list():
 def gir_new():
     stakeholders = misp_store.list_stakeholders()
     if request.method == "POST":
-        owner_uuid, owner_name, owner_role = _owner_fields(request.form, stakeholders)
-        output_format = [v.strip() for v in request.form.getlist("output_format") if v.strip()]
-        data = {
-            # Placeholder; create_gir allocates the authoritative gir_id atomically.
-            "gir_id": "",
-            "topic": request.form["topic"],
-            "description": request.form.get("description"),
-            "owner_uuid": owner_uuid,
-            "owner_name": owner_name,
-            "owner_role": owner_role,
-            "status": "Pending",
-            "review_cycle": request.form.get("review_cycle", "Quarterly"),
-            "collection_sources": request.form.getlist("collection_sources"),
-            "geographic_scope": dedup_lower(request.form.getlist("geographic_scope")),
-            "sectors": dedup_lower(request.form.getlist("sectors")),
-            "threat_types": request.form.getlist("threat_types"),
-            "threat_actors": dedup_lower(request.form.getlist("threat_actors")),
-            "out_of_scope": request.form.getlist("out_of_scope"),
-            "technology": request.form.getlist("technology"),
-            "vendor": request.form.getlist("vendor"),
-            "incident": request.form.getlist("incident"),
-            "campaign": request.form.getlist("campaign"),
-            "output_format": output_format,
-            "distribution": _distribution_ids(request.form, stakeholders),
-            "deadline": request.form.get("deadline"),
-            "priority_justification": request.form.get("priority_justification"),
-            "sub_questions": _sub_questions(request.form),
-            "focus_points": _scope_focus_points(request.form),
-            "next_review": request.form.get("next_review") or None,
-            "intel_level": request.form.getlist("intel_level"),
-            "mitre_attack_techniques": request.form.getlist("mitre_attack_techniques"),
-        }
+        data = _gir_form_data(request.form, stakeholders)
+        # Placeholder; create_gir allocates the authoritative gir_id atomically.
+        data["gir_id"] = ""
+        data["status"] = "Pending"
         try:
             uuid = misp_store.create_gir(data)
             gir_id = data["gir_id"]
@@ -740,43 +714,16 @@ def gir_edit(id):
         return "GIR not found", 404
     stakeholders = misp_store.list_stakeholders()
     if request.method == "POST":
-        owner_uuid, owner_name, owner_role = _owner_fields(request.form, stakeholders)
-        output_format = [v.strip() for v in request.form.getlist("output_format") if v.strip()]
-        data = {
-            "gir_id": gir.gir_id,
-            "topic": request.form["topic"],
-            "description": request.form.get("description"),
-            "owner_uuid": owner_uuid,
-            "owner_name": owner_name,
-            "owner_role": owner_role,
-            "status": request.form.get("status", "Active"),
-            "review_cycle": request.form.get("review_cycle", "Quarterly"),
-            "collection_sources": request.form.getlist("collection_sources"),
-            "geographic_scope": dedup_lower(request.form.getlist("geographic_scope")),
-            "sectors": dedup_lower(request.form.getlist("sectors")),
-            "threat_types": request.form.getlist("threat_types"),
-            "threat_actors": dedup_lower(request.form.getlist("threat_actors")),
-            "out_of_scope": request.form.getlist("out_of_scope"),
-            "technology": request.form.getlist("technology"),
-            "vendor": request.form.getlist("vendor"),
-            "incident": request.form.getlist("incident"),
-            "campaign": request.form.getlist("campaign"),
-            "output_format": output_format,
-            "distribution": _distribution_ids(request.form, stakeholders),
-            "deadline": request.form.get("deadline"),
-            "priority_justification": request.form.get("priority_justification"),
-            "sub_questions": _sub_questions(request.form),
-            "focus_points": _scope_focus_points(request.form, gir.focus_points),
-            "next_review": request.form.get("next_review") or None,
-            "intel_level": request.form.getlist("intel_level"),
-            "mitre_attack_techniques": request.form.getlist("mitre_attack_techniques"),
-        }
+        data = _gir_form_data(request.form, stakeholders, gir.focus_points)
+        data["gir_id"] = gir.gir_id
+        status = request.form.get("status")
+        data["status"] = status if status in GIR_STATUSES else gir.status
         try:
-            new_id = misp_store.update_gir(id, data)
+            misp_store.update_gir(id, data)
             audit.record("update", "gir", entity_id=id, entity_label=gir.gir_id)
             _matching.invalidate_cache()
             flash(f"{gir.gir_id} updated.", "success")
-            return redirect(url_for("requirements.gir_detail", id=new_id))
+            return redirect(url_for("requirements.gir_detail", id=id))
         except Exception as exc:
             logger.exception("Could not update GIR %s", id)
             flash(f"Could not update GIR: {exc}", "warning")
@@ -891,7 +838,6 @@ def gir_delete_focus_point(id, fp_id):
 
 @bp.route("/pirs/<string:id>/status", methods=["POST"])
 def pir_status_update(id):
-    from flask import jsonify
     pir = misp_store.get_pir(id)
     if pir is None:
         return jsonify({"error": "PIR not found"}), 404
@@ -911,6 +857,7 @@ def pir_status_update(id):
     try:
         misp_store.update_pir(id, data)
         audit.record("update", "pir", entity_id=id, entity_label=pir.pir_id)
+        _matching.invalidate_cache()
         return jsonify({"ok": True, "status": new_status})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -918,7 +865,6 @@ def pir_status_update(id):
 
 @bp.route("/girs/<string:id>/status", methods=["POST"])
 def gir_status_update(id):
-    from flask import jsonify
     gir = misp_store.get_gir(id)
     if gir is None:
         return jsonify({"error": "GIR not found"}), 404
@@ -930,6 +876,7 @@ def gir_status_update(id):
     try:
         misp_store.update_gir(id, data)
         audit.record("update", "gir", entity_id=id, entity_label=gir.gir_id)
+        _matching.invalidate_cache()
         return jsonify({"ok": True, "status": new_status})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

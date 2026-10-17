@@ -142,11 +142,9 @@ def send_pir_notification(
     return send_text(text, f"PIR {pir.pir_id}", channel_ids=channel_ids)
 
 
-def send_pir_intake_notification(pir, new_status: str, reason: str = None) -> None:
+def send_pir_intake_notification(pir, new_status: str, reason: str = None,
+                                 channel_ids: list[str] | None = None) -> bool:
     """Notify that a PIR's intake status has changed."""
-    urls = _active_webhooks()
-    if not urls:
-        return
     icons = {
         "acknowledged": ":white_check_mark:",
         "triaged": ":mag:",
@@ -162,7 +160,7 @@ def send_pir_intake_notification(pir, new_status: str, reason: str = None) -> No
     )
     if reason:
         text += f"\n**Reason:** {reason}"
-    _post(urls, {"text": text}, f"PIR intake {pir.pir_id}")
+    return send_text(text, f"PIR intake {pir.pir_id}", channel_ids=channel_ids)
 
 
 def send_gir_notification(

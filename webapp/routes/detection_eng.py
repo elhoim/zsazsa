@@ -12,6 +12,7 @@ import logging
 from flask import Blueprint, Response, flash, jsonify, redirect, render_template, request, url_for
 from webapp.routes.source_event_utils import (
     flattened_references,
+    linked_pir_uuid,
     lookup_source_event_meta,
     normalise_source_event_rows,
     parse_source_tokens,
@@ -75,7 +76,7 @@ def _wizard_context(der=None, source_events=None):
         "priorities": misp_store.DER_PRIORITIES,
         "formats": misp_store.DER_FORMATS,
         "statuses": misp_store.DER_STATUSES,
-        "pirs": misp_store.list_pirs(),
+        "pirs": misp_store.list_selectable_pirs(linked_pir_uuid(der)),
         "galaxy_mitre_attack": misp_store.galaxy_mitre_attack_patterns(),
         "source_event_tags": sorted({t for ev in (source_events or []) for t in ev.get("tags", [])}),
         "can_publish": misp_session.current_user_can_publish(),

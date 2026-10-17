@@ -1513,17 +1513,15 @@ def create_pir(data):
 
 
 def update_pir(uuid, data):
-    """Update PIR fields. If the MISP event was deleted, recreates it.
+    """Save ``data`` over an existing PIR.
 
-    Returns the UUID to redirect to (may be a new UUID if the event was gone).
+    A PIR that has gone is not created again: products, RFIs and stakeholders
+    point at its UUID, and a new event would have another.
     """
+    event = _zsazsa_event(uuid, "zsazsa-pir", config.TAG_PIR)
+    if event is None:
+        raise ValueError(f"PIR {uuid} not found")
     misp = _misp()
-    event = misp.get_event(uuid, pythonify=True)
-    if isinstance(event, dict):
-        logger.warning("PIR event %s not found; recreating with pir_id %s", uuid, data.get("pir_id"))
-        return create_pir(data)
-    if not _is_record(event, "zsazsa-pir", config.TAG_PIR):
-        raise ValueError(f"Event {uuid} is not a PIR")
     old = _get_obj(event, "zsazsa-pir")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
@@ -1533,7 +1531,6 @@ def update_pir(uuid, data):
     if "focus_points" in data:
         _replace_focus_points(uuid, data["focus_points"])
     _apply_scope_tags(misp, uuid, data, new_info=f"[zsazsa:pir] {data['pir_id']}")
-    return uuid
 
 
 def delete_pir(uuid):
@@ -1575,7 +1572,7 @@ def update_pir_intake(uuid, intake_status, reason=None, linked_pir_uuid=None, ch
         data["linked_pir_uuid"] = linked_pir_uuid
     if checklist is not None:
         data["triage_checklist"] = checklist
-    return update_pir(uuid, data)
+    update_pir(uuid, data)
 
 
 # ── GIR CRUD ──────────────────────────────────────────────────────────────────
@@ -1612,21 +1609,17 @@ def create_gir(data):
 
 
 def update_gir(uuid, data):
-    """Update GIR fields. If the MISP event was deleted, recreates it.
-
-    Returns the UUID to redirect to (may be a new UUID if the event was gone).
+    """Save ``data`` over an existing GIR, which is not created again when it
+    has gone, as for a PIR.
 
     Scope items are replaced only when the caller sends them, as for a PIR: the
     edit form posts every scope list, a status change posts none and leaves them
     alone.
     """
+    event = _zsazsa_event(uuid, "zsazsa-gir", config.TAG_GIR)
+    if event is None:
+        raise ValueError(f"GIR {uuid} not found")
     misp = _misp()
-    event = misp.get_event(uuid, pythonify=True)
-    if isinstance(event, dict):
-        logger.warning("GIR event %s not found; recreating with gir_id %s", uuid, data.get("gir_id"))
-        return create_gir(data)
-    if not _is_record(event, "zsazsa-gir", config.TAG_GIR):
-        raise ValueError(f"Event {uuid} is not a GIR")
     old = _get_obj(event, "zsazsa-gir")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
@@ -1636,7 +1629,6 @@ def update_gir(uuid, data):
     topic = data.get("topic", "")
     gir_id = data.get("gir_id", "")
     _apply_scope_tags(misp, uuid, data, new_info=f"[zsazsa:gir] {gir_id}: {topic}")
-    return uuid
 
 
 def delete_gir(uuid):
@@ -1832,11 +1824,11 @@ def remove_focus_point_with_scope(req_uuid, attr_uuid):
     _delete_attribute(misp, attr_uuid, "delete focus point")
 
 
-def sync_focus_points_category(req_uuid, category, values, notes=""):
+def sync_focus_points_category(req_uuid, category, values):
     """Replace all focus points of ``category`` for the PIR/GIR with
     ``values`` (deduplicated, trimmed) and align the parent scope list.
     Use for galaxy-backed categories where the user picks from a
-    multi-select."""
+    multi-select. A value that stays keeps the notes typed against it."""
     misp = _misp()
     event = misp.get_event(req_uuid, pythonify=True)
     if isinstance(event, dict) or event is None:
@@ -1852,13 +1844,15 @@ def sync_focus_points_category(req_uuid, category, values, notes=""):
         seen.add(key)
         cleaned.append(v)
 
+    notes = {}
     for a in _get_fp_attrs(event):
         ns = _fp_ns(a)
         if ns.category == category:
+            notes[ns.value.lower()] = ns.notes
             _delete_attribute(misp, a.uuid, "delete focus point")
 
     for v in cleaned:
-        add_focus_point(req_uuid, category, v, notes)
+        add_focus_point(req_uuid, category, v, notes.get(v.lower(), ""))
 
     relation = _FP_CATEGORY_TO_RELATION.get(category)
     if relation:
@@ -2034,13 +2028,12 @@ def create_rfi(data):
 
 
 def update_rfi(uuid, data):
+    """Save ``data`` over an existing RFI, which is not created again when it
+    has gone, as for a PIR."""
+    event = _zsazsa_event(uuid, "zsazsa-rfi", config.TAG_RFI)
+    if event is None:
+        raise ValueError(f"RFI {uuid} not found")
     misp = _misp()
-    event = misp.get_event(uuid, pythonify=True)
-    if isinstance(event, dict):
-        logger.warning("RFI event %s not found; recreating", uuid)
-        return create_rfi(data)
-    if not _is_record(event, "zsazsa-rfi", config.TAG_RFI):
-        raise ValueError(f"Event {uuid} is not an RFI")
     old = _get_obj(event, "zsazsa-rfi")
     if old:
         data["creator"] = _obj_attr(old, "creator") or ""
@@ -2058,7 +2051,6 @@ def update_rfi(uuid, data):
     rfi_id = data.get("rfi_id", "")
     info = f"[zsazsa:rfi] {rfi_id}: {data.get('question', '')[:80]}"
     misp.update_event({"Event": {"id": event.id, "info": info}})
-    return uuid
 
 
 def delete_rfi(uuid):
@@ -3486,13 +3478,26 @@ def girs_distributed_to_stakeholder(stakeholder_uuid, stakeholder_name="", stake
     ]
 
 
+def linked_pir_uuids(event) -> set:
+    """The PIRs a product event answers, as its object records them: one
+    linked-pir-uuid, or the linked-pir-uuids list of a threat landscape report."""
+    linked = set()
+    for obj in event.objects:
+        for attr in obj.attributes:
+            if attr.object_relation == "linked-pir-uuid":
+                linked.add(attr.value)
+            elif attr.object_relation == "linked-pir-uuids":
+                linked.update(_json_list(attr.value))
+    return linked
+
+
 def products_for_stakeholder(stakeholder, pirs, girs, limit=20):
     """The recent products on a stakeholder's page.
 
     ``pirs`` and ``girs`` are the requirements the stakeholder owns or is on the
-    distribution of. A product is listed when its title or a tag names one of
-    them, or when it is an approved alert or advisory, or a published briefing,
-    of a type the stakeholder subscribes to.
+    distribution of. A product is listed when it answers one of those PIRs, or
+    its title or a tag names one of them, or when it is an approved alert or
+    advisory, or a published briefing, of a type the stakeholder subscribes to.
     """
     needles = {p.pir_id for p in pirs} | {g.gir_id for g in girs} | {r.uuid for r in pirs + girs}
     needles.discard("")
@@ -3509,7 +3514,8 @@ def products_for_stakeholder(stakeholder, pirs, girs, limit=20):
     for ev in events:
         info = ev.info or ""
         ev_tags = [t.name for t in (getattr(ev, "tags", []) or [])]
-        if any(n in info for n in needles) or any(n in t for n in needles for t in ev_tags):
+        if (linked_pir_uuids(ev) & needles or any(n in info for n in needles)
+                or any(n in t for n in needles for t in ev_tags)):
             ptype = ""
             for t in ev_tags:
                 if t.startswith('zsazsa:ctiproduct='):

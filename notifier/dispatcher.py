@@ -159,6 +159,15 @@ def send_pir_preview(pir, preview_url: str, markdown: str, stakeholders: list) -
     )
 
 
+def send_pir_intake(pir, decision: str, reason: str | None, stakeholders: list) -> dict:
+    """Tell the stakeholders of a PIR what its triage decided, in their Mattermost channels."""
+    senders = {
+        "mattermost": lambda channel_ids: mattermost.send_pir_intake_notification(
+            pir, decision, reason, channel_ids=channel_ids),
+    }
+    return _dispatch(stakeholders, senders, "PIR intake", getattr(pir, "pir_id", ""))
+
+
 def send_rfi_preview(rfi, preview_url: str, markdown: str, stakeholders: list) -> dict:
     """Send RFI preview notifications to stakeholder-configured channels."""
     return _send_preview(

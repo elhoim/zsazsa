@@ -8,6 +8,7 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 from core.vuln_lookup import CVE_RE
 from webapp.routes.source_event_utils import (
     flattened_references,
+    linked_pir_uuid,
     lookup_source_event_meta,
     normalise_source_event_rows,
     parse_source_tokens,
@@ -83,7 +84,7 @@ def _wizard_context(vea=None, source_events=None):
         "exploit_complexity_options": misp_store.VEA_EXPLOIT_COMPLEXITY,
         "actor_interest_options": misp_store.VEA_ACTOR_INTEREST,
         "cisa_kev_options": misp_store.VEA_CISA_KEV,
-        "pirs": misp_store.list_pirs(),
+        "pirs": misp_store.list_selectable_pirs(linked_pir_uuid(vea)),
         "action_presets": getattr(_cfg, "RECOMMENDED_ACTIONS_IMMEDIATE", []),
         "source_event_tags": sorted({t for ev in (source_events or []) for t in ev.get("tags", [])}),
         "can_publish": misp_session.current_user_can_publish(),

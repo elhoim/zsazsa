@@ -31,6 +31,7 @@
   the configuration reference moved from INSTALL.md to the "Configuration"
   section of the README, which now opens with links to both.
 - A stakeholder who owns a PIR, GIR or RFI can no longer be deleted.
+- PIR triage notices go only to the PIR's owner and distribution channels.
 
 ### Fixed
 
@@ -51,6 +52,7 @@
   accepts; it now has a version 4 one, like the other templates. #64, reported
   by @angolion
 - Saving a stakeholder MISP could not load no longer creates a duplicate.
+- Saving a PIR, GIR or RFI MISP could not load no longer creates a duplicate.
 
 ### Security
 

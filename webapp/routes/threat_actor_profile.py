@@ -82,7 +82,7 @@ def _form_context(tap=None):
         "geo_items": misp_store.galaxy_geography(),
         "galaxy_sectors": misp_store.galaxy_sectors(),
         "galaxy_mitre_attack": misp_store.galaxy_mitre_attack_patterns(),
-        "pirs": misp_store.list_pirs(),
+        "pirs": misp_store.list_selectable_pirs(tap.linked_pir_uuid if tap else ""),
         "feeds": misp_store.list_indicator_feeds(),
     }
 

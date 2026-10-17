@@ -16,6 +16,8 @@ from unittest import mock
 
 from webapp import misp_store
 
+UUID = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+
 
 def _pir_data(**overrides):
     data = {"pir_id": "PIR-001", "question": "Are our hauliers targeted?",
@@ -36,7 +38,7 @@ class RequirementScopeItems(unittest.TestCase):
 
     def setUp(self):
         self.misp = mock.MagicMock()
-        self.misp.get_event.return_value = SimpleNamespace(id=7, uuid="u" * 36)
+        self.misp.get_event.return_value = SimpleNamespace(id=7, uuid=UUID)
         patches = [
             mock.patch.object(misp_store, "_misp", return_value=self.misp),
             # The PIR or GIR object, holding no attributes of interest here.
@@ -52,27 +54,27 @@ class RequirementScopeItems(unittest.TestCase):
         self.replace = misp_store._replace_focus_points
 
     def test_a_pir_update_without_scope_items_leaves_them_alone(self):
-        misp_store.update_pir("u" * 36, _pir_data())
+        misp_store.update_pir(UUID, _pir_data())
         self.replace.assert_not_called()
 
     def test_a_pir_update_with_scope_items_replaces_them(self):
         points = [{"category": "Sector", "value": "Transport", "notes": ""}]
-        misp_store.update_pir("u" * 36, _pir_data(focus_points=points))
-        self.replace.assert_called_once_with("u" * 36, points)
+        misp_store.update_pir(UUID, _pir_data(focus_points=points))
+        self.replace.assert_called_once_with(UUID, points)
 
     def test_a_pir_saved_with_no_scope_left_clears_its_items(self):
         """An empty list is a decision the form made, unlike a missing key."""
-        misp_store.update_pir("u" * 36, _pir_data(focus_points=[]))
-        self.replace.assert_called_once_with("u" * 36, [])
+        misp_store.update_pir(UUID, _pir_data(focus_points=[]))
+        self.replace.assert_called_once_with(UUID, [])
 
     def test_a_gir_update_without_scope_items_leaves_them_alone(self):
-        misp_store.update_gir("u" * 36, _gir_data())
+        misp_store.update_gir(UUID, _gir_data())
         self.replace.assert_not_called()
 
     def test_a_gir_update_with_scope_items_replaces_them(self):
         points = [{"category": "Vendor", "value": "Bosch", "notes": ""}]
-        misp_store.update_gir("u" * 36, _gir_data(focus_points=points))
-        self.replace.assert_called_once_with("u" * 36, points)
+        misp_store.update_gir(UUID, _gir_data(focus_points=points))
+        self.replace.assert_called_once_with(UUID, points)
 
 
 class RfiIdentity(unittest.TestCase):
@@ -81,7 +83,7 @@ class RfiIdentity(unittest.TestCase):
 
     def setUp(self):
         self.misp = mock.MagicMock()
-        self.misp.get_event.return_value = SimpleNamespace(id=7, uuid="u" * 36)
+        self.misp.get_event.return_value = SimpleNamespace(id=7, uuid=UUID)
         stored = {"creator": "koen@example.org", "rfi-id": "RFI-007"}
         patches = [
             mock.patch.object(misp_store, "_misp", return_value=self.misp),
@@ -95,7 +97,7 @@ class RfiIdentity(unittest.TestCase):
 
     def update(self, **data):
         data.setdefault("question", "Which hauliers were hit?")
-        misp_store.update_rfi("u" * 36, data)
+        misp_store.update_rfi(UUID, data)
         return data, self.misp.update_event.call_args.args[0]["Event"]["info"]
 
     def test_an_update_that_forgets_the_id_keeps_the_stored_one(self):

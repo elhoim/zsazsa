@@ -2,7 +2,7 @@
 
 Implements the RFI lifecycle described in the TI program template:
 intake → acknowledge → triage → respond → feedback. RFIs are stored as
-MISP events tagged 'zsazsa:type="rfi"' and 'zsazsa:ctiproduct="rfi"'.
+MISP events tagged 'zsazsa:type="rfi"'.
 """
 
 import logging
@@ -60,7 +60,6 @@ def _form_data(form, rfi_id):
         "owner_uuid": form.get("owner_uuid") or "",
         "owner_name": form.get("owner_name") or "",
         "priority": form.get("priority", "Medium"),
-        "status": form.get("status", "New"),
         "assigned_analyst": form.get("assigned_analyst"),
         "due_date": form.get("due_date") or None,
         "linked_pir_uuid": form.get("linked_pir_uuid") or "",
@@ -151,12 +150,13 @@ def rfi_list():
 @bp.route("/new", methods=["GET", "POST"])
 def rfi_new():
     stakeholders = misp_store.list_stakeholders()
-    pirs = misp_store.list_pirs()
+    pirs = misp_store.list_selectable_pirs()
     girs = misp_store.list_girs()
     if request.method == "POST":
         # The id is a placeholder; create_rfi allocates the authoritative
         # rfi_id atomically and writes it back into data.
         data = _form_data(request.form, "")
+        data["status"] = "New"
         # Resolve owner_name from selected stakeholder
         if data["owner_uuid"]:
             owner = next((s for s in stakeholders if s.id == data["owner_uuid"]), None)
@@ -273,19 +273,21 @@ def rfi_edit(id):
     if rfi is None:
         return "RFI not found", 404
     stakeholders = misp_store.list_stakeholders()
-    pirs = misp_store.list_pirs()
+    pirs = misp_store.list_selectable_pirs(rfi.linked_pir_uuid)
     girs = misp_store.list_girs()
     if request.method == "POST":
         data = _form_data(request.form, rfi.rfi_id)
+        # The status changes through triage and the status board only.
+        data["status"] = rfi.status
         if data["owner_uuid"]:
             owner = next((s for s in stakeholders if s.id == data["owner_uuid"]), None)
             if owner:
                 data["owner_name"] = owner.name
         try:
-            new_id = misp_store.update_rfi(id, data)
+            misp_store.update_rfi(id, data)
             audit.record("update", "rfi", entity_id=id, entity_label=rfi.rfi_id)
             flash(f"{rfi.rfi_id} updated.", "success")
-            return redirect(url_for("rfi.rfi_detail", id=new_id))
+            return redirect(url_for("rfi.rfi_detail", id=id))
         except Exception as exc:
             flash(f"Could not update RFI: {exc}", "warning")
 
@@ -312,7 +314,7 @@ def rfi_delete(id):
     rfi = misp_store.get_rfi(id)
     if rfi is None:
         return "RFI not found", 404
-    label = rfi.rfi_id if rfi else id
+    label = rfi.rfi_id
     try:
         misp_store.delete_rfi(id)
         audit.record("delete", "rfi", entity_id=id, entity_label=label)
