@@ -3008,11 +3008,30 @@ def pymisp_script(filters, feed=None) -> str:
     return _PYMISP_SCRIPT_HEAD + "\n".join(lines) + "\n" + _PYMISP_SCRIPT_TAIL
 
 
+# zsazsa keeps its own products and records -- indicator feeds, stakeholders,
+# PIRs, RFIs and the rest -- as events on the webapp MISP, tagged in the
+# zsazsa:type and zsazsa:ctiproduct namespaces. Their attributes are not threat
+# indicators: a feed object even carries that feed's public-URL capability token
+# as a cleartext text attribute. A broad feed query against the store would
+# otherwise return one feed's token as an indicator value to the consumer of
+# another feed. Collected intelligence is tagged zsazsa:source / zsazsa:collection
+# instead, so it is kept; only these own-record namespaces are dropped.
+_OWN_RECORD_TAG_PREFIXES = ("zsazsa:type=", "zsazsa:ctiproduct=")
+
+
+def _is_own_record(tag_names) -> bool:
+    """Whether the attribute belongs to one of zsazsa's own product/record events."""
+    return any(t.startswith(_OWN_RECORD_TAG_PREFIXES) for t in tag_names)
+
+
 def _parse_attribute_rows(raw, server_id, server_label, server_url, filters):
     rows = []
     for a in _tag_filtered(_attributes_from(raw), filters):
         event = a.get("Event") or {}
         tag_names = _attr_tag_names(a, event)
+        # Never surface zsazsa's own records (feed tokens included) as indicators.
+        if _is_own_record(tag_names):
+            continue
         ts = a.get("timestamp")
         try:
             ts_epoch = int(ts) if ts else 0
