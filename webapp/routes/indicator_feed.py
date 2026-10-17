@@ -445,6 +445,26 @@ def edit(id):
     return redirect(url_for("indicator_feed.detail", id=id))
 
 
+@bp.route("/<string:id>/new-token", methods=["POST"])
+def new_token(id):
+    """Replace the token in the feed's public URL, for a link that got out.
+    Like switching the URL on or off, only a publisher may."""
+    feed = misp_store.get_indicator_feed(id)
+    if feed is None:
+        return "Indicator feed not found", 404
+    if not misp_session.current_user_can_publish():
+        flash(misp_session.publish_denied_message("give a feed a new token"), "warning")
+        return redirect(url_for("indicator_feed.detail", id=id))
+    try:
+        misp_store.new_indicator_feed_token(id)
+        audit.record("update", "indicator-feed", entity_id=id, entity_label=f"{feed.feed_id} new token")
+        flash(f"{feed.feed_id} has a new token. The old public URL no longer works.", "success")
+    except Exception as exc:
+        logger.warning("New token for %s failed: %s", feed.feed_id, exc)
+        flash(f"Could not give {feed.feed_id} a new token: {exc}", "warning")
+    return redirect(url_for("indicator_feed.detail", id=id))
+
+
 @bp.route("/<string:id>/delete", methods=["POST"])
 def delete(id):
     feed = misp_store.get_indicator_feed(id)

@@ -199,25 +199,28 @@ class TagsAskedOfMisp(unittest.TestCase):
     matched. The operators put the real filter in front of the limit.
     """
 
+    # zsazsa's own records, which every query leaves out (GHSA-jw7f-22fc-mmvc).
+    OWN = ['zsazsa:type=%', 'zsazsa:ctiproduct=%']
+
     def tags(self, **filters):
         return misp_store._indicator_search_kwargs(filters).get("tags")
 
     def test_included_tags_are_asked_for_as_an_and(self):
         self.assertEqual(self.tags(tags_include=["tlp:red", "actor:x"]),
-                         {"AND": ["tlp:red", "actor:x"]})
+                         {"AND": ["tlp:red", "actor:x"], "NOT": self.OWN})
 
     def test_excluded_tags_are_asked_for_as_a_not(self):
         # NOT over a list means carrying none of them, which is what the feed
         # means by an exclusion, rather than not carrying all of them.
         self.assertEqual(self.tags(tags_exclude=["tlp:red", "actor:x"]),
-                         {"NOT": ["tlp:red", "actor:x"]})
+                         {"NOT": ["tlp:red", "actor:x"] + self.OWN})
 
     def test_the_two_travel_together(self):
         self.assertEqual(self.tags(tags_include=["tlp:red"], tags_exclude=["actor:x"]),
-                         {"AND": ["tlp:red"], "NOT": ["actor:x"]})
+                         {"AND": ["tlp:red"], "NOT": ["actor:x"] + self.OWN})
 
-    def test_a_query_without_tags_does_not_mention_them(self):
-        self.assertIsNone(self.tags())
+    def test_a_query_without_tags_still_leaves_out_zsazsas_records(self):
+        self.assertEqual(self.tags(), {"NOT": self.OWN})
 
 
 class WarninglistRefill(unittest.TestCase):
