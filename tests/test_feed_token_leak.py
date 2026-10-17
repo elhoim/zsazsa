@@ -1,11 +1,11 @@
 """A feed query must not return zsazsa's own records as indicator values.
 
-Each indicator feed's public-URL capability token is stored as a cleartext MISP
-text attribute on a feed event on the webapp store. A broad feed query against
-that store would otherwise return another feed's token as an indicator value to
-whoever holds this feed's URL. zsazsa's own product/record events carry
-zsazsa:type / zsazsa:ctiproduct tags; collected intelligence carries
-zsazsa:source / zsazsa:collection and must still come through.
+Each indicator feed's public-URL token is stored as a text attribute on the
+feed's event in zsazsa's own MISP. A broad feed query on that MISP would
+otherwise return another feed's token as an indicator value to whoever holds
+this feed's URL (GHSA-jw7f-22fc-mmvc). zsazsa's own records are tagged
+zsazsa:type or zsazsa:ctiproduct; collected intelligence has zsazsa:source or
+zsazsa:collection tags and must still come through.
 
     python -m unittest tests.test_feed_token_leak
 """

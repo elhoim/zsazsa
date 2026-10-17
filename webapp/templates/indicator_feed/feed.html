@@ -178,6 +178,13 @@
               <input type="text" class="form-control public-url font-monospace" style="font-size:.68rem;" readonly
                      value="{{ url_for('indicator_feed.public_feed', token=feed.token, _external=True) }}">
               <button type="button" class="btn btn-outline-secondary copy-url" title="Copy URL"><i class="fas fa-copy"></i></button>
+              {% if can_publish %}
+              <button type="submit" class="btn btn-outline-secondary" title="New token" aria-label="New token"
+                      formmethod="post" formaction="{{ url_for('indicator_feed.new_token', id=feed.id) }}"
+                      data-submit-confirm="Give {{ feed.feed_id }} a new token? The current URL stops working, so send the new one to everyone who uses the feed.">
+                <i class="fas fa-rotate"></i>
+              </button>
+              {% endif %}
             </div>
             <div class="text-warning" style="font-size:.72rem;">
               <i class="fas fa-triangle-exclamation me-1"></i>Anyone holding this link can read the feed:

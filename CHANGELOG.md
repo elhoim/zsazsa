@@ -50,6 +50,16 @@
   accepts; it now has a version 4 one, like the other templates. #64, reported
   by @angolion
 
+### Security
+
+- An indicator feed could disclose the public URLs of other feeds
+  (GHSA-jw7f-22fc-mmvc). Feeds now
+  leave out events tagged as a zsazsa record. The token is also kept to your
+  organisation in MISP, so it no longer syncs to connected instances when
+  `MISP_EVENT_DISTRIBUTION` shares events wider. A publisher can give a feed a
+  new token.
+  / reported by @elhoim
+
 ### Upgrading
 
 - The `zsazsa-threat-landscape-report` template has a new UUID. Nothing needs

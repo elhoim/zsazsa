@@ -37,7 +37,7 @@ from pymisp import MISPAttribute, MISPEvent, MISPObject, PyMISP
 from webapp import misp_session
 from webapp.collection_cache import AI_SUMMARY_PREFIX, source_slug
 from webapp.models import STAKEHOLDER_ROLES
-from webapp.utils import human_size, scraper_enabled
+from webapp.utils import PRODUCT_TAG_PREFIX, human_size, scraper_enabled
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
@@ -738,7 +738,7 @@ def _build_obj(name):
     return MISPObject(name, misp_objects_path_custom=_OBJECTS_PATH, strict=False)
 
 
-def _oa(obj, relation, value):
+def _oa(obj, relation, value, **fields):
     """Add a text attribute to a MISPObject, skipping empty/None values.
 
     Always passes type='text' explicitly so attribute creation succeeds even
@@ -746,7 +746,7 @@ def _oa(obj, relation, value):
     """
     if value in (None, "", [], "[]"):
         return
-    obj.add_attribute(relation, value=str(value), type="text", disable_correlation=True)
+    obj.add_attribute(relation, value=str(value), type="text", disable_correlation=True, **fields)
 
 
 def _oa_json(obj, relation, lst):
@@ -2156,7 +2156,9 @@ def _indicator_feed_obj(data):
     _oa(obj, "audience", data.get("audience"))
     _oa(obj, "author", data.get("author"))
     _oa(obj, "feedback-by", data.get("feedback_by"))
-    _oa(obj, "token", data.get("token"))
+    # Your organisation only, whatever the event has: the token is the whole
+    # credential for the public URL, and an event shared wider syncs it.
+    _oa(obj, "token", data.get("token"), distribution=0)
     _oa(obj, "public-url", "enabled" if data.get("public_url_enabled", True) else "disabled")
     _oa(obj, "creator", data.get("creator"))
     _oa(obj, "linked-pir-uuid", data.get("linked_pir_uuid"))
@@ -2251,6 +2253,17 @@ def update_indicator_feed(uuid, data):
     info = f"[zsazsa:indicator-feed] {data.get('feed_id', '')}: {(data.get('name') or '')[:80]}"
     misp.update_event({"Event": {"id": event.id, "info": info}})
     return uuid
+
+
+def new_indicator_feed_token(uuid):
+    """Give a feed a new public-URL token and return it. The old link answers
+    like an unknown one from then on; everything else about the feed stays."""
+    feed = get_indicator_feed(uuid)
+    if feed is None:
+        raise ValueError(f"Event {uuid} is not an indicator feed")
+    token = secrets.token_urlsafe(16)
+    update_indicator_feed(uuid, {**vars(feed), "token": token})
+    return token
 
 
 def profiles_using_indicator_feed(feed_uuid: str) -> list:
@@ -2804,6 +2817,18 @@ def _complex_query(and_parameters: list | None = None,
                                       not_parameters=not_parameters)
 
 
+# zsazsa's own records (feeds, stakeholders, requirements, products) are events
+# on its own MISP in these two namespaces. Their attributes are not indicators,
+# and a feed's object holds the token of its public URL, so a broad query on
+# that MISP would hand one feed's consumer the URLs of the others. Collected
+# intelligence there, manual entries and newsletters, is tagged otherwise.
+_OWN_RECORD_TAG_PREFIXES = ("zsazsa:type=", PRODUCT_TAG_PREFIX)
+
+
+def _is_own_record(tag_names) -> bool:
+    return any(t.startswith(_OWN_RECORD_TAG_PREFIXES) for t in tag_names)
+
+
 def _indicator_search_kwargs(filters):
     """Build the PyMISP attribute-search kwargs from a feed's filter dict.
 
@@ -2833,10 +2858,12 @@ def _indicator_search_kwargs(filters):
     # A flat list of tags is an OR, and MISP applies the limit to that, so two
     # included tags could cut every attribute carrying both out of the answer.
     # The complex query asks for every included tag and none of the excluded.
+    # zsazsa's own records are always excluded, here so that the limit and the
+    # count leave them out too, and again in _parse_attribute_rows for a MISP
+    # that does not apply this.
     tags_inc = list(filters.get("tags_include") or [])
-    tags_exc = list(filters.get("tags_exclude") or [])
-    if tags_inc or tags_exc:
-        kwargs["tags"] = _complex_query(and_parameters=tags_inc, not_parameters=tags_exc)
+    tags_exc = list(filters.get("tags_exclude") or []) + [f"{p}%" for p in _OWN_RECORD_TAG_PREFIXES]
+    kwargs["tags"] = _complex_query(and_parameters=tags_inc, not_parameters=tags_exc)
     event_terms = list(filters.get("events_include") or []) + [f"!{e}" for e in filters.get("events_exclude") or []]
     if event_terms:
         kwargs["eventid"] = event_terms
@@ -3008,28 +3035,11 @@ def pymisp_script(filters, feed=None) -> str:
     return _PYMISP_SCRIPT_HEAD + "\n".join(lines) + "\n" + _PYMISP_SCRIPT_TAIL
 
 
-# zsazsa keeps its own products and records -- indicator feeds, stakeholders,
-# PIRs, RFIs and the rest -- as events on the webapp MISP, tagged in the
-# zsazsa:type and zsazsa:ctiproduct namespaces. Their attributes are not threat
-# indicators: a feed object even carries that feed's public-URL capability token
-# as a cleartext text attribute. A broad feed query against the store would
-# otherwise return one feed's token as an indicator value to the consumer of
-# another feed. Collected intelligence is tagged zsazsa:source / zsazsa:collection
-# instead, so it is kept; only these own-record namespaces are dropped.
-_OWN_RECORD_TAG_PREFIXES = ("zsazsa:type=", "zsazsa:ctiproduct=")
-
-
-def _is_own_record(tag_names) -> bool:
-    """Whether the attribute belongs to one of zsazsa's own product/record events."""
-    return any(t.startswith(_OWN_RECORD_TAG_PREFIXES) for t in tag_names)
-
-
 def _parse_attribute_rows(raw, server_id, server_label, server_url, filters):
     rows = []
     for a in _tag_filtered(_attributes_from(raw), filters):
         event = a.get("Event") or {}
         tag_names = _attr_tag_names(a, event)
-        # Never surface zsazsa's own records (feed tokens included) as indicators.
         if _is_own_record(tag_names):
             continue
         ts = a.get("timestamp")
