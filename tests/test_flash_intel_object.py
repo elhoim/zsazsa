@@ -3,7 +3,9 @@
 MISP refused the zsazsa-flash-intel object because it was built without its
 template, so it had no meta-category, and every draft was filed without the
 fields the wizard edits while the log said it was created. It also answered
-Invalid Target to the source-type tag put on an event report.
+Invalid Target to the source-type tag put on an event report. A model that
+answers "relevant" without naming a focus point the article matches does not
+get a draft: the local model did so on an article about none of them.
 
     python -m unittest tests.test_flash_intel_object
 """
@@ -45,7 +47,9 @@ class Object(unittest.TestCase):
 
 
 class Process(unittest.TestCase):
-    def run_process(self, object_saved):
+    RELEVANT = {"relevant": True, "matched_focus_points": ["energy"], "source_type": "news-report"}
+
+    def run_process(self, object_saved=True, relevance=RELEVANT):
         misp = mock.create_autospec(PyMISP, instance=True)
         misp_webapp = mock.create_autospec(PyMISP, instance=True)
         created = MISPEvent()
@@ -55,13 +59,13 @@ class Process(unittest.TestCase):
         report = mock.MagicMock()
         with mock.patch.object(flash_intel, "_get_http_error", return_value=None), \
              mock.patch.object(flash_intel, "_get_reports", return_value=("article", [report])), \
-             mock.patch.object(flash_intel.llm, "check_relevance",
-                               return_value={"relevant": True, "matched_focus_points": [], "source_type": "news-report"}), \
-             mock.patch.object(flash_intel.llm, "generate_flash_intel", return_value="## Summary\nx"), \
+             mock.patch.object(flash_intel.llm, "check_relevance", return_value=relevance), \
+             mock.patch.object(flash_intel.llm, "generate_flash_intel", return_value="## Summary\nx") as generate, \
              mock.patch.object(flash_intel, "_add_flash_intel_object", return_value=object_saved), \
              mock.patch.object(flash_intel, "_automated_subscribers", return_value=[]), \
              mock.patch.object(flash_intel, "tagger") as tagger:
             result = flash_intel.process(misp, misp_webapp, event, {})
+        self.generate = generate
         return result, tagger, event, report
 
     def test_the_source_type_goes_on_the_event_not_on_its_report(self):
@@ -77,6 +81,15 @@ class Process(unittest.TestCase):
     def test_a_complete_draft_does_not(self):
         result, _tagger, _event, _report = self.run_process(True)
         self.assertEqual(result["detail"], "FIA-00007")
+
+    def test_relevant_without_a_matched_focus_point_gets_no_draft(self):
+        relevance = {"relevant": True, "matched_focus_points": [], "reason": "Cloud account takeover."}
+        result, tagger, event, _report = self.run_process(relevance=relevance)
+        self.assertEqual(result["outcome"], "not_relevant")
+        self.assertIn("no focus point matched", result["detail"])
+        self.assertIn("Cloud account takeover.", result["detail"])
+        tagger.set_workflow_state.assert_called_once_with(mock.ANY, event, "rejected")
+        self.generate.assert_not_called()
 
 
 if __name__ == "__main__":

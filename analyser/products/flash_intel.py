@@ -63,13 +63,16 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     source_reliability = _get_source_reliability(event)
 
     relevance = llm.check_relevance(article_content, focus_points, source_reliability)
-    if not relevance.get("relevant"):
+    matched = relevance.get("matched_focus_points") or []
+    if not relevance.get("relevant") or not matched:
         reason = relevance.get("reason", "")
+        if relevance.get("relevant"):
+            # The prompt asks for the focus points a relevant article matches.
+            reason = f"Relevant, but no focus point matched. {reason}".strip()
         logger.info("Event %s not relevant: %s", event.uuid, reason)
         tagger.set_workflow_state(misp, event, "rejected")
         return {"outcome": "not_relevant", "source_feed": source_feed, "detail": reason}
 
-    matched = relevance.get("matched_focus_points", [])
     source_type = relevance.get("source_type", "blog-post")
     logger.info("Event %s relevant, matched: %s", event.uuid, matched)
 

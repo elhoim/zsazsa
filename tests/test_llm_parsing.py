@@ -74,7 +74,7 @@ class EmptyAnswers(unittest.TestCase):
         with mock.patch.object(flash_intel, "_get_http_error", return_value=None), \
              mock.patch.object(flash_intel, "_get_reports", return_value=("article text", [])), \
              mock.patch.object(flash_intel.llm, "check_relevance",
-                               return_value={"relevant": True, "matched_focus_points": []}), \
+                               return_value={"relevant": True, "matched_focus_points": ["energy"]}), \
              mock.patch.object(flash_intel.llm, "generate_flash_intel", return_value="   "), \
              mock.patch.object(flash_intel, "tagger"):
             result = flash_intel.process(misp, misp_webapp, event, {})
