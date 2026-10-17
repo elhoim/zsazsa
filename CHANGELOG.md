@@ -44,6 +44,17 @@
   is logged and noted in the activity log. The `osint:source-type` tag goes on
   the source event instead of its report, which MISP answered with Invalid
   Target.
+- A threat landscape report could not be created on MISP before 2.5.40,
+  which refused its object with "template_uuid: Please provide a valid RFC
+  4122 UUID". The template had a version 7 UUID, which only newer MISP
+  accepts; it now has a version 4 one, like the other templates. #64, reported
+  by @angolion
+
+### Upgrading
+
+- The `zsazsa-threat-landscape-report` template has a new UUID. Nothing needs
+  doing: zsazsa finds the object by name, so existing reports keep working,
+  and a report's object takes the new UUID the next time it is saved.
 
 ## 1.0.8
 
