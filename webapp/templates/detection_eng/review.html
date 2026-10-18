@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import audience_badges %}
 {% from "_sort_header.html" import sort_th with context %}
 
 {% block title %}Detection engineering requests | zsazsa CTI{% endblock %}
@@ -31,42 +32,10 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="Review state">
-            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
-            <select name="state" class="form-select form-select-sm" aria-label="Review state" onchange="this.form.submit()">
-              <option value="">All states</option>
-              {% for value in review_states %}
-              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="TLP">
-            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
-            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
-              <option value="">All TLP levels</option>
-              {% for value in tlp_choices %}
-              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Audience">
-            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
-            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
-              <option value="">All audiences</option>
-              {% for value in audience_choices %}
-              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Priority">
-            <span class="stat-icon icon-xs"><i class="fas fa-flag"></i></span>
-            <select name="priority" class="form-select form-select-sm" aria-label="Priority" onchange="this.form.submit()">
-              <option value="">All priorities</option>
-              {% for value in priorities %}
-              <option value="{{ value }}" {{ 'selected' if priority_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('state', 'Review state', 'fa-list-check', 'All states', review_states, state_filter) }}
+          {{ charts.filter_select('tlp', 'TLP', 'fa-traffic-light', 'All TLP levels', tlp_choices, tlp_filter) }}
+          {{ charts.filter_select('audience', 'Audience', 'fa-users', 'All audiences', audience_choices, audience_filter) }}
+          {{ charts.filter_select('priority', 'Priority', 'fa-flag', 'All priorities', priorities, priority_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ ders | length }} request{{ 's' if ders|length != 1 }}</span>
             {% if state_filter or tlp_filter or audience_filter or priority_filter %}
@@ -75,7 +44,7 @@
           </div>
         </form>
       </div>
-      {% if state_counts %}
+      {% if state_counts or priority_counts or tlp_counts or audience_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-4">{{ charts.mix('Review state', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>
@@ -203,13 +172,7 @@
           </td>
           <td>
             {{ d.title or '(untitled)' }}
-            {% if d.audience %}
-            <div class="mt-1">
-              {% for a in d.audience.split(', ') %}{% if a.strip() %}
-              <span class="badge chip-source" style="font-size:.63rem;">{{ a.strip() }}</span>
-              {% endif %}{% endfor %}
-            </div>
-            {% endif %}
+            {{ audience_badges(d.audience) }}
           </td>
           <td>
             {% for t in d.technique[:3] %}<span class="badge bg-secondary me-1" style="font-size:.68rem;">{{ t }}</span>{% endfor %}

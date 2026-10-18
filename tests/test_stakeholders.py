@@ -77,6 +77,15 @@ class Contacts(unittest.TestCase):
         self.assertEqual(ns.email, "")
 
 
+class Roles(unittest.TestCase):
+    def test_a_role_an_older_version_spelt_its_own_way_reads_as_the_form_names_it(self):
+        """Recipients were matched on the role's proper name, but the list, its
+        role filter and the edit form saw "soc" and "SOC" as two roles."""
+        for stored, read in (("soc", "SOC"), ("IR", "Incident Response"), ("Board liaison", "Board liaison"), ("", "")):
+            with self.subTest(stored):
+                self.assertEqual(misp_store._stakeholder_ns(_event(role=stored)).role, read)
+
+
 class Update(unittest.TestCase):
     def setUp(self):
         self.misp = mock.create_autospec(PyMISP, instance=True)
@@ -353,6 +362,17 @@ class Pages(TempDatabase):
         reason = page.select_one(f"#org-{ORG_UUID} span[title^='Cannot remove']")
         self.assertIn("stakeholder", reason["title"])
         self.assertTrue(reason.button.has_attr("disabled"))
+
+    def test_the_organisation_filter_shows_the_name_and_filters_on_the_uuid(self):
+        with mock.patch.object(org_store, "_misp_lookup",
+                               return_value={"uuid": ORG_UUID, "name": "CIRCL", "sector": "", "country": ""}):
+            org_store.add_organisation(ORG_UUID)
+        bob = _stakeholder(uuid="b" * 36, id="b" * 36, name="Bob")
+        with mock.patch.object(misp_store, "list_stakeholders", return_value=[_stakeholder(organization=ORG_UUID), bob]):
+            page = BeautifulSoup(self.client.get(f"/stakeholders/?organization={ORG_UUID}").data, "html.parser")
+        chosen = page.select_one('select[name="organization"] option[selected]')
+        self.assertEqual((chosen["value"], chosen.get_text()), (ORG_UUID, "CIRCL"))
+        self.assertIn("1 stakeholder", page.select_one(".list-filters").get_text(" ", strip=True))
 
     def test_the_list_disables_delete_for_an_owner_and_says_why(self):
         bob = _stakeholder(uuid="b" * 36, id="b" * 36, name="Bob")

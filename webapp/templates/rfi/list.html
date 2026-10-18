@@ -40,33 +40,9 @@
       <div class="col-lg-3">
         <form method="get" class="list-filters">
           {% if show_closed %}<input type="hidden" name="closed" value="1">{% endif %}
-          <div class="filter" title="Status">
-            <span class="stat-icon icon-xs"><i class="fas fa-bars-progress"></i></span>
-            <select name="status" class="form-select form-select-sm" aria-label="Status" onchange="this.form.submit()">
-              <option value="">All statuses</option>
-              {% for s in statuses %}
-              <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Priority">
-            <span class="stat-icon icon-xs"><i class="fas fa-flag"></i></span>
-            <select name="priority" class="form-select form-select-sm" aria-label="Priority" onchange="this.form.submit()">
-              <option value="">All priorities</option>
-              {% for value in priorities %}
-              <option value="{{ value }}" {{ 'selected' if priority_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="SLA">
-            <span class="stat-icon icon-xs"><i class="fas fa-stopwatch"></i></span>
-            <select name="sla" class="form-select form-select-sm" aria-label="SLA" onchange="this.form.submit()">
-              <option value="">Any SLA</option>
-              {% for value in sla_labels %}
-              <option value="{{ value }}" {{ 'selected' if sla_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('status', 'Status', 'fa-bars-progress', 'All statuses', statuses, status_filter) }}
+          {{ charts.filter_select('priority', 'Priority', 'fa-flag', 'All priorities', priorities, priority_filter) }}
+          {{ charts.filter_select('sla', 'SLA', 'fa-stopwatch', 'Any SLA', sla_labels, sla_filter) }}
           {% if not status_filter and closed_count %}
           <a href="{{ url_for('rfi.rfi_list', **dict(request.args.to_dict(), closed=None if show_closed else 1)) }}"
              class="btn btn-xs btn-outline-secondary w-100 mb-2">

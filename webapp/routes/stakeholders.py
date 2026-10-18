@@ -177,23 +177,22 @@ def _sort_stakeholders(items, sort, direction):
 
 @bp.route("/", endpoint="list")
 def list_stakeholders():
-    stakeholders = misp_store.list_stakeholders()
+    all_stakeholders = misp_store.list_stakeholders()
     org_map = org_store.org_map()
     # Organisation options for the filter: distinct organisations actually in use,
     # labelled via org_map and sorted by display name.
     org_values = sorted(
-        {s.organization for s in stakeholders if s.organization},
+        {s.organization for s in all_stakeholders if s.organization},
         key=lambda v: (org_map.get(v, v) or "").lower(),
     )
     org_options = [(v, org_map.get(v, v)) for v in org_values]
-    role_options = sorted({s.role for s in stakeholders if s.role}, key=str.lower)
-    product_options = sorted({p for s in stakeholders for p in s.products}, key=str.lower)
+    role_options = sorted({s.role for s in all_stakeholders if s.role}, key=str.lower)
+    product_options = sorted({p for s in all_stakeholders for p in s.products}, key=str.lower)
 
     type_filter = (request.args.get("type") or "").strip()
     org_filter = (request.args.get("organization") or "").strip()
     role_filter = (request.args.get("role") or "").strip()
     product_filter = (request.args.get("product") or "").strip()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if type_filter:
         tests["type"] = lambda s: s.stakeholder_type == type_filter
@@ -203,14 +202,14 @@ def list_stakeholders():
         tests["role"] = lambda s: s.role == role_filter
     if product_filter:
         tests["product"] = lambda s: product_filter in s.products
-    shown = _sort_stakeholders(matching(stakeholders, tests), request.args.get("sort"), request.args.get("dir"))
-    by_product = matching(stakeholders, tests, skip="product")
+    stakeholders = _sort_stakeholders(matching(all_stakeholders, tests), request.args.get("sort"), request.args.get("dir"))
+    by_product = matching(all_stakeholders, tests, skip="product")
 
     return render_template(
         "stakeholders/list.html",
-        stakeholders=shown,
-        type_counts=Counter(s.stakeholder_type for s in matching(stakeholders, tests, skip="type")),
-        role_counts=Counter(s.role or "Unspecified" for s in matching(stakeholders, tests, skip="role")).most_common(),
+        stakeholders=stakeholders,
+        type_counts=Counter(s.stakeholder_type for s in matching(all_stakeholders, tests, skip="type")),
+        role_counts=Counter(s.role or "Unspecified" for s in matching(all_stakeholders, tests, skip="role")).most_common(),
         subscription_counts=Counter(p for s in by_product for p in s.products).most_common(),
         unsubscribed=sum(1 for s in by_product if not s.products),
         owned_records=misp_store.records_owned_by_stakeholders(),

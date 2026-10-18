@@ -39,12 +39,17 @@ def _review_state(event):
     return "draft"
 
 
+# The review states of a product that has gone out. A feed has none: it is out
+# once saved.
+_OUT_STATES = ("approved", "published", "")
+
+
 def _program_metrics(pirs, girs, stakeholders):
     metrics = {
         "rfis": {"total": 0, "by_status": {}, "open": 0, "overdue": 0,
                   "feedback_collected": 0, "feedback_met": 0,
                   "feedback_on_time": 0},
-        "products": {"total": 0, "drafts": 0, "by_type": {}, "drafts_by_type": {}, "with_pir_link": 0,
+        "products": {"total": 0, "not_out": 0, "by_type": {}, "not_out_by_type": {}, "with_pir_link": 0,
                       "with_feedback": 0, "last_30d": 0, "last_7d": 0},
         "intel_levels": {"pir": Counter(), "gir": Counter()},
         "stakeholder_coverage": {"with_pir": 0, "without_pir": 0},
@@ -82,7 +87,7 @@ def _program_metrics(pirs, girs, stakeholders):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     pirs_covered = set()
     for ev in events:
-        # A rejected product never went out; a draft has not yet.
+        # A rejected product never went out; a draft or one in review has not yet.
         state = _review_state(ev)
         if state == "rejected":
             continue
@@ -92,11 +97,11 @@ def _program_metrics(pirs, girs, stakeholders):
         metrics["products"]["total"] += 1
         if ptype:
             metrics["products"]["by_type"][ptype] = metrics["products"]["by_type"].get(ptype, 0) + 1
-        if state == "draft":
-            metrics["products"]["drafts"] += 1
+        if state not in _OUT_STATES:
+            metrics["products"]["not_out"] += 1
             if ptype:
-                drafts_by_type = metrics["products"]["drafts_by_type"]
-                drafts_by_type[ptype] = drafts_by_type.get(ptype, 0) + 1
+                not_out_by_type = metrics["products"]["not_out_by_type"]
+                not_out_by_type[ptype] = not_out_by_type.get(ptype, 0) + 1
         went_out = _product_date(ev, state)
         age_days = (now - went_out).days if went_out else None
         if age_days is not None and age_days < 7:

@@ -523,7 +523,7 @@ class RenderedPages(unittest.TestCase):
              mock.patch.object(indicator_feed.feed_cache, "failure", return_value=note):
             html = self.client.get("/products/indicator-feed/").data
         row = BeautifulSoup(html, "html.parser").select_one("tbody tr")
-        caching = row.select("td")[4].get_text(" ", strip=True)
+        caching = row.select("td")[3].get_text(" ", strip=True)
         self.assertIn("refresh failed", caching)
         self.assertIn("05-09 10:30", caching)
 

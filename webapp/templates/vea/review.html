@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import audience_badges %}
 {% from "_sort_header.html" import sort_th with context %}
 
 {% block title %}Vulnerability advisories | zsazsa CTI{% endblock %}
@@ -28,42 +29,10 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="Review state">
-            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
-            <select name="state" class="form-select form-select-sm" aria-label="Review state" onchange="this.form.submit()">
-              <option value="">All states</option>
-              {% for value in review_states %}
-              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Exploitation">
-            <span class="stat-icon icon-xs"><i class="fas fa-bug"></i></span>
-            <select name="exploitation" class="form-select form-select-sm" aria-label="Exploitation" onchange="this.form.submit()">
-              <option value="">Any exploitation</option>
-              {% for value in exploitation_choices %}
-              <option value="{{ value }}" {{ 'selected' if exploitation_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="TLP">
-            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
-            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
-              <option value="">All TLP levels</option>
-              {% for value in tlp_choices %}
-              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Audience">
-            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
-            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
-              <option value="">All audiences</option>
-              {% for value in audience_choices %}
-              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('state', 'Review state', 'fa-list-check', 'All states', review_states, state_filter) }}
+          {{ charts.filter_select('exploitation', 'Exploitation', 'fa-bug', 'Any exploitation', exploitation_choices, exploitation_filter) }}
+          {{ charts.filter_select('tlp', 'TLP', 'fa-traffic-light', 'All TLP levels', tlp_choices, tlp_filter) }}
+          {{ charts.filter_select('audience', 'Audience', 'fa-users', 'All audiences', audience_choices, audience_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ veas | length }} advisor{{ 'ies' if veas|length != 1 else 'y' }}</span>
             {% if state_filter or exploitation_filter or tlp_filter or audience_filter %}
@@ -72,7 +41,7 @@
           </div>
         </form>
       </div>
-      {% if state_counts %}
+      {% if state_counts or exploitation_counts or tlp_counts or audience_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-6 col-xl-3">{{ charts.mix('Review state', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>
@@ -114,13 +83,7 @@
           <td><code class="small">{{ v.cve_id or '-' }}</code></td>
           <td>
             {{ v.title or v.cve_id or '(untitled)' }}
-            {% if v.audience %}
-            <div class="mt-1">
-              {% for a in v.audience.split(', ') %}{% if a.strip() %}
-              <span class="badge chip-source" style="font-size:.63rem;">{{ a.strip() }}</span>
-              {% endif %}{% endfor %}
-            </div>
-            {% endif %}
+            {{ audience_badges(v.audience) }}
           </td>
           <td><span class="tlp-badge tlp-{{ v.tlp | slug }}">TLP:{{ v.tlp | upper }}</span></td>
           <td>

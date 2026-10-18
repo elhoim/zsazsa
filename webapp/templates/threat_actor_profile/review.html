@@ -21,33 +21,9 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="State">
-            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
-            <select name="state" class="form-select form-select-sm" aria-label="State" onchange="this.form.submit()">
-              <option value="">All states</option>
-              {% for value in states %}
-              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="TLP">
-            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
-            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
-              <option value="">All TLP levels</option>
-              {% for value in tlp_choices %}
-              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Audience">
-            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
-            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
-              <option value="">All audiences</option>
-              {% for value in audience_choices %}
-              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('state', 'State', 'fa-list-check', 'All states', states, state_filter) }}
+          {{ charts.filter_select('tlp', 'TLP', 'fa-traffic-light', 'All TLP levels', tlp_choices, tlp_filter) }}
+          {{ charts.filter_select('audience', 'Audience', 'fa-users', 'All audiences', audience_choices, audience_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ taps | length }} profile{{ 's' if taps|length != 1 }}</span>
             {% if state_filter or tlp_filter or audience_filter %}
@@ -56,7 +32,7 @@
           </div>
         </form>
       </div>
-      {% if state_counts %}
+      {% if state_counts or tlp_counts or audience_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-4">{{ charts.mix('State', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>

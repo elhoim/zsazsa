@@ -13,7 +13,7 @@ from unittest import mock
 import config
 from bs4 import BeautifulSoup
 from flask import Flask
-from pymisp import MISPEvent
+from pymisp import MISPEvent, PyMISP
 
 from webapp import collection_cache, create_app, misp_store
 from webapp.routes import indicator_feed, products, threat_actor_profile
@@ -71,7 +71,7 @@ class ProductTypeMapping(unittest.TestCase):
         obj = misp_store._build_obj("zsazsa-flash-intel")
         obj.add_attribute("linked-pir-uuid", value="p" * 36, type="text")
         answering.add_object(obj)
-        fake_misp = mock.MagicMock()
+        fake_misp = mock.create_autospec(PyMISP, instance=True)
         fake_misp.search.return_value = [answering, other]
         pir = SimpleNamespace(uuid="p" * 36, pir_id="PIR-001")
         with self.app.test_request_context("/products"), \

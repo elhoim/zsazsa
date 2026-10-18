@@ -345,7 +345,6 @@ def list_briefings():
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
     all_briefings = misp_store.list_briefings()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if state_filter:
         tests["state"] = lambda b: b.review_state == state_filter

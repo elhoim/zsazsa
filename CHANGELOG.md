@@ -72,6 +72,8 @@
 - The "Max events" of a MISP server under Collection sources was saved but not used: the cache
   always read 500 events.
 - The dashboard counted pending scraper events among the newest few hundred only.
+- A stakeholder role or a product audience saved under an older spelling, such as "soc", now shows
+  and filters correctly.
 - The statistics page counted a PIR or GIR under its first intelligence level only.
 
 ### Security

@@ -182,9 +182,9 @@ def _vea(n, state, **fields):
                    review_state=state, **fields)
 
 
-def _feed(n, cache_interval):
+def _feed(n, cache_interval, **fields):
     return _record(misp_store._indicator_feed_obj, misp_store._indicator_feed_ns, n, feed_id=f"FEED-00{n}",
-                   name=f"Feed {n}", cache_interval=cache_interval)
+                   name=f"Feed {n}", cache_interval=cache_interval, **fields)
 
 
 class ProductLists(_Page):
@@ -233,6 +233,16 @@ class ProductLists(_Page):
                 self.assertIn("SOC 2", self.stats(both))
                 self.assertIn(path + "?tlp=AMBER%2BSTRICT&audience=SOC",
                               [a["href"] for a in page.select(".list-stats a.chart-filter")])
+
+    def test_the_bars_stay_when_the_filters_leave_nothing(self):
+        """The bars went with the last record, and with them the way back."""
+        fias = [_fia(1, "draft", tlp="red", audience="CISO"), _fia(2, "draft", tlp="clear", audience="SOC")]
+        with mock.patch.object(misp_store, "list_fias", return_value=fias):
+            page = self.page("/products/flash-intel/?tlp=RED&audience=SOC")
+        self.assertEqual(page.select("tbody tr[id^=fia-row]"), [])
+        self.assertIn("No flash intel alerts match these filters.", page.get_text())
+        self.assertEqual([a["href"] for a in page.select(".list-stats a.chart-filter")],
+                         ["/products/flash-intel/?tlp=CLEAR&audience=SOC", "/products/flash-intel/?tlp=RED&audience=CISO"])
 
     def test_detection_requests_by_priority(self):
         ders = [_record(misp_store._der_obj, misp_store._der_ns, n, der_id=f"DER-0000{n}", title=f"Request {n}",
@@ -290,6 +300,16 @@ class ProductLists(_Page):
         self.assertIn("Review state draft 1 published 1 TLP CLEAR 1 AMBER 2", self.stats(page))
         self.assertIn("/briefing/?tlp=AMBER&sort=title&dir=asc&state=draft",
                       [a["href"] for a in page.select(".list-stats a.chart-filter")])
+
+    def test_a_feed_shows_its_audience_under_its_name(self):
+        """As the alert and detection request lists do, rather than in a column."""
+        with mock.patch.object(misp_store, "list_indicator_feeds",
+                               return_value=[_feed(1, "", audience="SOC, CISO"), _feed(2, "")]):
+            page = self.page("/products/indicator-feed/")
+        self.assertNotIn("Audience", [th.get_text(strip=True) for th in page.select("thead th")])
+        rows = page.select("tbody tr")
+        self.assertEqual([b.get_text() for b in rows[0].select("td:nth-of-type(2) .chip-source")], ["SOC", "CISO"])
+        self.assertEqual(rows[1].select(".chip-source"), [])
 
     def test_feeds_by_caching(self):
         feeds = [_feed(1, ""), _feed(2, "daily"), _feed(3, "hourly")]

@@ -114,9 +114,10 @@ class ProgramHealth(unittest.TestCase):
         self.assertEqual(program["products"]["last_7d"], 0)
         self.assertEqual(program["pir_coverage"]["covered"], 0)
 
-    def test_a_rejected_product_is_left_out_and_drafts_are_named(self):
-        """A rejected product never went out, and the analyser leaves many."""
-        products = [_product(published=1), _product(state="rejected"), _product(state="draft"),
+    def test_a_rejected_product_is_left_out_and_the_rest_not_out_yet_are_named(self):
+        """A rejected product never went out, and the analyser leaves many. One
+        waiting for review has not gone out either; it counted as out."""
+        products = [_product(published=1), _product(state="rejected"), _product(state="pending-review"),
                     _product(state="draft", tag='zsazsa:ctiproduct="threat-actor-profile"',
                              object_name="zsazsa-threat-actor-profile"),
                     _product(tag='zsazsa:ctiproduct="indicator-feed"', object_name="zsazsa-indicator-feed",
@@ -124,10 +125,10 @@ class ProgramHealth(unittest.TestCase):
                     _product(object_name="")]
         metrics = _metrics(products)["products"]
         self.assertEqual(metrics["total"], 5)
-        self.assertEqual(metrics["drafts"], 3)
+        self.assertEqual(metrics["not_out"], 3)
         self.assertEqual(metrics["by_type"], {"Flash intel alert": 3, "Threat actor profile": 1,
                                               "Indicator feed": 1})
-        self.assertEqual(metrics["drafts_by_type"], {"Flash intel alert": 2, "Threat actor profile": 1})
+        self.assertEqual(metrics["not_out_by_type"], {"Flash intel alert": 2, "Threat actor profile": 1})
 
     def test_a_pir_counts_under_each_of_its_intel_levels(self):
         """Only the first one counted, so the statistics page and the PIR list
@@ -229,6 +230,14 @@ class IndicatorHealth(unittest.TestCase):
         self.assertEqual(servers["partner"]["by_type"], {"ip-dst": 1})
         self.assertIn("timed out", servers["partner"]["error"])
         self.assertEqual(servers["scraper"]["error"], "")
+
+    def test_the_servers_keep_their_order_after_one_fails(self):
+        """A good refresh replaced its row and went to the back, behind the one that failed."""
+        ok = {"https://misp.example.org": {}, "https://scraper.example.org": {}, "https://partner.example.org": {}}
+        self.refresh(ok)
+        self.refresh({**ok, "https://partner.example.org": ConnectionError("timed out")})
+        self.assertEqual([s["id"] for s in pipeline._indicator_stats()["servers"]],
+                         [misp_store.WEBAPP_STORE_ID, "scraper", "partner"])
 
     def test_a_server_no_longer_configured_drops_out(self):
         self.refresh({"https://misp.example.org": {}, "https://scraper.example.org": {},
@@ -341,8 +350,8 @@ class StatisticsPage(_App):
         "rfis": {"total": 7, "by_status": {"Acknowledged": 2, "Closed": 4, "In Progress": 1}, "open": 3, "overdue": 3,
                  "feedback_collected": 1, "feedback_met": 1, "feedback_on_time": 1,
                  "pct_feedback_collected": 14.3, "pct_on_time": 100.0},
-        "products": {"total": 32, "drafts": 8, "by_type": {"Flash intel alert": 8, "Daily threat briefing": 9},
-                     "drafts_by_type": {"Daily threat briefing": 5}, "with_pir_link": 6, "with_feedback": 5,
+        "products": {"total": 32, "not_out": 8, "by_type": {"Flash intel alert": 8, "Daily threat briefing": 9},
+                     "not_out_by_type": {"Daily threat briefing": 5}, "with_pir_link": 6, "with_feedback": 5,
                      "last_30d": 5, "last_7d": 2, "pct_with_pir_link": 18.8, "pct_with_feedback": 15.6},
         "intel_levels": {"pir": Counter({"Operational": 5, "Strategic": 2}), "gir": Counter()},
         "stakeholder_coverage": {"with_pir": 2, "without_pir": 8, "pct_covered": 20.0},
@@ -388,14 +397,14 @@ class StatisticsPage(_App):
                       "RFIs by status Acknowledged 2 Closed 4 In Progress 1",
                       "Products linked to a PIR 18.8% 6 of 32 products", "Products with feedback 15.6% 5 of 32 products",
                       "PIR coverage (last 90 days) 0.0% 0 of 2 active PIRs with a product",
-                      "Products (7 / 30 days) 2 / 5", "32 total products (8 in draft)",
+                      "Products (7 / 30 days) 2 / 5", "32 total products (8 not out yet)",
                       "Stakeholder coverage 20.0% 2 stakeholders owning an active PIR",
                       "PIRs by intel level Operational 5 Strategic 2", "GIRs by intel level -"):
             self.assertIn(shown, self.text)
 
     def test_products_by_type_link_to_their_list_busiest_first(self):
         links = [(a.get_text(" ", strip=True), a["href"]) for a in self.page.select("a.stats-type")]
-        self.assertEqual(links, [("Daily threat briefing 9 (5 in draft)", "/products/?type=Daily+threat+briefing"),
+        self.assertEqual(links, [("Daily threat briefing 9 (5 not out yet)", "/products/?type=Daily+threat+briefing"),
                                  ("Flash intel alert 8", "/products/?type=Flash+intel+alert")])
 
     def test_the_actor_types_maturity_and_the_rest(self):

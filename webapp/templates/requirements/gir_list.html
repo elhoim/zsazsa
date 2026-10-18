@@ -20,24 +20,8 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="Intelligence level">
-            <span class="stat-icon icon-xs"><i class="fas fa-layer-group"></i></span>
-            <select name="intel_level" class="form-select form-select-sm" aria-label="Intelligence level" onchange="this.form.submit()">
-              <option value="">All levels</option>
-              {% for lvl in intel_levels %}
-              <option value="{{ lvl }}" {{ 'selected' if intel_filter == lvl }}>{{ lvl }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Review cycle">
-            <span class="stat-icon icon-xs"><i class="fas fa-arrows-rotate"></i></span>
-            <select name="review_cycle" class="form-select form-select-sm" aria-label="Review cycle" onchange="this.form.submit()">
-              <option value="">All review cycles</option>
-              {% for value in review_cycles %}
-              <option value="{{ value }}" {{ 'selected' if cycle_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('intel_level', 'Intelligence level', 'fa-layer-group', 'All levels', intel_levels, intel_filter) }}
+          {{ charts.filter_select('review_cycle', 'Review cycle', 'fa-arrows-rotate', 'All review cycles', review_cycles, cycle_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ girs | length }} GIR{{ 's' if girs|length != 1 }}</span>
             {% if intel_filter or cycle_filter %}
@@ -46,7 +30,7 @@
           </div>
         </form>
       </div>
-      {% if level_counts %}
+      {% if level_counts or cycle_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-4">{{ charts.mix('Status', status_counts, charts.status_colors) }}</div>

@@ -12,6 +12,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from pymisp import MISPEvent
+
 from webapp import misp_store
 
 _PRODUCT = "Flash intel alert"
@@ -153,6 +155,28 @@ class Clearance(unittest.TestCase):
         self.assertFalse(misp_store._tlp_cleared("nonsense", "red"))
         self.assertFalse(misp_store._tlp_cleared("nonsense", "green"))
         self.assertTrue(misp_store._tlp_cleared("nonsense", "clear"))
+
+
+class AudienceSpelling(unittest.TestCase):
+    def test_every_product_reads_an_older_spelling_as_the_role_it_stands_for(self):
+        """Recipients were matched on the roles' proper names, but the product
+        forms ticked their audience boxes by the stored text, so saving a
+        product with "soc" dropped it, and its list showed "soc" beside a bar
+        that counted SOC."""
+        readers = {
+            "flash intel alert": (misp_store._fia_obj, misp_store._fia_ns),
+            "advisory": (misp_store._vea_obj, misp_store._vea_ns),
+            "threat actor profile": (misp_store._tap_obj, misp_store._tap_ns),
+            "detection request": (misp_store._der_obj, misp_store._der_ns),
+            "indicator feed": (misp_store._indicator_feed_obj, misp_store._indicator_feed_ns),
+            "threat landscape report": (misp_store._tlr_obj, misp_store._tlr_ns),
+        }
+        for kind, (build, read) in readers.items():
+            with self.subTest(kind):
+                event = MISPEvent()
+                event.uuid, event.id, event.date = "u" * 36, "1", "2026-10-01"
+                event.add_object(build({"title": "t", "audience": "soc,IR, SOC, Board liaison"}))
+                self.assertEqual(read(event).audience, "SOC, Incident Response, Board liaison")
 
 
 if __name__ == "__main__":

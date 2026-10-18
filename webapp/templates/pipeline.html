@@ -603,21 +603,14 @@
       method: 'POST',
       headers: {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content},
     })
-      .then(function (r) { return r.json(); })
+      .then(zsazsaReadJson)
       .then(function (data) {
-        var timer = setInterval(function () {
-          fetch(SCRIPT_ROOT + '/pipeline/run/' + encodeURIComponent(data.job_id))
-            .then(function (r) { return r.json(); })
-            .then(function (state) {
-              var status = state.job && state.job.status;
-              if (!state.ok || status === 'completed' || status === 'failed') {
-                clearInterval(timer);
-                location.reload();
-              }
-            });
-        }, 2000);
+        zsazsaJobsChanged();
+        // A server that failed is marked on the reloaded page, next to the counts it last gave.
+        zsazsaFollowJob(data.job_id, function () { location.reload(); },
+                        function (why) { alert('Could not refresh the indicator counts: ' + why); location.reload(); });
       })
-      .catch(function () { location.reload(); });
+      .catch(function (err) { alert('Could not refresh the indicator counts: ' + zsazsaErrorText(err)); location.reload(); });
   });
 })();
 

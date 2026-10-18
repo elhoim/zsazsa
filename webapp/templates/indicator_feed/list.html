@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import feed_downloads %}
+{% from "_macros.html" import audience_badges, feed_downloads %}
 
 {# Indicator feeds as a product list, in the shape the other CTI products use:
    one row per feed, the actions grouped by what they do. Building a query is a
@@ -24,33 +24,9 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="Caching">
-            <span class="stat-icon icon-xs"><i class="fas fa-box-archive"></i></span>
-            <select name="caching" class="form-select form-select-sm" aria-label="Caching" onchange="this.form.submit()">
-              <option value="">Cached or not</option>
-              {% for value in caching_choices %}
-              <option value="{{ value }}" {{ 'selected' if caching_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="TLP">
-            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
-            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
-              <option value="">All TLP levels</option>
-              {% for value in tlp_choices %}
-              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Audience">
-            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
-            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
-              <option value="">All audiences</option>
-              {% for value in audience_choices %}
-              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('caching', 'Caching', 'fa-box-archive', 'Cached or not', caching_choices, caching_filter) }}
+          {{ charts.filter_select('tlp', 'TLP', 'fa-traffic-light', 'All TLP levels', tlp_choices, tlp_filter) }}
+          {{ charts.filter_select('audience', 'Audience', 'fa-users', 'All audiences', audience_choices, audience_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ feeds | length }} indicator feed{{ 's' if feeds|length != 1 }}</span>
             {% if caching_filter or tlp_filter or audience_filter %}
@@ -59,7 +35,7 @@
           </div>
         </form>
       </div>
-      {% if caching_counts %}
+      {% if caching_counts or tlp_counts or audience_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-4">{{ charts.mix('Caching', caching_counts, caching_colors, param='caching', selected=caching_filter) }}</div>
@@ -82,7 +58,6 @@
             <th style="width:100px;">ID</th>
             <th>Name</th>
             <th>TLP</th>
-            <th>Audience</th>
             <th>Caching</th>
             <th>Created</th>
             <th class="text-end" style="width:1%;">Actions</th>
@@ -99,9 +74,9 @@
             <td>
               <a href="{{ url_for('indicator_feed.detail', id=f.id) }}" class="text-decoration-none fw-semibold">{{ f.name }}</a>
               {% if f.description %}<div class="text-muted small">{{ f.description | truncate(70) }}</div>{% endif %}
+              {{ audience_badges(f.audience) }}
             </td>
             <td><span class="tlp-badge tlp-{{ f.tlp | slug }}">TLP:{{ f.tlp | upper }}</span></td>
-            <td class="small">{{ f.audience or '-' }}</td>
             <td class="small" style="white-space:nowrap;">
               {% if f.cache_interval %}
                 <i class="fas fa-box-archive me-1 text-muted"></i>{{ f.cache_interval }}

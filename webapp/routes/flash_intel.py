@@ -169,7 +169,6 @@ def review():
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
     all_fias = misp_store.list_fias()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if state_filter:
         tests["state"] = lambda f: f.review_state == state_filter

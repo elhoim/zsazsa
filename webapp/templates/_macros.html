@@ -84,6 +84,17 @@
 {% endmacro %}
 
 
+{% macro audience_badges(audience) %}
+{# The roles a product is for, under its title on the product lists. #}
+{% if audience %}
+<div class="mt-1">
+  {% for role in audience.split(',') if role.strip() %}
+  <span class="badge chip-source" style="font-size:.63rem;">{{ role.strip() }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro product_identity(icon, label, product_id, source_count, review_state, tlp) %}
 {# The strip above a product wizard: what is being written and where it stands.
    Read-only, mirroring fields that stay in the form below it. Include

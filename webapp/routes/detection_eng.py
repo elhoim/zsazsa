@@ -135,7 +135,6 @@ def review():
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
     all_ders = misp_store.list_ders()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if state_filter:
         tests["state"] = lambda d: d.review_state == state_filter

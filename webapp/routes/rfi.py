@@ -142,9 +142,9 @@ def _sort_rfis(rfis, sort, direction):
 
 @bp.route("/")
 def rfi_list():
-    rfis = misp_store.list_rfis()
-    sla_map = {r.id: _sla_status(r) for r in rfis}
-    sla = {id_: _sla_label(*status) for id_, status in sla_map.items()}
+    all_rfis = misp_store.list_rfis()
+    sla_map = {r.id: _sla_status(r) for r in all_rfis}
+    sla = {r.id: _sla_label(*sla_map[r.id]) for r in all_rfis}
     status_filter = (request.args.get("status") or "").strip()
     priority_filter = (request.args.get("priority") or "").strip()
     sla_filter = (request.args.get("sla") or "").strip()
@@ -153,7 +153,6 @@ def rfi_list():
     show_closed = request.args.get("closed") == "1"
     hide_closed = not status_filter and not show_closed
 
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if status_filter:
         tests["status"] = lambda r: r.status == status_filter
@@ -163,10 +162,10 @@ def rfi_list():
         tests["sla"] = lambda r: sla[r.id] == sla_filter
     if hide_closed:
         tests["closed"] = lambda r: r.status != "Closed"
-    shown = _sort_rfis(matching(rfis, tests), request.args.get("sort"), request.args.get("dir"))
+    rfis = _sort_rfis(matching(all_rfis, tests), request.args.get("sort"), request.args.get("dir"))
     return render_template(
         "rfi/list.html",
-        rfis=shown,
+        rfis=rfis,
         sla_map=sla_map,
         statuses=RFI_STATUSES,
         priorities=RFI_PRIORITIES,
@@ -176,10 +175,10 @@ def rfi_list():
         sla_filter=sla_filter,
         show_closed=show_closed,
         hide_closed=hide_closed,
-        closed_count=sum(1 for r in matching(rfis, tests, skip="closed") if r.status == "Closed"),
-        status_counts=ordered_counts((r.status for r in shown), RFI_STATUSES),
-        priority_counts=ordered_counts((r.priority for r in matching(rfis, tests, skip="priority")), RFI_PRIORITIES),
-        sla_counts=ordered_counts((sla[r.id] for r in matching(rfis, tests, skip="sla")), SLA_LABELS),
+        closed_count=sum(1 for r in matching(all_rfis, tests, skip="closed") if r.status == "Closed"),
+        status_counts=ordered_counts((r.status for r in rfis), RFI_STATUSES),
+        priority_counts=ordered_counts((r.priority for r in matching(all_rfis, tests, skip="priority")), RFI_PRIORITIES),
+        sla_counts=ordered_counts((sla[r.id] for r in matching(all_rfis, tests, skip="sla")), SLA_LABELS),
         triage_checklist=RFI_TRIAGE_CHECKLIST,
     )
 

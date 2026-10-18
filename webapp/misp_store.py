@@ -1056,7 +1056,9 @@ def _stakeholder_ns(event):
         misp_url=f"{config.MISP_WEBAPP_URL}/events/view/{uuid}",
         history_url=f"{config.MISP_WEBAPP_URL}/audit_logs/eventIndex/{uuid}",
         name=_obj_attr(obj, "name") or "",
-        role=_obj_attr(obj, "role") or "",
+        # Under the name the form offers, as recipients are matched: a role
+        # saved by an older version may be spelt "soc" or "IR".
+        role=_canonical_role(_obj_attr(obj, "role")),
         organization=_obj_attr(obj, "organization") or "",
         stakeholder_type=_obj_attr(obj, "stakeholder-type") or "External",
         contacts=contacts,
@@ -2173,7 +2175,7 @@ def _indicator_feed_ns(event):
         description=_obj_attr(obj, "description") or "",
         query=_json_dict(_obj_attr(obj, "query")),
         tlp=_obj_attr(obj, "tlp") or "clear",
-        audience=_obj_attr(obj, "audience") or "",
+        audience=", ".join(_audience_roles(_obj_attr(obj, "audience"))),
         author=_obj_attr(obj, "author") or "",
         feedback_by=_parse_date(_obj_attr(obj, "feedback-by")),
         token=_obj_attr(obj, "token") or "",
@@ -2402,7 +2404,7 @@ def _tap_ns(event):
         title=_obj_attr(obj, "title") or "",
         summary=_obj_attr(obj, "summary") or "",
         threat_actors=_json_list(_obj_attr(obj, "threat-actors")),
-        audience=_obj_attr(obj, "audience") or "",
+        audience=", ".join(_audience_roles(_obj_attr(obj, "audience"))),
         tlp=_obj_attr(obj, "tlp") or "amber",
         status=_obj_attr(obj, "status") or "Draft",
         published_at=_parse_dt(_obj_attr(obj, "published-at")),
@@ -4654,7 +4656,7 @@ def _fia_ns(event):
         history_url=f"{config.MISP_WEBAPP_URL}/audit_logs/eventIndex/{uuid}",
         fia_id=fia_id,
         title=title,
-        audience=g("audience"),
+        audience=", ".join(_audience_roles(g("audience"))),
         tlp=g("tlp") or "amber",
         summary=g("summary"),
         action_required=g("action-required"),
@@ -5467,8 +5469,19 @@ def stakeholders_on_automated_mode(product_type: str, tlp: str) -> list:
             if (s.product_modes or {}).get(product_type) == "automated"]
 
 
+def _audience_roles(audience_str: str) -> list:
+    """The roles of an audience under the names the forms offer, each once, in
+    order. A product saved by an older version may have "soc" or "IR"."""
+    roles = []
+    for part in (audience_str or "").split(","):
+        role = _canonical_role(part)
+        if role and role not in roles:
+            roles.append(role)
+    return roles
+
+
 def _audiences(audience_str: str) -> set:
-    return {_canonical_role(a) for a in (audience_str or "").split(",") if _canonical_role(a)}
+    return set(_audience_roles(audience_str))
 
 
 def has_audience(product, role) -> bool:
@@ -5651,7 +5664,7 @@ def _vea_ns(event):
         title=g("title"),
         tlp=g("tlp") or "amber",
         author=g("author"),
-        audience=g("audience"),
+        audience=", ".join(_audience_roles(g("audience"))),
         affected_product=g("affected-product"),
         affected_versions=g("affected-versions"),
         fixed_version=g("fixed-version"),
@@ -6111,7 +6124,7 @@ def _der_ns(event):
         status=g("status") or DER_STATUS_PENDING,
         tlp=g("tlp") or "amber",
         author=g("author"),
-        audience=g("audience"),
+        audience=", ".join(_audience_roles(g("audience"))),
         review_state=g("review-state") or DER_REVIEW_DRAFT,
         rejection_reason=g("rejection-reason"),
         source_event_uuids=source_event_uuids,
@@ -6254,14 +6267,12 @@ def _write_der_report(misp, event_uuid, der_id, content):
     _check(misp.add_event_report(event_uuid, er), "add DER report")
 
 
-def list_ders(review_state=None):
+def list_ders():
     misp = _misp()
     events = _search_all(misp, tags=[config.TAG_DETECTION_ENG], pythonify=True)
     if not events or isinstance(events, dict):
         return []
     result = [_der_ns(e) for e in events]
-    if review_state:
-        result = [d for d in result if d.review_state == review_state]
     result.sort(key=lambda d: d.der_id, reverse=True)
     return result
 
@@ -7263,7 +7274,7 @@ def _tlr_ns(event):
         reporting_period=g("reporting-period"),
         tlp=g("tlp") or "amber",
         author=g("author"),
-        audience=g("audience"),
+        audience=", ".join(_audience_roles(g("audience"))),
         top_threats=g("top-threats"),
         trending_actors=g("trending-actors"),
         **{key: g(key.replace("_", "-")) for key, _label, _icon in TLR_ACTOR_CATEGORIES},

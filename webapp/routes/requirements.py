@@ -317,7 +317,6 @@ def _gir_form_data(form, stakeholders, focus_points=()):
     }
 
 
-# The PIR and GIR forms refuse a requirement without an intelligence level.
 INTEL_LEVEL_REQUIRED = "Select at least one intelligence level."
 
 
@@ -354,34 +353,32 @@ def _sort_requirements(items, sort, direction, id_attr, text_attr, status_order)
 
 @bp.route("/pirs")
 def pir_list():
-    pirs = misp_store.list_pirs()
+    all_pirs = misp_store.list_pirs()
     intel_filter = (request.args.get("intel_level") or "").strip()
     priority_filter = (request.args.get("priority") or "").strip()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if intel_filter:
         tests["intel_level"] = lambda p: intel_filter in (p.intel_level or [])
     if priority_filter:
         tests["priority"] = lambda p: p.priority == priority_filter
-    shown = _sort_requirements(
-        matching(pirs, tests), request.args.get("sort"), request.args.get("dir"),
+    pirs = _sort_requirements(
+        matching(all_pirs, tests), request.args.get("sort"), request.args.get("dir"),
         "pir_id", "question", PIR_STATUS_ORDER,
     )
     return render_template(
         "requirements/pir_list.html",
-        pirs=shown,
-        scope_counts={p.uuid: _scope_item_count(p) for p in shown},
-        status_counts=ordered_counts(("Rejected" if p.intake_status == "rejected" else p.status for p in shown),
+        pirs=pirs,
+        scope_counts={p.uuid: _scope_item_count(p) for p in pirs},
+        status_counts=ordered_counts(("Rejected" if p.intake_status == "rejected" else p.status for p in pirs),
                                      PIR_STATUS_ORDER),
-        priority_counts=ordered_counts((p.priority for p in matching(pirs, tests, skip="priority")),
+        priority_counts=ordered_counts((p.priority for p in matching(all_pirs, tests, skip="priority")),
                                        MOSCOW_PRIORITIES),
-        level_counts=_level_counts(matching(pirs, tests, skip="intel_level")),
+        level_counts=_level_counts(matching(all_pirs, tests, skip="intel_level")),
         intel_levels=INTEL_LEVELS,
         intel_filter=intel_filter,
         priorities=MOSCOW_PRIORITIES,
         priority_filter=priority_filter,
-        # Any PIR can take another in, whatever the list is filtered on.
-        merge_targets=[p for p in pirs if p.intake_status not in _NOT_MERGE_TARGETS],
+        merge_targets=[p for p in all_pirs if p.intake_status not in _NOT_MERGE_TARGETS],
         triage_checklist=PIR_TRIAGE_CHECKLIST,
     )
 
@@ -661,26 +658,25 @@ def pir_delete_focus_point(id, fp_id):
 
 @bp.route("/girs")
 def gir_list():
-    girs = misp_store.list_girs()
+    all_girs = misp_store.list_girs()
     intel_filter = (request.args.get("intel_level") or "").strip()
     cycle_filter = (request.args.get("review_cycle") or "").strip()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if intel_filter:
         tests["intel_level"] = lambda g: intel_filter in (g.intel_level or [])
     if cycle_filter:
         tests["review_cycle"] = lambda g: g.review_cycle == cycle_filter
-    shown = _sort_requirements(
-        matching(girs, tests), request.args.get("sort"), request.args.get("dir"),
+    girs = _sort_requirements(
+        matching(all_girs, tests), request.args.get("sort"), request.args.get("dir"),
         "gir_id", "topic", GIR_STATUS_ORDER,
     )
     return render_template(
         "requirements/gir_list.html",
-        girs=shown,
-        scope_counts={g.uuid: _scope_item_count(g) for g in shown},
-        status_counts=ordered_counts((g.status for g in shown), GIR_STATUS_ORDER),
-        level_counts=_level_counts(matching(girs, tests, skip="intel_level")),
-        cycle_counts=ordered_counts((g.review_cycle for g in matching(girs, tests, skip="review_cycle")),
+        girs=girs,
+        scope_counts={g.uuid: _scope_item_count(g) for g in girs},
+        status_counts=ordered_counts((g.status for g in girs), GIR_STATUS_ORDER),
+        level_counts=_level_counts(matching(all_girs, tests, skip="intel_level")),
+        cycle_counts=ordered_counts((g.review_cycle for g in matching(all_girs, tests, skip="review_cycle")),
                                     REVIEW_CYCLES),
         intel_levels=INTEL_LEVELS,
         intel_filter=intel_filter,

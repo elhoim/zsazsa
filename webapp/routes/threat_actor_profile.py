@@ -96,7 +96,6 @@ def review():
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
     all_taps = misp_store.list_threat_actor_profiles()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if state_filter:
         tests["state"] = lambda t: t.status == state_filter

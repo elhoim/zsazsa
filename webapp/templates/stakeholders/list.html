@@ -38,41 +38,10 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
-          <div class="filter" title="Type">
-            <span class="stat-icon icon-xs"><i class="fas fa-circle-half-stroke"></i></span>
-            <select name="type" class="form-select form-select-sm" aria-label="Type" onchange="this.form.submit()">
-              <option value="">All types</option>
-              <option value="Internal" {{ 'selected' if type_filter == 'Internal' }}>Internal</option>
-              <option value="External" {{ 'selected' if type_filter == 'External' }}>External</option>
-            </select>
-          </div>
-          <div class="filter" title="Organisation">
-            <span class="stat-icon icon-xs"><i class="fas fa-sitemap"></i></span>
-            <select name="organization" class="form-select form-select-sm" aria-label="Organisation" onchange="this.form.submit()">
-              <option value="">All organisations</option>
-              {% for value, label in org_options %}
-              <option value="{{ value }}" {{ 'selected' if org_filter == value }}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Role">
-            <span class="stat-icon icon-xs"><i class="fas fa-user-tag"></i></span>
-            <select name="role" class="form-select form-select-sm" aria-label="Role" onchange="this.form.submit()">
-              <option value="">All roles</option>
-              {% for role in role_options %}
-              <option value="{{ role }}" {{ 'selected' if role_filter == role }}>{{ role }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="filter" title="Product subscription">
-            <span class="stat-icon icon-xs"><i class="fas fa-cubes"></i></span>
-            <select name="product" class="form-select form-select-sm" aria-label="Product subscription" onchange="this.form.submit()">
-              <option value="">All subscriptions</option>
-              {% for product in product_options %}
-              <option value="{{ product }}" {{ 'selected' if product_filter == product }}>{{ product }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {{ charts.filter_select('type', 'Type', 'fa-circle-half-stroke', 'All types', ['Internal', 'External'], type_filter) }}
+          {{ charts.filter_select('organization', 'Organisation', 'fa-sitemap', 'All organisations', org_options, org_filter) }}
+          {{ charts.filter_select('role', 'Role', 'fa-user-tag', 'All roles', role_options, role_filter) }}
+          {{ charts.filter_select('product', 'Product subscription', 'fa-cubes', 'All subscriptions', product_options, product_filter) }}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ stakeholders | length }} stakeholder{{ 's' if stakeholders|length != 1 }}</span>
             {% if type_filter or org_filter or role_filter or product_filter %}
@@ -82,7 +51,7 @@
         </form>
       </div>
 
-      {% if role_counts %}
+      {% if type_counts or role_counts or subscription_counts %}
       <div class="col-lg-9 list-stats">
         <div class="row g-3">
           <div class="col-md-2">

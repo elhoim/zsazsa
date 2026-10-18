@@ -107,7 +107,7 @@ TLP_NAMES = [t.upper() for t in TLP_LEVELS]
 
 
 def tlp_of(product) -> str:
-    return (product.tlp or "clear").upper()
+    return product.tlp.upper()
 
 
 def tlp_counts(products) -> list:

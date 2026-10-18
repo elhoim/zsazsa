@@ -193,7 +193,7 @@
               <div class="d-flex align-items-center gap-2"><span style="width:4.2rem;">30 days</span>
                 <div class="stats-track flex-grow-1" style="--icon-color:var(--misp-navy);"><div style="width:{{ products.last_30d / busiest * 100 }}%;"></div></div></div>
             </div>
-            <div class="sub mt-1">{{ products.total }} total products{% if products.drafts %} ({{ products.drafts }} in draft){% endif %}</div>
+            <div class="sub mt-1">{{ products.total }} total products{% if products.not_out %} ({{ products.not_out }} not out yet){% endif %}</div>
           </div>
         </div>
       </div>
@@ -217,20 +217,20 @@
         <div class="chart-label">Products by type</div>
         <div class="chart-legend">
           <span><span class="chart-swatch" style="background:var(--accent-blue);"></span>Out</span>
-          <span><span class="chart-swatch stats-draft"></span>In draft</span>
+          <span><span class="chart-swatch stats-draft"></span>Not out yet</span>
         </div>
       </div>
       <div class="row g-1">
         {% for ptype, n in products.by_type | dictsort(by='value', reverse=true) %}
-        {% set drafts = products.drafts_by_type.get(ptype, 0) %}
+        {% set not_out = products.not_out_by_type.get(ptype, 0) %}
         <div class="col-lg-6">
           <a href="{{ url_for('products.index', type=ptype) }}" class="stats-type">
             <span class="name" title="{{ ptype }}">{{ ptype }}</span>
             <span class="stats-type-bar" style="width:{{ n / widest * 100 }}%;">
-              {% if n > drafts %}<span class="out" style="flex:{{ n - drafts }};"></span>{% endif %}
-              {% if drafts %}<span class="stats-draft" style="flex:{{ drafts }};"></span>{% endif %}
+              {% if n > not_out %}<span class="out" style="flex:{{ n - not_out }};"></span>{% endif %}
+              {% if not_out %}<span class="stats-draft" style="flex:{{ not_out }};"></span>{% endif %}
             </span>
-            <span class="num"><strong>{{ n }}</strong>{% if drafts %} <small>({{ drafts }} in draft)</small>{% endif %}</span>
+            <span class="num"><strong>{{ n }}</strong>{% if not_out %} <small>({{ not_out }} not out yet)</small>{% endif %}</span>
           </a>
         </div>
         {% endfor %}

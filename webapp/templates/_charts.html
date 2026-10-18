@@ -4,7 +4,8 @@
 {% set palette = ['var(--accent-blue)', 'var(--accent-green)', 'var(--accent-orange)', 'var(--accent-purple)',
                   'var(--misp-navy)', 'var(--accent-red)', 'var(--neutral-500)', 'var(--accent-cyan)'] %}
 
-{# Requirement statuses, rejected PIRs and RFI statuses. #}
+{# Requirement statuses, rejected PIRs, RFI statuses and the engineering status of a
+   detection request. #}
 {% set status_colors = {'Pending': 'var(--neutral-400)', 'Active': 'var(--accent-green)',
                         'In Development': 'var(--accent-blue)', 'Under Evaluation': 'var(--accent-orange)',
                         'Implemented': 'var(--misp-navy)', 'Retired': 'var(--neutral-600)', 'Rejected': 'var(--accent-red)',
@@ -68,6 +69,21 @@
 {% else %}
 <span class="text-muted small">-</span>
 {% endif %}
+{% endmacro %}
+
+{# A dropdown of a list's filter card, which filters as soon as it changes.
+   ``choices`` are values, or (value, label) pairs. #}
+{% macro filter_select(name, label, icon, everything, choices, selected) %}
+<div class="filter" title="{{ label }}">
+  <span class="stat-icon icon-xs"><i class="fas {{ icon }}"></i></span>
+  <select name="{{ name }}" class="form-select form-select-sm" aria-label="{{ label }}" onchange="this.form.submit()">
+    <option value="">{{ everything }}</option>
+    {% for choice in choices %}
+    {% set value, text = (choice, choice) if choice is string else choice %}
+    <option value="{{ value }}" {{ 'selected' if selected == value }}>{{ text }}</option>
+    {% endfor %}
+  </select>
+</div>
 {% endmacro %}
 
 {# This page with its ``param`` filter set to ``name``, or taken off when it is ``selected``. #}

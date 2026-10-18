@@ -43,9 +43,8 @@ ATTR_RANGES = [("1h", "Last hour"), ("today", "Today"), ("1d", "Last day"),
 EVENT_RANGES = [("0", "Today"), ("1", "Last day"), ("2", "Last 2 days"),
                 ("7", "Last 7 days"), ("30", "Last 30 days"), ("90", "Last 90 days")]
 
-# Whether the feed is served from disk or queried on every request. It is the
-# one thing about a feed that is worth filtering the list by.
-# How a feed is cached, as the list shows it and filters on it.
+# Whether the feed is served from disk, and how often it is refreshed, as the
+# list shows it and filters on it.
 CACHING = ["Not cached"] + [interval.capitalize() for interval in feed_cache.INTERVALS]
 
 # `servers` is a list filter too, but it selects targets rather than narrowing
@@ -176,6 +175,10 @@ def _export_limit(args):
     if (args.get("truncate") or "").strip().lower() == "off":
         return misp_store.MAX_SEARCH_LIMIT
     return None
+
+
+def _caching(feed):
+    return feed_cache.interval(feed).capitalize() or "Not cached"
 
 
 def _with_schedule(feeds):
@@ -309,7 +312,6 @@ def index():
     tlp_filter = (request.args.get("tlp") or "").strip()
     audience_filter = (request.args.get("audience") or "").strip()
     all_feeds = misp_store.list_indicator_feeds()
-    # The filters that are set, each under the query argument it comes from.
     tests = {}
     if caching_filter:
         tests["caching"] = lambda f: _caching(f) == caching_filter
@@ -331,10 +333,6 @@ def index():
         audience_counts=misp_store.audience_counts(matching(all_feeds, tests, skip="audience")),
         can_publish=misp_session.current_user_can_publish(),
     )
-
-
-def _caching(feed):
-    return feed_cache.interval(feed).capitalize() or "Not cached"
 
 
 @bp.route("/<string:id>")

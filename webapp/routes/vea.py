@@ -157,8 +157,7 @@ def review():
     audience_filter = (request.args.get("audience") or "").strip()
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
-    veas = misp_store.list_veas()
-    # The filters that are set, each under the query argument it comes from.
+    all_veas = misp_store.list_veas()
     tests = {}
     if state_filter:
         tests["state"] = lambda v: v.review_state == state_filter
@@ -168,25 +167,25 @@ def review():
         tests["audience"] = lambda v: misp_store.has_audience(v, audience_filter)
     if exploitation_filter:
         tests["exploitation"] = lambda v: _exploitation(v) == exploitation_filter
-    shown = sort_products(matching(veas, tests), sort, direction)
+    veas = sort_products(matching(all_veas, tests), sort, direction)
     return render_template(
         "vea/review.html",
-        veas=shown,
-        exploitation={v.uuid: _exploitation(v) for v in shown},
+        veas=veas,
+        exploitation={v.uuid: _exploitation(v) for v in veas},
         state_filter=state_filter,
         exploitation_filter=exploitation_filter,
         review_states=misp_store.VEA_REVIEW_STATES,
         exploitation_choices=EXPLOITATION,
-        state_counts=ordered_counts((v.review_state for v in matching(veas, tests, skip="state")),
+        state_counts=ordered_counts((v.review_state for v in matching(all_veas, tests, skip="state")),
                                     misp_store.VEA_REVIEW_STATES),
-        exploitation_counts=ordered_counts((_exploitation(v) for v in matching(veas, tests, skip="exploitation")),
+        exploitation_counts=ordered_counts((_exploitation(v) for v in matching(all_veas, tests, skip="exploitation")),
                                            EXPLOITATION),
         tlp_filter=tlp_filter,
         audience_filter=audience_filter,
         tlp_choices=TLP_NAMES,
         audience_choices=STAKEHOLDER_ROLES,
-        tlp_counts=tlp_counts(matching(veas, tests, skip="tlp")),
-        audience_counts=misp_store.audience_counts(matching(veas, tests, skip="audience")),
+        tlp_counts=tlp_counts(matching(all_veas, tests, skip="tlp")),
+        audience_counts=misp_store.audience_counts(matching(all_veas, tests, skip="audience")),
         sort=sort,
         dir=direction,
     )

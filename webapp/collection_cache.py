@@ -895,8 +895,9 @@ def refresh_indicator_stats() -> None:
                     (sid, label, error))
             else:
                 conn.execute(
-                    "INSERT OR REPLACE INTO indicator_stats (server_id, label, by_type, fetched_at, error)"
-                    " VALUES (?, ?, ?, ?, '')",
+                    "INSERT INTO indicator_stats (server_id, label, by_type, fetched_at, error) VALUES (?, ?, ?, ?, '')"
+                    " ON CONFLICT(server_id) DO UPDATE SET label = excluded.label, by_type = excluded.by_type,"
+                    " fetched_at = excluded.fetched_at, error = ''",
                     (sid, label, json.dumps({kind: int(n) for kind, n in raw.items()}), time.time()))
 
 
