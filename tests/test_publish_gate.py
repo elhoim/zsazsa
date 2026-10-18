@@ -4,7 +4,7 @@ The detail pages disable the buttons for an analyst without perm_publish, but th
 routes behind them take a plain POST, so each one has to refuse on its own:
 approving or publishing, publishing from the wizard, resending and notifying.
 A published alert or advisory cannot be edited at all, or a resend would deliver
-something other than what was approved.
+something other than what was approved, and publishing it again is a resend.
 
 Nothing is published or delivered for real here: the store and the delivery
 jobs are stubbed.
@@ -20,7 +20,7 @@ from unittest import mock
 from flask import Flask
 from werkzeug.datastructures import MultiDict
 
-from webapp.routes import (daily_briefing, flash_intel, indicator_feed, stakeholders,
+from webapp.routes import (daily_briefing, detection_eng, flash_intel, indicator_feed, stakeholders,
                            threat_actor_profile, threat_landscape, vea)
 
 UUID = "u" * 36
@@ -118,6 +118,21 @@ class FlashIntelPublisher(_FlashIntelFixture):
         self.client.post(f"/products/flash-intel/{UUID}/resend")
         self.deliver.assert_called_once_with("FIA-00042", UUID, "resend")
 
+    def test_a_published_alert_is_not_published_again(self):
+        """Approve on a published alert published it and delivered it a second time."""
+        self.fia.review_state = flash_intel.misp_store.FIA_REVIEW_APPROVED
+        self.client.post(f"/products/flash-intel/{UUID}/approve")
+        self.publish.assert_not_called()
+        self.deliver.assert_not_called()
+
+    def test_publishing_from_the_wizard_takes_an_audience(self):
+        """Approve asks for one; publishing from the wizard did not, and the
+        alert went out to nobody."""
+        with mock.patch.object(flash_intel, "_form_data", return_value={"audience": ""}):
+            self.client.post(f"/products/flash-intel/{UUID}/edit", data={"action": "publish"})
+        self.assertEqual(self.update.call_args.args[1]["review_state"], "pending-review")
+        self.publish.assert_not_called()
+
 
 class _VeaFixture(_Gate):
     def setUp(self):
@@ -176,6 +191,54 @@ class VeaPublisher(_VeaFixture):
         self.client.post(f"/products/vea/{UUID}/resend")
         self.deliver.assert_called_once_with("VEA-00042", UUID, "resend")
 
+    def test_a_published_advisory_is_not_published_again(self):
+        self.vea.review_state = vea.misp_store.VEA_REVIEW_APPROVED
+        self.client.post(f"/products/vea/{UUID}/approve")
+        self.publish.assert_not_called()
+        self.deliver.assert_not_called()
+
+    def test_publishing_from_the_wizard_takes_an_audience(self):
+        with mock.patch.object(vea, "_form_data", return_value={"audience": ""}):
+            self.client.post(f"/products/vea/{UUID}/edit", data={"action": "publish"})
+        self.assertEqual(self.update.call_args.args[1]["review_state"], "pending-review")
+        self.publish.assert_not_called()
+
+
+class _DetectionEngFixture(_Gate):
+    def setUp(self):
+        super().setUp()
+        self.client = _client(detection_eng.bp)
+        self.der = SimpleNamespace(uuid=UUID, der_id="DER-00042", audience="SOC", review_state="pending-review",
+                                   tlp="amber", status="Pending", format="sigma", draft_rule="")
+        self.stub(detection_eng.misp_store, "get_der", return_value=self.der)
+        self.update = self.stub(detection_eng.misp_store, "update_der")
+        self.publish = self.stub(detection_eng.misp_store, "publish_der")
+        self.stub(detection_eng.misp_store, "fetch_source_events", return_value=[])
+        self.stub(detection_eng, "_form_data", return_value={"audience": "SOC"})
+        self.deliver = self.stub(detection_eng, "_start_der_delivery")
+        self.stub(detection_eng.audit, "record")
+
+
+class DetectionEngPublisher(_DetectionEngFixture):
+    can_publish = True
+
+    def test_approve_publishes_and_delivers(self):
+        self.client.post(f"/products/detection-eng/{UUID}/approve")
+        self.publish.assert_called_once_with(UUID)
+        self.deliver.assert_called_once_with("DER-00042", UUID, "publish")
+
+    def test_a_published_request_is_not_published_again(self):
+        self.der.review_state = detection_eng.misp_store.DER_REVIEW_APPROVED
+        self.client.post(f"/products/detection-eng/{UUID}/approve")
+        self.publish.assert_not_called()
+        self.deliver.assert_not_called()
+
+    def test_publishing_from_the_wizard_takes_an_audience(self):
+        with mock.patch.object(detection_eng, "_form_data", return_value={"audience": ""}):
+            self.client.post(f"/products/detection-eng/{UUID}/edit", data={"action": "publish"})
+        self.assertEqual(self.update.call_args.args[1]["review_state"], "pending-review")
+        self.publish.assert_not_called()
+
 
 class _DailyBriefingFixture(_Gate):
     def setUp(self):
@@ -230,6 +293,12 @@ class DailyBriefingPublisher(_DailyBriefingFixture):
         self.briefing.review_state = daily_briefing.misp_store.BRIEFING_REVIEW_PUBLISHED
         self.client.post(f"/briefing/{UUID}/resend")
         self.deliver.assert_called_once()
+
+    def test_a_published_briefing_is_not_published_again(self):
+        self.briefing.review_state = daily_briefing.misp_store.BRIEFING_REVIEW_PUBLISHED
+        self.client.post(f"/briefing/{UUID}/publish")
+        self.publish.assert_not_called()
+        self.deliver.assert_not_called()
 
 
 class _ThreatLandscapeFixture(_Gate):

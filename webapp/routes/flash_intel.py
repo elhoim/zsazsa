@@ -280,6 +280,9 @@ def wizard_edit(id):
         if action == "publish" and not misp_session.current_user_can_publish():
             flash(misp_session.publish_denied_message("approve and publish"), "warning")
             action = "save"
+        if action == "publish" and not data["audience"].strip():
+            flash("A target audience is required before publishing. Select an audience first.", "warning")
+            action = "save"
         if action == "submit":
             data["review_state"] = misp_store.FIA_REVIEW_PENDING
         elif action == "publish":
@@ -294,6 +297,7 @@ def wizard_edit(id):
                 # review state alone does not. Delivery runs as a background job,
                 # which writes its own notify audit entry when it finishes.
                 misp_store.publish_fia(id)
+                audit.record("publish", "fia", entity_id=id, entity_label=fia.fia_id)
                 _start_flash_intel_delivery(fia.fia_id, id, "publish")
                 flash(f"{fia.fia_id} published.", "success")
                 flash("Notifications are being sent in the background; the job badge reports the result.", "info")
@@ -316,6 +320,9 @@ def approve(id):
     fia = misp_store.get_fia(id)
     if fia is None:
         return "FIA not found", 404
+    if fia.review_state == misp_store.FIA_REVIEW_APPROVED:
+        flash(f"{fia.fia_id} is already published. Resend delivers it again.", "warning")
+        return redirect(url_for("flash_intel.detail", id=id))
     if not (fia.audience or "").strip():
         flash("A target audience is required before publishing. Edit the alert and select an audience first.", "warning")
         return redirect(url_for("flash_intel.detail", id=id))

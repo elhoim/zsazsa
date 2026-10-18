@@ -699,7 +699,9 @@ def _tag_scraper_event_as_product_source(src_uuid: str, product_label: str,
     try:
         client = misp_client or _scraper_misp()
         event = client.get_event(src_uuid, pythonify=True)
-        if not event or isinstance(event, dict):
+        # A source is something collected. On the webapp MISP an id from a
+        # product form could name one of zsazsa's own records instead.
+        if not event or isinstance(event, dict) or _is_own_record(t.name for t in event.tags):
             return
         current_wf = next(
             (tag.name for tag in (getattr(event, "tags", []) or [])
@@ -4160,6 +4162,11 @@ def get_all_collection_source_labels() -> list[str]:
     return labels
 
 
+# Local tag on every manual collection entry, next to the zsazsa:source tag of
+# the source it was entered under.
+TAG_MANUAL_ENTRY = 'zsazsa:source-type="manual"'
+
+
 def create_manual_collection_event(data: dict) -> str:
     """Create a manually-entered collection event on the webapp MISP server.
 
@@ -4186,7 +4193,7 @@ def create_manual_collection_event(data: dict) -> str:
 
     uuid = created.uuid
 
-    _tag_local(misp, uuid, 'zsazsa:source-type="manual"')
+    _tag_local(misp, uuid, TAG_MANUAL_ENTRY)
     if slug:
         _tag_local(misp, uuid, f'zsazsa:source="{slug}"')
 
@@ -4452,12 +4459,25 @@ def data_collection_source_counts() -> list[dict]:
     return rows
 
 
+def _manual_entry_event(uuid):
+    """The event of a manual collection entry, or None when ``uuid`` names any
+    other event on the webapp MISP."""
+    if not _is_event_id(uuid):
+        return None
+    event = _misp().get_event(uuid, pythonify=True)
+    if isinstance(event, dict) or event is None or not _event_has_tag(event, TAG_MANUAL_ENTRY):
+        return None
+    return event
+
+
 def add_manual_collection_attachment(event_uuid: str, filename: str, file_bytes: bytes) -> str:
     """Add a file attachment to a manually-entered collection event on the webapp MISP.
 
     Returns the new attribute UUID.
     """
     import base64
+    if _manual_entry_event(event_uuid) is None:
+        raise ValueError(f"manual entry {event_uuid} not found")
     misp = _misp()
     attr = MISPAttribute()
     attr.type = "attachment"
@@ -4473,10 +4493,10 @@ def get_manual_collection_event(uuid: str):
     """Fetch a manual collection event from the webapp MISP. Returns a plain dict or None."""
     misp = _misp()
     try:
-        event = misp.get_event(uuid, pythonify=True)
+        event = _manual_entry_event(uuid)
     except Exception:
         return None
-    if not event or isinstance(event, dict):
+    if event is None:
         return None
     tags = [t.name for t in getattr(event, "tags", []) or []]
     attrs = []

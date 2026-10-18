@@ -504,13 +504,7 @@ def detail(id):
         for s in briefing.stories
         if getattr(s, "source_event_uuid", "")
     ]
-    source_meta = {}
-    if source_uuids:
-        try:
-            for ev in collection_cache.get_events_by_uuids(source_uuids):
-                source_meta[ev["uuid"]] = ev
-        except Exception:
-            pass
+    source_meta = {ev["uuid"]: ev for ev in collection_cache.get_events_by_uuids(source_uuids)}
 
     return render_template(
         "daily_briefing/detail.html",
@@ -699,6 +693,9 @@ def publish(id):
     briefing = misp_store.get_briefing(id)
     if briefing is None:
         return "Briefing not found", 404
+    if briefing.review_state == misp_store.BRIEFING_REVIEW_PUBLISHED:
+        flash(f"Daily briefing {briefing.date} is already published. Resend delivers it again.", "warning")
+        return redirect(url_for("daily_briefing.detail", id=id))
     if not misp_session.current_user_can_publish():
         flash(misp_session.publish_denied_message(), "warning")
         return redirect(url_for("daily_briefing.detail", id=id))

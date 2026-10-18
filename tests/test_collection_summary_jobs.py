@@ -148,16 +148,20 @@ class BatchAcrossSources(unittest.TestCase):
     """A selection can mix scraper events with manual entries, so the batch has
     to reach for the right connection per event rather than one for all."""
 
-    def _run(self, batch, sources=_ALL_SOURCES):
+    def _run(self, batch, sources=_ALL_SOURCES, cached=None):
         """Run the batch job with both MISP connections and the LLM stubbed out.
 
-        The returned namespace holds the stubs, so a check can see which
+        ``cached`` is what the collection cache holds, by default the batch
+        itself. The returned namespace holds the stubs, so a check can see which
         connection each event was loaded from and how often the source list and
         the connections themselves were opened.
         """
+        if cached is None:
+            cached = [{"uuid": ev["uuid"], "source_id": ev["sourceId"]} for ev in batch]
         scraper_misp, webapp_misp = mock.MagicMock(), mock.MagicMock()
         with mock.patch.object(data_collection, "_sources", return_value=sources) as list_sources, \
-             mock.patch.object(data_collection.collection_cache, "get_events_by_uuids", return_value=[]), \
+             mock.patch.object(data_collection.collection_cache, "get_events_by_uuids",
+                               side_effect=lambda uuids: [row for row in cached if row["uuid"] in uuids]), \
              mock.patch.object(data_collection.misp_store, "_scraper_misp", return_value=scraper_misp), \
              mock.patch.object(data_collection.misp_store, "_misp", return_value=webapp_misp) as open_webapp, \
              mock.patch.object(data_collection.job_store, "update_job") as update, \
@@ -193,6 +197,13 @@ class BatchAcrossSources(unittest.TestCase):
             sources=_ALL_SOURCES + [{"id": "manual-newsletter", "kind": "manual", "label": "News"}])
         self.assertEqual(run.webapp_misp.get_event.call_count, 2)
         run.open_webapp.assert_called_once()
+
+    def test_an_event_the_collection_does_not_list_is_skipped(self):
+        """A manual source writes to zsazsa's own MISP, where an id from the
+        request could name a stakeholder or a product."""
+        run = self._run([{"uuid": "b" * 36, "sourceId": "manual-slack"}], cached=[])
+        run.generate.assert_not_called()
+        run.webapp_misp.get_event.assert_not_called()
 
     def test_an_event_from_an_unwritable_source_is_skipped(self):
         run = self._run([{"uuid": "c" * 36, "sourceId": "partner-misp"}])

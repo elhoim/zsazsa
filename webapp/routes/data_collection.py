@@ -6,16 +6,14 @@ one event live - a single event fetch is fast; querying hundreds is not.
 """
 
 import concurrent.futures
+import datetime
 import logging
 import re
 import threading
 import time
 from collections import Counter
 
-_TECH_RE = re.compile(r'\bT\d{4}(?:\.\d{3})?\b')
-
 import urllib3
-import datetime
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from pymisp import PyMISP, MISPEventReport
@@ -32,6 +30,7 @@ _UUID_RE = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
     re.IGNORECASE,
 )
+_TECH_RE = re.compile(r'\bT\d{4}(?:\.\d{3})?\b')
 
 logger = logging.getLogger(__name__)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -45,59 +44,14 @@ _THREAT_LEVELS = {1: "High", 2: "Medium", 3: "Low", 4: "Undefined"}
 _ANALYSIS_STATES = {0: "Initial", 1: "Ongoing", 2: "Completed"}
 
 
-def _split_tags(s: str) -> list[str]:
-    if not s:
-        return []
-    parts = []
-    for chunk in s.split(","):
-        for tok in chunk.split():
-            tok = tok.strip()
-            if tok:
-                parts.append(tok)
-    return parts
-
-
 def _sources() -> list[dict]:
-    out = []
-    if scraper_enabled():
-        out.append({
-            "id": _SCRAPER_SOURCE_ID,
-            "label": "MISP scraper",
-            "kind": "scraper",
-            "url": config.MISP_URL,
-            # IMAP mailbox sources feed into the scraper, so list them under it.
-            "imap_sources": misp_store.imap_source_labels(),
-        })
-    for s in getattr(config, "MISP_SERVERS", []) or []:
-        if not s.get("enabled", True):
-            continue
-        out.append({
-            "id": s.get("id") or s.get("label"),
-            "label": s.get("label") or s.get("id"),
-            "kind": "misp",
-            "url": s.get("url"),
-            "api_key": s.get("api_key"),
-            "verify_tls": s.get("verify_tls", True),
-            "tags": _split_tags(s.get("tags", "")),
-            "tags_and": _split_tags(s.get("tags_and", "")),
-            "tags_not": _split_tags(s.get("tags_not", "")),
-            "org_filter_type": s.get("org_filter_type", "") or "",
-            "org_filter": _split_tags(s.get("org_filter", "")),
-            "since_days": int(s.get("since_days") or 7),
-        })
-    try:
-        for src in misp_store.list_collection_sources():
-            if src.enabled:
-                out.append({
-                    "id": collection_cache.manual_source_id(src.name),
-                    "label": src.name,
-                    "kind": "manual",
-                    "url": config.MISP_WEBAPP_URL,
-                    "source_uuid": src.uuid,
-                })
-    except Exception as exc:
-        logger.warning("Could not load manual collection sources from MISP: %s", exc)
-    return out
+    """The collection sources as the cache reads them, with the mailboxes that
+    feed the scraper, which the page lists under it."""
+    sources = collection_cache._build_sources()
+    for s in sources:
+        if s["kind"] == "scraper":
+            s["imap_sources"] = misp_store.imap_source_labels()
+    return sources
 
 
 def _find_source(source_id: str) -> dict | None:
@@ -404,7 +358,9 @@ def pull():
         logger.warning("pull: %s from %s failed: %s", uuid, source_id, exc)
         return jsonify({"ok": False, "error": "Could not fetch event."}), 502
 
-    if event is None:
+    # The scraper is often the same MISP zsazsa keeps its records in, and a
+    # record in the cache could then be tagged and summarised from this page.
+    if event is None or misp_store._is_own_record(t.name for t in event.tags):
         return jsonify({"ok": False, "error": "Event not found"}), 404
 
     row = collection_cache._extract_row(event, source_id)
@@ -421,62 +377,55 @@ def pull():
     return jsonify({"ok": True, "message": f"Event '{event.info}' pulled into cache", "uuid": uuid})
 
 
-@bp.route("/<string:uuid>")
-def detail(uuid):
-    source_id = request.args.get("source") or _SCRAPER_SOURCE_ID
-    src = _find_source(source_id)
-    if src and src["kind"] == "manual":
-        misp = misp_store._misp()
-        misp_url_base = config.MISP_WEBAPP_URL.rstrip("/")
-    elif src and src["kind"] == "misp":
-        if not src.get("api_key"):
-            return "Source not configured (missing API key)", 502
-        try:
-            misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False)
-        except Exception as exc:
-            logger.warning("Could not connect to MISP server %s: %s", source_id, exc)
-            return "Source not available", 502
-        misp_url_base = src["url"].rstrip("/")
-    else:
-        if not scraper_enabled():
-            return "Source not configured", 502
-        misp = misp_store._scraper_misp()
-        misp_url_base = config.MISP_URL.rstrip("/")
+def _event_with_reports(src, uuid):
+    """One event of a source with its reports, as (event, reports, error).
 
+    ``error`` is a (message, status) pair when the event cannot be shown. Through
+    a manual source this reads zsazsa's own MISP, where the id could name any
+    event, so only a manual entry is shown there.
+    """
+    misp, err_msg = _connect_source(src)
+    if misp is None:
+        return None, None, (err_msg, 502)
     try:
         event = misp.get_event(uuid, pythonify=True)
     except Exception as exc:
         logger.warning("MISP get_event %s failed: %s", uuid, exc)
-        return "Event not available", 502
-
+        return None, None, ("Could not fetch event.", 502)
     if not event or isinstance(event, dict):
-        return "Event not found", 404
-
+        return None, None, ("Event not found", 404)
+    if src["kind"] == "manual" and not misp_store._event_has_tag(event, misp_store.TAG_MANUAL_ENTRY):
+        return None, None, ("Event not found", 404)
     try:
         reports = misp.get_event_reports(event.id, pythonify=True) or []
     except Exception as exc:
         logger.warning("Could not load event reports for %s: %s", uuid, exc)
         reports = []
-
-    report_views = []
-    for r in reports:
-        report_views.append({
+    report_views = [
+        {
             "name": getattr(r, "name", "") or "Report",
             "content": getattr(r, "content", "") or "",
             "date": misp_store.report_date(r),
             "tags": [t.name for t in getattr(r, "tags", []) or []],
-        })
+        }
+        for r in reports
+    ]
+    return event, report_views, None
 
-    event_data = _extract_event_detail(event)
-    misp_url = f"{misp_url_base}/events/view/{event.uuid}"
-    source_label = (src or {}).get("label", source_id)
 
+@bp.route("/<string:uuid>")
+def detail(uuid):
+    source_id = request.args.get("source") or _SCRAPER_SOURCE_ID
+    src = _find_source(source_id)
+    event, reports, error = _event_with_reports(src, uuid)
+    if error:
+        return error
     return render_template(
         "data_collection/detail.html",
-        event=event_data,
-        reports=report_views,
-        misp_url=misp_url,
-        source_label=source_label,
+        event=_extract_event_detail(event),
+        reports=reports,
+        misp_url=f"{src['url'].rstrip('/')}/events/view/{event.uuid}",
+        source_label=src["label"],
         source_id=source_id,
         draft_briefings=_draft_briefings(),
     )
@@ -580,9 +529,11 @@ def _generate_ai_summary(misp, event, source_id, user=""):
         er.name = f"{AI_SUMMARY_PREFIX} {(event.info or uuid)[:80]}"
         er.content = summary
         er.distribution = 5
-        misp.add_event_report(event.id, er)
+        refused = _misp_response_errors(misp.add_event_report(event.id, er))
     except Exception as exc:
-        logger.warning("Could not add summary report to %s: %s", uuid, exc)
+        refused = str(exc)
+    if refused:
+        logger.warning("Could not add summary report to %s: %s", uuid, refused)
         return False, "Could not save summary to MISP.", 502
 
     collection_cache.mark_ai_summary(uuid, source_id)
@@ -651,58 +602,18 @@ def summarise(uuid):
 def preview(uuid):
     source_id = request.args.get("source") or _SCRAPER_SOURCE_ID
     src = _find_source(source_id)
-    if src and src["kind"] == "manual":
-        misp = misp_store._misp()
-        misp_url_base = config.MISP_WEBAPP_URL.rstrip("/")
-    elif src and src["kind"] == "misp":
-        if not src.get("api_key"):
-            return jsonify({"ok": False, "error": "Source not configured"}), 502
-        try:
-            misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False)
-        except Exception as exc:
-            logger.warning("preview: could not connect to source %s: %s", source_id, exc)
-            return jsonify({"ok": False, "error": "Source not available"}), 502
-        misp_url_base = src["url"].rstrip("/")
-    else:
-        if not scraper_enabled():
-            return jsonify({"ok": False, "error": "Source not configured"}), 502
-        misp = misp_store._scraper_misp()
-        misp_url_base = config.MISP_URL.rstrip("/")
-
-    try:
-        event = misp.get_event(uuid, pythonify=True)
-    except Exception as exc:
-        logger.warning("preview: get_event %s failed: %s", uuid, exc)
-        return jsonify({"ok": False, "error": "Could not fetch event."}), 502
-
-    if not event or isinstance(event, dict):
-        return jsonify({"ok": False, "error": "Event not found"}), 404
-
-    try:
-        reports = misp.get_event_reports(event.id, pythonify=True) or []
-    except Exception:
-        reports = []
-
-    report_views = [
-        {
-            "name": getattr(r, "name", "") or "Report",
-            "content": getattr(r, "content", "") or "",
-            "date": misp_store.report_date(r),
-            "tags": [t.name for t in getattr(r, "tags", []) or []],
-        }
-        for r in reports
-    ]
-
-    event_data = _extract_event_detail(event)
-    src_label = (src or {}).get("label", source_id)
-
+    event, reports, error = _event_with_reports(src, uuid)
+    if error:
+        message, status = error
+        return jsonify({"ok": False, "error": message}), status
+    misp_url = f"{src['url'].rstrip('/')}/events/view/{uuid}"
     return jsonify({
         "ok": True,
-        "event": event_data,
-        "reports": report_views,
-        "misp_url": f"{misp_url_base}/events/view/{uuid}",
-        "detail_url": f"{misp_url_base}/events/view/{uuid}",
-        "source_label": src_label,
+        "event": _extract_event_detail(event),
+        "reports": reports,
+        "misp_url": misp_url,
+        "detail_url": misp_url,
+        "source_label": src["label"],
     })
 
 
@@ -1046,23 +957,39 @@ _CTI_EVAL_VALUES = ["very-low", "low", "moderate", "high", "very-high"]
 
 def _misp_for_source(source_id):
     """Return a connected PyMISP instance for the given source_id, or None on error."""
-    src = _find_source(source_id)
+    return _connect_source(_find_source(source_id))
+
+
+def _connect_source(src):
+    """(PyMISP, None) for a source from _sources(), or (None, why not)."""
     if src is None:
         return None, "Unknown source"
     if src["kind"] == "misp":
         if not src.get("api_key"):
             return None, "Source not configured (missing API key)"
         try:
-            return PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False), None
+            return PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
+                          timeout=misp_store.HTTP_TIMEOUT), None
         except Exception as exc:
-            logger.warning("_misp_for_source %s: %s", source_id, exc)
+            logger.warning("Could not connect to source %s: %s", src["id"], exc)
             return None, "Could not connect to source"
     # Manual entries live on the webapp MISP, as _cache_manual_event() also has
-    # it; the only kind left after that is the scraper, which _find_source()
-    # above has already established is configured.
+    # it; the only kind left after that is the scraper, which is only among the
+    # sources when it is configured.
     if src["kind"] == "manual":
         return misp_store._misp(), None
     return misp_store._scraper_misp(), None
+
+
+def _is_collected(uuid: str, source_id: str) -> bool:
+    """Whether the collection page lists this event under this source.
+
+    The actions here write with the key of the source's MISP, which for a manual
+    source is zsazsa's own: an id from the request could name a stakeholder, a
+    product or another organisation's event there. The cache holds only what the
+    sources collected, so an event has to be in it to be acted on.
+    """
+    return any(row["source_id"] == source_id for row in collection_cache.get_events_by_uuids([uuid]))
 
 
 def _is_remote_source(source_id: str) -> bool:
@@ -1125,6 +1052,8 @@ def cti_tag(uuid):
         return jsonify({"ok": False, "error": f"Unknown predicate: {predicate!r}"}), 400
     if value not in _CTI_EVAL_VALUES:
         return jsonify({"ok": False, "error": f"Unknown value: {value!r}"}), 400
+    if not _is_collected(uuid, source_id):
+        return jsonify({"ok": False, "error": "Event not found"}), 404
 
     misp, err_msg = _misp_for_source(source_id)
     if misp is None:
@@ -1174,6 +1103,8 @@ def scope_tag(uuid):
         return jsonify({"ok": False, "error": "Only galaxy scope tags may be applied"}), 400
     if action not in ("add", "remove"):
         return jsonify({"ok": False, "error": "action must be add or remove"}), 400
+    if not _is_collected(uuid, source_id):
+        return jsonify({"ok": False, "error": "Event not found"}), 404
 
     misp, err_msg = _misp_for_source(source_id)
     if misp is None:
@@ -1298,7 +1229,7 @@ def queue_for_tlr():
     for ev in events:
         uuid = (ev.get("uuid") or "").strip()
         source_id = (ev.get("sourceId") or _SCRAPER_SOURCE_ID).strip()
-        if not uuid:
+        if not uuid or not _is_collected(uuid, source_id):
             continue
 
         misp_client, err_msg = _misp_for_source(source_id)
@@ -1444,6 +1375,9 @@ def bulk_flag():
         source_id = (ev.get("sourceId") or _SCRAPER_SOURCE_ID).strip()
         if not uuid:
             continue
+        if not _is_collected(uuid, source_id):
+            errors += 1
+            continue
         if collection_cache.is_flagged(uuid):
             already_flagged += 1
             continue
@@ -1510,6 +1444,9 @@ def bulk_reject():
         uuid = (ev.get("uuid") or "").strip()
         source_id = (ev.get("sourceId") or _SCRAPER_SOURCE_ID).strip()
         if not uuid:
+            continue
+        if not _is_collected(uuid, source_id):
+            errors += 1
             continue
 
         if source_id not in source_cache:
@@ -1611,7 +1548,7 @@ def _run_summarise_job(job_id: str, batch: list[dict], user: str,
             job_store.update_job(job_id, message=f"Event {position} of {len(batch)}: generating summary")
 
             kind = kind_by_source.get(source_id)
-            if not uuid or kind is None:
+            if not uuid or kind is None or not _is_collected(uuid, source_id):
                 skipped += 1
                 continue
             if cached_by_uuid.get(uuid, {}).get("has_ai_summary"):
@@ -1699,29 +1636,19 @@ def flag_for_review(uuid):
     if err:
         return err
     source_id = data.get("source") or _SCRAPER_SOURCE_ID
-    src = _find_source(source_id)
+    if not _is_collected(uuid, source_id):
+        return jsonify({"ok": False, "error": "Event not found"}), 404
     tag = getattr(config, "TAG_COLLECTION_FOLLOWUP", 'zsazsa:collection="follow-up"')
 
-    currently_flagged = collection_cache.is_flagged(uuid)
-
-    if src and src["kind"] == "manual":
-        misp = misp_store._misp()
-    elif src and src["kind"] == "misp":
-        if not src.get("api_key"):
-            return jsonify({"ok": False, "error": "Source not configured"}), 502
-        try:
-            misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False)
-        except Exception as exc:
-            logger.warning("flag_for_review: source connection failed: %s", exc)
-            return jsonify({"ok": False, "error": "Source not available"}), 502
-    else:
-        if not scraper_enabled():
-            return jsonify({"ok": False, "error": "Source not configured"}), 502
-        misp = misp_store._scraper_misp()
+    misp, err_msg = _misp_for_source(source_id)
+    if misp is None:
+        return jsonify({"ok": False, "error": err_msg}), 502
 
     try:
-        if currently_flagged:
-            misp.untag(uuid, tag)
+        if collection_cache.is_flagged(uuid):
+            err_text = _misp_response_errors(misp.untag(uuid, tag))
+            if err_text:
+                return jsonify({"ok": False, "error": err_text}), 400
             collection_cache.unflag_event(uuid)
             _refresh_cached_event(uuid, source_id, misp, context="unflag")
             audit.record("unflag", "misp-event", entity_id=uuid)
@@ -1750,8 +1677,14 @@ def reject_event(uuid):
     if err:
         return err
     source_id = (data.get("source") or _SCRAPER_SOURCE_ID).strip()
+    if not _is_collected(uuid, source_id):
+        return jsonify({"ok": False, "error": "Event not found"}), 404
+    src = _find_source(source_id)
+    # As in a bulk reject: another server's workflow state is not ours to change.
+    if src and src["kind"] == "misp":
+        return jsonify({"ok": False, "error": "Events from another MISP server are dismissed, not rejected."}), 400
 
-    misp, err_msg = _misp_for_source(source_id)
+    misp, err_msg = _connect_source(src)
     if misp is None:
         return jsonify({"ok": False, "error": err_msg or "Source not available"}), 502
 
@@ -1819,6 +1752,8 @@ def dismiss_event(uuid):
     if err:
         return err
     source_id = (data.get("source") or _SCRAPER_SOURCE_ID).strip()
+    if not _is_collected(uuid, source_id):
+        return jsonify({"ok": False, "error": "Event not found"}), 404
 
     misp, err_msg = _misp_for_source(source_id)
     if misp is None:

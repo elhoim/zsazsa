@@ -256,6 +256,9 @@ def wizard_edit(id):
         if action == "publish" and not misp_session.current_user_can_publish():
             flash(misp_session.publish_denied_message("approve and publish"), "warning")
             action = "save"
+        if action == "publish" and not data["audience"].strip():
+            flash("A target audience is required before publishing. Select an audience first.", "warning")
+            action = "save"
         if action == "submit":
             data["review_state"] = misp_store.VEA_REVIEW_PENDING
         elif action == "publish":
@@ -267,6 +270,7 @@ def wizard_edit(id):
             audit.record("update", "vea", entity_id=id, entity_label=vea.vea_id)
             if action == "publish":
                 misp_store.publish_vea(id)
+                audit.record("publish", "vea", entity_id=id, entity_label=vea.vea_id)
                 _start_vea_delivery(vea.vea_id, id, "publish")
                 flash(f"{vea.vea_id} published.", "success")
                 flash("Notifications are being sent in the background; the job badge reports the result.", "info")
@@ -384,6 +388,9 @@ def approve(id):
     vea = misp_store.get_vea(id)
     if vea is None:
         return "VEA not found", 404
+    if vea.review_state == misp_store.VEA_REVIEW_APPROVED:
+        flash(f"{vea.vea_id} is already published. Resend delivers it again.", "warning")
+        return redirect(url_for("vea.detail", id=id))
     if not (vea.audience or "").strip():
         flash("A target audience is required before publishing. Edit the advisory and select an audience first.", "warning")
         return redirect(url_for("vea.detail", id=id))

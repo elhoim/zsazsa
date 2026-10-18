@@ -451,7 +451,7 @@ def refresh_source(src: dict) -> dict:
                 misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
                               timeout=misp_store.HTTP_TIMEOUT)
                 events = misp.search(
-                    tags=['zsazsa:source-type="manual"'],
+                    tags=[misp_store.TAG_MANUAL_ENTRY],
                     limit=src.get("limit") or 500, page=1, metadata=False, pythonify=True,
                 )
                 payload_err = _search_payload_error(events)

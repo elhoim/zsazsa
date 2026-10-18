@@ -252,6 +252,9 @@ def wizard_edit(id):
         if action == "publish" and not misp_session.current_user_can_publish():
             flash(misp_session.publish_denied_message("approve and publish"), "warning")
             action = "save"
+        if action == "publish" and not data["audience"].strip():
+            flash("A target audience is required before publishing. Select an audience first.", "warning")
+            action = "save"
         if action == "submit":
             data["review_state"] = misp_store.DER_REVIEW_PENDING
         elif action == "publish":
@@ -263,6 +266,7 @@ def wizard_edit(id):
             audit.record("update", "detection_eng", entity_id=id, entity_label=der.der_id)
             if action == "publish":
                 misp_store.publish_der(id)
+                audit.record("publish", "detection_eng", entity_id=id, entity_label=der.der_id)
                 _start_der_delivery(der.der_id, id, "publish")
                 flash(f"{der.der_id} published.", "success")
                 flash("Notifications are being sent in the background; the job badge reports the result.", "info")
@@ -312,6 +316,9 @@ def approve(id):
     der = misp_store.get_der(id)
     if der is None:
         return "Detection engineering request not found", 404
+    if der.review_state == misp_store.DER_REVIEW_APPROVED:
+        flash(f"{der.der_id} is already published. Resend delivers it again.", "warning")
+        return redirect(url_for("detection_eng.detail", id=id))
     if not (der.audience or "").strip():
         flash("A target audience is required before publishing. Edit the request and select an audience first.", "warning")
         return redirect(url_for("detection_eng.detail", id=id))

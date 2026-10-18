@@ -53,6 +53,8 @@
   by @angolion
 - Saving a stakeholder MISP could not load no longer creates a duplicate.
 - Saving a PIR, GIR or RFI MISP could not load no longer creates a duplicate.
+- Approving or publishing a product that is already published no longer sends it twice.
+- Publishing from a product's edit form now needs an audience, as Approve does.
 
 ### Security
 
@@ -63,6 +65,7 @@
   `MISP_EVENT_DISTRIBUTION` shares events wider. A publisher can give a feed a
   new token.
   / reported by @elhoim
+- The data collection page could change any event on zsazsa's own MISP.
 
 ### Upgrading
 
