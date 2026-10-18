@@ -55,6 +55,7 @@
 - Saving a PIR, GIR or RFI MISP could not load no longer creates a duplicate.
 - Approving or publishing a product that is already published no longer sends it twice.
 - Publishing from a product's edit form now needs an audience, as Approve does.
+- The PIR filter on All products found no product: it now reads each product's link.
 
 ### Security
 
@@ -66,6 +67,7 @@
   new token.
   / reported by @elhoim
 - The data collection page could change any event on zsazsa's own MISP.
+- A threat actor profile sent its indicator feeds whatever their TLP.
 
 ### Upgrading
 

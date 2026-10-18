@@ -146,6 +146,16 @@ class BriefingStoryFormatting(unittest.TestCase):
         self.assertNotIn("Threat actor type", story)
         self.assertTrue(story.startswith("What happened:"))
 
+    def test_an_actor_type_with_an_ampersand_comes_back_as_configured(self):
+        """The briefing form ticks the type by its configured name, so the
+        suggestion has to be that name exactly, not an HTML-escaped copy."""
+        name = "Cybercrime & Hacker-for-Hire Actors"
+        with mock.patch.object(llm, "_call", return_value=self.STORY + f"Threat actor type: {name}\n"), \
+             mock.patch.object(llm, "_build_system_prompt", return_value="sys"), \
+             mock.patch.object(llm, "_feature_cfg", return_value={}):
+            _story, actor_type = llm.draft_briefing_story("article", threat_actor_types=[{"name": name}])
+        self.assertEqual(actor_type, name)
+
 
 class UntrustedInput(unittest.TestCase):
     """Scraped article/story text is delimited before it reaches a model."""

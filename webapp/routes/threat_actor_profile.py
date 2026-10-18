@@ -286,12 +286,15 @@ def publish(id):
     tap = misp_store.get_threat_actor_profile(id)
     if tap is None:
         return "Threat actor profile not found", 404
+    if tap.status == "Published":
+        flash(f"{tap.tap_id} is already published.", "warning")
+        return redirect(url_for("threat_actor_profile.detail", id=id))
     if not misp_session.current_user_can_publish():
         flash(misp_session.publish_denied_message(), "warning")
         return redirect(url_for("threat_actor_profile.detail", id=id))
     try:
         misp_store.publish_threat_actor_profile(id)
-        audit.record("update", "threat-actor-profile", entity_id=id, entity_label=tap.tap_id, details="published")
+        audit.record("publish", "threat-actor-profile", entity_id=id, entity_label=tap.tap_id)
         flash(f"{tap.tap_id} published.", "success")
     except Exception as exc:
         flash(f"Could not publish: {exc}", "warning")
@@ -503,6 +506,7 @@ def _markdown(tap, pir=None):
 def _linked_feeds_markdown(tap):
     """Embed each linked indicator feed (name, description, CSV) into the product
     so it travels inside the notification rather than as a separate attachment.
+    A feed classified above the profile is named and left out.
 
     A feed runs with its own limit here, as it does everywhere else, so one that
     matches more than it shows says so rather than arriving short. A feed that
@@ -510,6 +514,11 @@ def _linked_feeds_markdown(tap):
     outage as a feed with nothing in it."""
     lines = []
     for feed in _linked_feeds(tap):
+        # Everyone the profile reaches is cleared for its TLP, not the feed's.
+        if not misp_store._tlp_cleared(tap.tlp, feed.tlp):
+            lines += ["", f"*{feed.feed_id} is left out: it is TLP:{feed.tlp.upper()}, above this "
+                          f"profile's TLP:{tap.tlp.upper()}.*", ""]
+            continue
         lines += ["", f"## Indicator feed: {feed.name}", ""]
         if feed.description:
             lines += [feed.description, ""]

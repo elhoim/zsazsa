@@ -3,8 +3,9 @@ what publishing one keeps.
 
 A profile stores feed UUIDs, not feeds, and embeds each feed's indicators into
 the product that goes out to stakeholders. Both ends of that link can move
-under it: a feed can match more indicators than it lists, and a feed can be
-deleted while a profile still points at it.
+under it: a feed can match more indicators than it lists, a feed can be
+deleted while a profile still points at it, and a feed can be classified above
+the profile it is linked to.
 
     python -m unittest tests.test_threat_actor_profile_feeds
 """
@@ -20,7 +21,7 @@ from webapp.routes import threat_actor_profile as tap_routes
 
 
 def _feed(**over):
-    data = dict(uuid="f" * 36, feed_id="FEED-001", name="Actor infrastructure",
+    data = dict(uuid="f" * 36, feed_id="FEED-001", name="Actor infrastructure", tlp="clear",
                 description="", query={"types": ["ip-dst"], "limit": 3})
     data.update(over)
     return SimpleNamespace(**data)
@@ -32,7 +33,7 @@ def _rows(n):
 
 class EmbeddedFeeds(unittest.TestCase):
     def setUp(self):
-        self.tap = SimpleNamespace(tap_id="TAP-001", indicator_feeds=["f" * 36])
+        self.tap = SimpleNamespace(tap_id="TAP-001", tlp="amber", indicator_feeds=["f" * 36])
 
     def _markdown(self, feed, rows):
         with mock.patch.object(misp_store, "get_indicator_feed", return_value=feed), \
@@ -84,6 +85,14 @@ class EmbeddedFeeds(unittest.TestCase):
         self.assertIn("## Indicator feed: Actor infrastructure", md)
         self.assertIn("could not be read from MISP", md)
         self.assertNotIn("(no indicators)", md)
+
+    def test_a_feed_classified_above_the_profile_is_left_out(self):
+        """Everyone the profile reaches is cleared for its TLP, and the feed's
+        indicators went to them whatever the feed was classified."""
+        md = self._markdown(_feed(tlp="red"), _rows(2))
+        self.assertIn("FEED-001 is left out: it is TLP:RED, above this profile's TLP:AMBER", md)
+        self.assertNotIn("10.0.0.0", md)
+        self.assertNotIn("Actor infrastructure", md)
 
     def test_a_deleted_feed_is_skipped(self):
         with mock.patch.object(misp_store, "get_indicator_feed", return_value=None):

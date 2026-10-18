@@ -379,6 +379,12 @@ class ThreatActorProfilePublisher(_ThreatActorProfileFixture):
         self.client.post(f"/products/threat-actor-profile/{UUID}/publish")
         self.publish.assert_called_once_with(UUID)
 
+    def test_a_published_profile_is_not_published_again(self):
+        """Publishing again moved its publish date to today."""
+        self.tap.status = "Published"
+        self.client.post(f"/products/threat-actor-profile/{UUID}/publish")
+        self.publish.assert_not_called()
+
     def test_notify_delivers(self):
         self.tap.status = "Published"
         self.client.post(f"/products/threat-actor-profile/{UUID}/notify")

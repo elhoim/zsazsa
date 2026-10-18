@@ -1,4 +1,4 @@
-"""Browse CTI products produced by the analyser.
+"""Browse every CTI product zsazsa holds, whoever made it.
 
 A product is any MISP event tagged 'zsazsa:ctiproduct="…"'. The list page
 groups events by product type and supports filtering by type and by linked PIR.
@@ -6,6 +6,7 @@ groups events by product type and supports filtering by type and by linked PIR.
 
 import logging
 from collections import Counter
+from types import SimpleNamespace
 
 from flask import Blueprint, render_template, request
 
@@ -51,7 +52,7 @@ def _non_feedback_report_count(misp, event) -> int:
     return sum(1 for er in reports if not (getattr(er, "name", "") or "").startswith("feedback"))
 
 
-def _list_product_events(type_filter: str | None, linked_pir: str | None):
+def _list_product_events(type_filter: str | None, linked_pir=None):
     misp = misp_store._misp()
     if type_filter:
         tags = [f'{PRODUCT_TAG_PREFIX}"{product_type_tag_value(type_filter)}"']
@@ -70,10 +71,11 @@ def _list_product_events(type_filter: str | None, linked_pir: str | None):
     for e in events:
         ev_tags = _event_tags(e)
         ptype = _product_type_from_tags(ev_tags)
-        if linked_pir:
-            # Match if event references the PIR id either in info or as a tag value
-            if linked_pir not in (e.info or '') and linked_pir not in ev_tags:
-                continue
+        # A product records the PIR it answers on its object; an older one may
+        # only name it in its title.
+        if linked_pir and not (linked_pir.uuid in misp_store.linked_pir_uuids(e)
+                               or linked_pir.pir_id in (e.info or "")):
+            continue
         rows.append({
             "uuid": e.uuid,
             "id": e.id,
@@ -94,14 +96,17 @@ def index():
     type_filter = (request.args.get("type") or "").strip()
     linked_pir = (request.args.get("linked_pir") or "").strip()
 
-    events = _list_product_events(type_filter or None, linked_pir or None)
+    pirs = misp_store.list_pirs()
+    pir = None
+    if linked_pir:
+        # An id no PIR has any more can still be matched in a title.
+        pir = next((p for p in pirs if p.pir_id == linked_pir), SimpleNamespace(uuid="", pir_id=linked_pir))
+    events = _list_product_events(type_filter or None, pir)
 
     type_counter = Counter(ev["product_type"] for ev in events if ev["product_type"])
     grouped = {}
     for ev in events:
         grouped.setdefault(ev["product_type"] or "(untyped)", []).append(ev)
-
-    pirs = misp_store.list_pirs()
 
     return render_template(
         "products/list.html",

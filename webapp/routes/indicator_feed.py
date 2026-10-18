@@ -383,26 +383,29 @@ def _public_url_choice(current):
     return "enabled" in posted
 
 
+def _form_data(form):
+    """The feed as its form describes it, for a new feed and an edit alike."""
+    return {
+        "name": (form.get("name") or "").strip(),
+        "description": (form.get("description") or "").strip(),
+        "tlp": (form.get("tlp") or "clear").strip(),
+        "audience": ", ".join(form.getlist("audience")),
+        "author": (form.get("author") or "").strip(),
+        "feedback_by": (form.get("feedback_by") or "").strip(),
+        "linked_pir_uuid": (form.get("linked_pir_uuid") or "").strip(),
+        "query": _filters_from(form),
+        **_cache_fields(form),
+    }
+
+
 @bp.route("/save", methods=["POST"])
 def save():
-    filters = _filters_from(request.form)
-    name = (request.form.get("name") or "").strip()
-    if not name:
+    data = _form_data(request.form)
+    if not data["name"]:
         flash("A name is required to save an indicator feed.", "warning")
-        return redirect(url_for("indicator_feed.new") + "?" + _query_string(filters))
-    data = {
-        "name": name,
-        "description": (request.form.get("description") or "").strip(),
-        "tlp": (request.form.get("tlp") or "clear").strip(),
-        "audience": ", ".join(request.form.getlist("audience")),
-        "author": (request.form.get("author") or "").strip(),
-        "feedback_by": (request.form.get("feedback_by") or "").strip(),
-        "linked_pir_uuid": (request.form.get("linked_pir_uuid") or "").strip(),
-        "query": filters,
-        # A new feed's public URL starts on only when a publisher creates it.
-        "public_url_enabled": _public_url_choice(misp_session.current_user_can_publish()),
-        **_cache_fields(request.form),
-    }
+        return redirect(url_for("indicator_feed.new") + "?" + _query_string(data["query"]))
+    # A new feed's public URL starts on only when a publisher creates it.
+    data["public_url_enabled"] = _public_url_choice(misp_session.current_user_can_publish())
     try:
         uuid = misp_store.create_indicator_feed(data)
         audit.record("create", "indicator-feed", entity_id=uuid, entity_label=data["feed_id"])
@@ -410,7 +413,7 @@ def save():
         return redirect(url_for("indicator_feed.detail", id=uuid))
     except Exception as exc:
         flash(f"Could not save indicator feed: {exc}", "warning")
-        return redirect(url_for("indicator_feed.new") + "?" + _query_string(filters))
+        return redirect(url_for("indicator_feed.new") + "?" + _query_string(data["query"]))
 
 
 @bp.route("/<string:id>/edit", methods=["POST"])
@@ -418,23 +421,12 @@ def edit(id):
     feed = misp_store.get_indicator_feed(id)
     if feed is None:
         return "Indicator feed not found", 404
-    name = (request.form.get("name") or "").strip()
-    if not name:
+    data = _form_data(request.form)
+    if not data["name"]:
         flash("A name is required.", "warning")
         return redirect(url_for("indicator_feed.detail", id=id))
-    data = {
-        "feed_id": feed.feed_id,
-        "name": name,
-        "description": (request.form.get("description") or "").strip(),
-        "tlp": (request.form.get("tlp") or "clear").strip(),
-        "audience": ", ".join(request.form.getlist("audience")),
-        "author": (request.form.get("author") or "").strip(),
-        "feedback_by": (request.form.get("feedback_by") or "").strip(),
-        "linked_pir_uuid": (request.form.get("linked_pir_uuid") or "").strip(),
-        "query": _filters_from(request.form),
-        "public_url_enabled": _public_url_choice(feed.public_url_enabled),
-        **_cache_fields(request.form),
-    }
+    data["feed_id"] = feed.feed_id
+    data["public_url_enabled"] = _public_url_choice(feed.public_url_enabled)
     try:
         misp_store.update_indicator_feed(id, data)
         feed_cache.clear(id)
