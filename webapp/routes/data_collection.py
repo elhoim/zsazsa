@@ -956,7 +956,7 @@ _CTI_EVAL_VALUES = ["very-low", "low", "moderate", "high", "very-high"]
 
 
 def _misp_for_source(source_id):
-    """Return a connected PyMISP instance for the given source_id, or None on error."""
+    """_connect_source() for the source with this id."""
     return _connect_source(_find_source(source_id))
 
 

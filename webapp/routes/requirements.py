@@ -242,7 +242,7 @@ def _sub_questions(form):
 
 def _pir_form_data(form, stakeholders, focus_points=()):
     """The PIR as its form describes it, for a new PIR and an edit alike.
-    ``focus_points`` are the stored ones, whose notes the form cannot carry."""
+    ``focus_points`` are the stored ones, whose notes the form does not post."""
     owner_uuid, owner_name, owner_role = _owner_fields(form, stakeholders)
     return {
         "question": form["question"],

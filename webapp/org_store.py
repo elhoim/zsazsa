@@ -56,9 +56,9 @@ def add_organisation(uuid):
     uuid = (uuid or "").strip()
     if not uuid:
         raise ValueError("UUID is required")
-    # MISP would also find an organisation by its numeric id, and the UUID it
-    # answers with, which is the one stored, is in lower case. The duplicate
-    # check below has to compare the same form.
+    # What is stored is the lower-case UUID MISP answers with. MISP also finds
+    # an organisation by its numeric id, so an id, or a UUID in upper case,
+    # would get past the duplicate check below.
     try:
         uuid = str(UUID(uuid))
     except ValueError:

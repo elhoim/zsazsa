@@ -5323,7 +5323,7 @@ def scope_stats() -> list[dict]:
                 value = (value or "").strip()
                 if not value:
                     continue
-                spelling, refs = found.setdefault(value.casefold(), (value, []))
+                refs = found.setdefault(value.casefold(), (value, []))[1]
                 if ref not in refs:
                     refs.append(ref)
         items = [{"value": v, "count": len(refs), "entries": refs} for v, refs in found.values()]
