@@ -368,7 +368,8 @@ class Pages(TempDatabase):
                                return_value={"uuid": ORG_UUID, "name": "CIRCL", "sector": "", "country": ""}):
             org_store.add_organisation(ORG_UUID)
         bob = _stakeholder(uuid="b" * 36, id="b" * 36, name="Bob")
-        with mock.patch.object(misp_store, "list_stakeholders", return_value=[_stakeholder(organization=ORG_UUID), bob]):
+        with mock.patch.object(misp_store, "list_stakeholders", return_value=[_stakeholder(organization=ORG_UUID), bob]), \
+             mock.patch.object(misp_store, "records_owned_by_stakeholders", return_value={}):
             page = BeautifulSoup(self.client.get(f"/stakeholders/?organization={ORG_UUID}").data, "html.parser")
         chosen = page.select_one('select[name="organization"] option[selected]')
         self.assertEqual((chosen["value"], chosen.get_text()), (ORG_UUID, "CIRCL"))
