@@ -33,6 +33,13 @@
   section of the README, which now opens with links to both.
 - A stakeholder who owns a PIR, GIR or RFI can no longer be deleted.
 - PIR triage notices go only to the PIR's owner and distribution channels.
+- Updated scope and statistics pages.
+- The stakeholder list can be filtered by role and product subscription.
+- PIRs can be filtered by priority and GIRs by review cycle. The RFI list leaves
+  closed RFIs hidden by default.
+- RFIs can be filtered by priority and SLA. The product lists have the same filters and charts.
+- The daily briefing list can be filtered by state and TLP.
+- A PIR or GIR is saved only with at least one intelligence level.
 
 ### Fixed
 
@@ -64,6 +71,8 @@
   now shows the newest cached event.
 - The "Max events" of a MISP server under Collection sources was saved but not used: the cache
   always read 500 events.
+- The dashboard counted pending scraper events among the newest few hundred only.
+- The statistics page counted a PIR or GIR under its first intelligence level only.
 
 ### Security
 

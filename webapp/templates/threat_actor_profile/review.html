@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_sort_header.html" import sort_th %}
+{% from "_sort_header.html" import sort_th with context %}
 
 {% block title %}Threat actor profiles | zsazsa CTI{% endblock %}
 {% block page_title %}Threat actor profiles{% endblock %}
@@ -15,25 +15,57 @@
 {% endblock %}
 
 {% block content %}
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-purple);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">State</label>
-        <select name="state" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All states</option>
-          {% for s in states %}
-          <option value="{{ s }}" {{ 'selected' if state_filter == s }}>{{ s }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="State">
+            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
+            <select name="state" class="form-select form-select-sm" aria-label="State" onchange="this.form.submit()">
+              <option value="">All states</option>
+              {% for value in states %}
+              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="TLP">
+            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
+            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
+              <option value="">All TLP levels</option>
+              {% for value in tlp_choices %}
+              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Audience">
+            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
+            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
+              <option value="">All audiences</option>
+              {% for value in audience_choices %}
+              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ taps | length }} profile{{ 's' if taps|length != 1 }}</span>
+            {% if state_filter or tlp_filter or audience_filter %}
+            <a href="{{ url_for('threat_actor_profile.review') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if state_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('threat_actor_profile.review') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if state_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-4">{{ charts.mix('State', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('TLP', tlp_counts, charts.tlp_colors, param='tlp', selected=tlp_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('Audience', audience_counts, param='audience', selected=audience_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ taps | length }} profile{{ 's' if taps|length != 1 }}</div>
-    </form>
+    </div>
   </div>
 </div>
 
@@ -43,11 +75,11 @@
     <table class="table table-hover zsazsa-table mb-0">
       <thead>
         <tr>
-          {{ sort_th('ID', 'id', sort, dir, 'threat_actor_profile.review', state_filter, '110px') }}
-          {{ sort_th('Title', 'title', sort, dir, 'threat_actor_profile.review', state_filter) }}
+          {{ sort_th('ID', 'id', sort, dir, 'threat_actor_profile.review', '110px') }}
+          {{ sort_th('Title', 'title', sort, dir, 'threat_actor_profile.review') }}
           <th>TLP</th>
-          {{ sort_th('State', 'state', sort, dir, 'threat_actor_profile.review', state_filter) }}
-          {{ sort_th('Published', 'date', sort, dir, 'threat_actor_profile.review', state_filter) }}
+          {{ sort_th('State', 'state', sort, dir, 'threat_actor_profile.review') }}
+          {{ sort_th('Published', 'date', sort, dir, 'threat_actor_profile.review') }}
           <th>Author</th>
           <th class="text-end">Actions</th>
         </tr>
@@ -170,6 +202,8 @@
         {% endfor %}
       </tbody>
     </table>
+    {% elif state_filter or tlp_filter or audience_filter %}
+    <div class="p-4 text-center text-muted">No threat actor profiles match these filters.</div>
     {% else %}
     <div class="p-4 text-center text-muted">
       No threat actor profiles yet. <a href="{{ url_for('threat_actor_profile.new') }}">Create the first one</a>.

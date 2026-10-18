@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_sort_header.html" import sort_th %}
+{% from "_sort_header.html" import sort_th with context %}
 
 {% block title %}Detection engineering requests | zsazsa CTI{% endblock %}
 {% block page_title %}Detection engineering requests{% endblock %}
@@ -23,25 +23,70 @@
   {%- else -%}bg-secondary-subtle text-secondary-emphasis{%- endif -%}{% endmacro %}
 
 {% block content %}
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+{% set priority_colors = {'Critical': 'var(--priority-must-fg)', 'High': 'var(--accent-orange)',
+                          'Medium': 'var(--accent-blue)', 'Low': 'var(--neutral-400)'} %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--misp-navy);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Review state</label>
-        <select name="state" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All states</option>
-          {% for s in review_states %}
-          <option value="{{ s }}" {{ 'selected' if state_filter == s }}>{{ s }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="Review state">
+            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
+            <select name="state" class="form-select form-select-sm" aria-label="Review state" onchange="this.form.submit()">
+              <option value="">All states</option>
+              {% for value in review_states %}
+              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="TLP">
+            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
+            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
+              <option value="">All TLP levels</option>
+              {% for value in tlp_choices %}
+              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Audience">
+            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
+            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
+              <option value="">All audiences</option>
+              {% for value in audience_choices %}
+              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Priority">
+            <span class="stat-icon icon-xs"><i class="fas fa-flag"></i></span>
+            <select name="priority" class="form-select form-select-sm" aria-label="Priority" onchange="this.form.submit()">
+              <option value="">All priorities</option>
+              {% for value in priorities %}
+              <option value="{{ value }}" {{ 'selected' if priority_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ ders | length }} request{{ 's' if ders|length != 1 }}</span>
+            {% if state_filter or tlp_filter or audience_filter or priority_filter %}
+            <a href="{{ url_for('detection_eng.review') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if state_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('detection_eng.review') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if state_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-4">{{ charts.mix('Review state', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('Status', status_counts, charts.status_colors) }}</div>
+          <div class="col-md-4">{{ charts.mix('Priority', priority_counts, priority_colors, param='priority', selected=priority_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('TLP', tlp_counts, charts.tlp_colors, param='tlp', selected=tlp_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('Audience', audience_counts, param='audience', selected=audience_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ ders | length }} request{{ 's' if ders|length != 1 else '' }}</div>
-    </form>
+    </div>
   </div>
 </div>
 
@@ -137,13 +182,13 @@
     <table class="table table-hover zsazsa-table mb-0">
       <thead>
         <tr>
-          {{ sort_th('DER', 'id', sort, dir, 'detection_eng.review', state_filter, '120px') }}
-          {{ sort_th('Title', 'title', sort, dir, 'detection_eng.review', state_filter) }}
+          {{ sort_th('DER', 'id', sort, dir, 'detection_eng.review', '120px') }}
+          {{ sort_th('Title', 'title', sort, dir, 'detection_eng.review') }}
           <th>Technique(s)</th>
           <th>Priority</th>
           <th>Status</th>
-          {{ sort_th('State', 'state', sort, dir, 'detection_eng.review', state_filter) }}
-          {{ sort_th('Published', 'date', sort, dir, 'detection_eng.review', state_filter) }}
+          {{ sort_th('State', 'state', sort, dir, 'detection_eng.review') }}
+          {{ sort_th('Published', 'date', sort, dir, 'detection_eng.review') }}
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -286,6 +331,8 @@
         {% endfor %}
       </tbody>
     </table>
+    {% elif state_filter or tlp_filter or audience_filter or priority_filter %}
+    <div class="p-4 text-muted">No detection engineering requests match these filters.</div>
     {% else %}
     <div class="p-4 text-muted">No detection engineering requests yet. <a href="{{ url_for('detection_eng.wizard_new') }}">Create one</a>.</div>
     {% endif %}

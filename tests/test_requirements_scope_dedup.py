@@ -59,7 +59,7 @@ class CreatingAndEditing(unittest.TestCase):
              mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
-            reply = self.client.post(path, data={"question": "Q?", "topic": "T", **fields})
+            reply = self.client.post(path, data={"question": "Q?", "topic": "T", "intel_level": "Strategic", **fields})
         return reply, captured
 
     def test_a_new_pir_is_stored_rather_than_erroring(self):
@@ -115,7 +115,7 @@ class FocusPointsSurviveAnEdit(unittest.TestCase):
              mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
-            self.client.post(f"/pirs/{'u' * 36}/edit", data={"question": "Q?", **fields})
+            self.client.post(f"/pirs/{'u' * 36}/edit", data={"question": "Q?", "intel_level": "Strategic", **fields})
         return captured["focus_points"]
 
     def test_every_scope_field_on_the_form_becomes_a_focus_point(self):
@@ -220,7 +220,7 @@ class GirScopeItems(unittest.TestCase):
              mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
-            self.client.post(path, data={"topic": "T", **fields})
+            self.client.post(path, data={"topic": "T", "intel_level": "Strategic", **fields})
         return captured["focus_points"]
 
     def test_a_new_gir_gets_scope_items_from_its_form(self):

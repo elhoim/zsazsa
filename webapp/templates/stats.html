@@ -4,146 +4,279 @@
 {% block page_title %}Statistics{% endblock %}
 
 {% block content %}
+<style>
+  .stats-count { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 10px; box-shadow: var(--card-shadow);
+                 padding: 1rem 1.15rem; height: 100%; position: relative; overflow: hidden; display: block; color: inherit; text-decoration: none; }
+  .stats-count::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--icon-color); }
+  a.stats-count:hover { box-shadow: var(--shadow-hover-lift); }
+  .stats-count .big { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .stats-count .of { font-size: 1rem; font-weight: 400; color: var(--text-muted); }
+  .stats-count .label { font-size: .78rem; color: var(--text-muted); margin-top: .2rem; }
+  .stats-track { height: 6px; border-radius: 3px; background: var(--surface-muted); overflow: hidden; }
+  .stats-track > div { height: 100%; border-radius: 3px; background: var(--icon-color); }
+
+  .stats-callout { border-radius: 10px; padding: .75rem 1rem; font-size: .85rem; display: flex; gap: .75rem; align-items: flex-start;
+                   background: color-mix(in srgb, var(--icon-color) 9%, var(--card-bg));
+                   border: 1px solid color-mix(in srgb, var(--icon-color) 28%, var(--card-bg)); }
+  .stats-callout .stat-icon { width: 28px; height: 28px; font-size: .8rem; border-radius: 8px; }
+  .stats-callout a { font-weight: 600; }
+
+  .stats-group { border: 1px solid var(--border-faint); border-radius: 10px; padding: 1rem; height: 100%; }
+  .stats-group-head { display: flex; align-items: center; gap: .5rem; font-weight: 600; font-size: .86rem; margin-bottom: .9rem; }
+  .stats-metric { display: flex; gap: .8rem; align-items: center; padding: .35rem 0; }
+  .stats-metric + .stats-metric { border-top: 1px dashed var(--border-light); padding-top: .7rem; margin-top: .35rem; }
+  .stats-metric .name, .stats-metric .sub { font-size: .78rem; color: var(--text-muted); }
+  a.stats-metric { color: inherit; text-decoration: none; border-radius: 8px; margin: 0 -.5rem; padding-left: .5rem; padding-right: .5rem; }
+  a.stats-metric:hover { background: var(--surface-hover); }
+  .stats-metric .figure { font-size: 1.35rem; font-weight: 700; line-height: 1.1; }
+  .stats-ring { width: 64px; height: 64px; flex-shrink: 0; }
+  .stats-ring circle { fill: none; stroke-width: 7; }
+  .stats-ring .track { stroke: var(--surface-muted); }
+  .stats-ring .arc { stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+
+  .stats-type { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) 6.5rem; gap: .7rem; align-items: center;
+                padding: .28rem .35rem; border-radius: 6px; color: inherit; text-decoration: none; font-size: .8rem; }
+  .stats-type:hover { background: var(--surface-hover); }
+  .stats-type .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stats-type .num { text-align: right; white-space: nowrap; }
+  .stats-type .num small { color: var(--text-muted); }
+  .stats-type-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; }
+  .stats-type-bar .out { background: var(--accent-blue); }
+  .stats-draft { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent-blue) 45%, var(--card-bg)) 0 4px,
+                                                   color-mix(in srgb, var(--accent-blue) 20%, var(--card-bg)) 4px 8px); }
+
+  .stats-actors { overflow-x: auto; }
+  .stats-actor { display: grid; grid-template-columns: minmax(10rem, 15rem) minmax(6rem, 1fr) repeat(3, 8.5rem) 3.5rem; gap: .7rem;
+                 align-items: center; padding: .45rem .25rem; border-bottom: 1px solid var(--border-faint); font-size: .82rem; min-width: 50rem; }
+  .stats-actor.head { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 700; }
+  .stats-actor:last-child { border-bottom: 0; }
+  .stats-actor .n { text-align: right; }
+  .stats-actor-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; }
+  .stats-actor-bar > span + span { border-left: 2px solid var(--card-bg); }
+
+  .stats-signal { border: 1px solid var(--border-subtle); border-top: 4px solid var(--icon-color); border-radius: 10px; padding: 1rem; height: 100%; }
+  .stats-steps { display: flex; gap: 4px; margin: .55rem 0 .8rem; }
+  .stats-steps > div { flex: 1; text-align: center; font-size: .62rem; font-weight: 700; color: var(--text-muted); }
+  .stats-steps > div::before { content: ""; display: block; height: 7px; border-radius: 4px; background: var(--surface-muted); margin-bottom: 3px; }
+  .stats-steps > div.on { color: var(--icon-color); }
+  .stats-steps > div.on::before { background: var(--icon-color); }
+  .stats-signal ul { list-style: none; padding: 0; margin: 0; font-size: .78rem; color: var(--text-muted); }
+  .stats-signal li { display: flex; gap: .45rem; padding: .15rem 0; }
+  .stats-signal li i { margin-top: .2rem; font-size: .7rem; }
+
+  .stats-export { display: flex; align-items: center; gap: .75rem; padding: .7rem .85rem; border-radius: 8px;
+                  border: 1px solid var(--border-light); color: inherit; text-decoration: none; }
+  .stats-export:hover { border-color: var(--icon-color); }
+</style>
+
+{# A percentage as a ring, coloured by how far along it is. #}
+{% macro ring(pct) -%}
+<svg class="stats-ring" viewBox="0 0 64 64" aria-hidden="true">
+  <circle class="track" cx="32" cy="32" r="26"></circle>
+  {% if pct %}<circle class="arc" cx="32" cy="32" r="26" stroke="{{ 'var(--accent-green)' if pct >= 50 else ('var(--accent-orange)' if pct >= 25 else 'var(--accent-red)') }}"
+          stroke-dasharray="{{ (pct * 1.6336) | round(2) }} 163.36"></circle>{% endif %}
+</svg>
+{%- endmacro %}
+
+{% macro metric(pct, name, sub) -%}
+<div class="stats-metric">
+  {{ ring(pct) }}
+  <div><div class="name">{{ name }}</div><div class="figure">{{ pct }}%</div><div class="sub">{{ sub }}</div></div>
+</div>
+{%- endmacro %}
+
+{% import "_charts.html" as charts %}
+
+{# CTI program coverage #}
+<div class="row g-3 mb-3">
+  <div class="col-sm-6 col-xl-3">
+    <a href="{{ url_for('requirements.pir_list') }}" class="stats-count" style="--icon-color:var(--accent-blue);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div><div class="big">{{ active_pir_count }} <span class="of">/ {{ pir_count }}</span></div><div class="label">Active / total PIRs</div></div>
+        <span class="stat-icon icon-sm"><i class="fas fa-star"></i></span>
+      </div>
+      <div class="stats-track mt-3"><div style="width:{{ (active_pir_count / pir_count * 100) if pir_count else 0 }}%;"></div></div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <a href="{{ url_for('requirements.gir_list') }}" class="stats-count" style="--icon-color:var(--accent-green);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div><div class="big">{{ active_gir_count }} <span class="of">/ {{ gir_count }}</span></div><div class="label">Active / total GIRs</div></div>
+        <span class="stat-icon icon-sm"><i class="fas fa-list-check"></i></span>
+      </div>
+      <div class="stats-track mt-3"><div style="width:{{ (active_gir_count / gir_count * 100) if gir_count else 0 }}%;"></div></div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <a href="{{ url_for('stakeholders.list') }}" class="stats-count" style="--icon-color:var(--accent-orange);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div><div class="big">{{ stakeholder_count }}</div><div class="label">Stakeholders</div></div>
+        <span class="stat-icon icon-sm"><i class="fas fa-users"></i></span>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    {% set unscoped = pirs_no_fp + girs_no_fp %}
+    <div class="stats-count" style="--icon-color:{{ 'var(--accent-red)' if unscoped else 'var(--accent-green)' }};">
+      <div class="d-flex justify-content-between align-items-start">
+        <div><div class="big">{{ unscoped }}</div><div class="label">Active requirements without scope items</div></div>
+        <span class="stat-icon icon-sm"><i class="fas {{ 'fa-crosshairs' if unscoped else 'fa-check' }}"></i></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if pirs_no_fp > 0 or girs_no_fp > 0 %}
+<div class="stats-callout mb-3" style="--icon-color:var(--accent-orange);">
+  <span class="stat-icon"><i class="fas fa-triangle-exclamation"></i></span>
+  <div>
+    {% if pirs_no_fp > 0 %}{{ pirs_no_fp }} active PIR{{ 's have' if pirs_no_fp != 1 else ' has' }} no scope items{% if girs_no_fp > 0 %}, and {% endif %}{% endif %}{% if girs_no_fp > 0 %}{{ girs_no_fp }} active GIR{{ 's have' if girs_no_fp != 1 else ' has' }} no scope items{% endif %}.
+    Without scope items the analyser cannot match articles to these requirements.
+    <a href="{{ url_for('requirements.pir_list') }}">Review PIRs</a> or
+    <a href="{{ url_for('requirements.gir_list') }}">GIRs</a>.
+  </div>
+</div>
+{% endif %}
 
 {% if program %}
-<div class="card content-card mb-4">
+{% set gaps = program.collection_gaps %}
+{% if gaps.pirs_without_sources > 0 or gaps.girs_without_sources > 0 %}
+<div class="stats-callout mb-3" style="--icon-color:var(--accent-blue);">
+  <span class="stat-icon"><i class="fas fa-circle-info"></i></span>
+  <div>
+    Collection gap: {% if gaps.pirs_without_sources > 0 %}{{ gaps.pirs_without_sources }} active PIR{{ 's have' if gaps.pirs_without_sources != 1 else ' has' }} no collection sources mapped{% if gaps.girs_without_sources > 0 %}, and {% endif %}{% endif %}{% if gaps.girs_without_sources > 0 %}{{ gaps.girs_without_sources }} active GIR{{ 's have' if gaps.girs_without_sources != 1 else ' has' }} no collection sources mapped{% endif %}.
+    Map collection sources on each requirement so analysts know where to look.
+    <a href="{{ url_for('requirements.pir_list') }}">Review PIRs</a>{% if gaps.girs_without_sources > 0 %} or
+    <a href="{{ url_for('requirements.gir_list') }}">GIRs</a>{% endif %}.
+  </div>
+</div>
+{% endif %}
+
+{% set rfis, products = program.rfis, program.products %}
+<div class="card content-card mt-4 mb-4">
   <div class="card-header"><i class="fas fa-heart-pulse me-2"></i>CTI program health</div>
   <div class="card-body">
     <div class="row g-3">
-      <div class="col-md-3">
-        <div class="text-muted small">Open RFIs</div>
-        <div class="h3 mb-0">{{ program.rfis.open }}
-          {% if program.rfis.overdue %}
-          <span class="badge text-bg-danger ms-1">{{ program.rfis.overdue }} overdue</span>
-          {% endif %}
+      <div class="col-xl-4 col-lg-6">
+        <div class="stats-group">
+          <div class="stats-group-head" style="--icon-color:var(--accent-purple);"><span class="stat-icon icon-sm"><i class="fas fa-circle-question"></i></span>Requests for information</div>
+          <a href="{{ url_for('rfi.rfi_list') }}" class="stats-metric" style="--icon-color:var(--accent-purple);">
+            <span class="stat-icon" style="width:64px;height:64px;border-radius:50%;font-size:1.3rem;"><i class="fas fa-inbox"></i></span>
+            <div>
+              <div class="name">Open RFIs</div>
+              <div class="figure">{{ rfis.open }}
+                {% if rfis.overdue %}<span class="chart-pill ms-1" style="--icon-color:var(--accent-red);">{{ rfis.overdue }} overdue</span>{% endif %}
+              </div>
+              <div class="sub">{{ rfis.total }} total RFIs</div>
+            </div>
+          </a>
+          {{ metric(rfis.pct_feedback_collected, 'RFI feedback collected', rfis.feedback_collected ~ ' of ' ~ rfis.total) }}
+          {{ metric(rfis.pct_on_time, 'RFI on-time delivery', 'of feedback received') }}
+          <div class="stats-metric d-block">{{ charts.mix('RFIs by status', rfis.by_status.items() | list, charts.status_colors) }}</div>
         </div>
-        <div class="text-muted small">{{ program.rfis.total }} total RFIs</div>
       </div>
-      <div class="col-md-3">
-        <div class="text-muted small">RFI feedback collected</div>
-        <div class="h3 mb-0">{{ program.rfis.pct_feedback_collected }}%</div>
-        <div class="text-muted small">{{ program.rfis.feedback_collected }} of {{ program.rfis.total }}</div>
-      </div>
-      <div class="col-md-3">
-        <div class="text-muted small">RFI on-time delivery</div>
-        <div class="h3 mb-0">{{ program.rfis.pct_on_time }}%</div>
-        <div class="text-muted small">of feedback received</div>
-      </div>
-      <div class="col-md-3">
-        <div class="text-muted small">Stakeholder coverage</div>
-        <div class="h3 mb-0">{{ program.stakeholder_coverage.pct_covered }}%</div>
-        <div class="text-muted small">{{ program.stakeholder_coverage.with_pir }} stakeholders owning an active PIR</div>
-      </div>
-    </div>
 
-    <hr class="my-3">
+      <div class="col-xl-4 col-lg-6">
+        <div class="stats-group">
+          <div class="stats-group-head" style="--icon-color:var(--accent-blue);"><span class="stat-icon icon-sm"><i class="fas fa-cubes"></i></span>Products</div>
+          {{ metric(products.pct_with_pir_link, 'Products linked to a PIR', products.with_pir_link ~ ' of ' ~ products.total ~ ' products') }}
+          {{ metric(products.pct_with_feedback, 'Products with feedback', products.with_feedback ~ ' of ' ~ products.total ~ ' products') }}
+          {% set coverage = program.pir_coverage %}
+          {{ metric(coverage.pct, 'PIR coverage (last 90 days)', coverage.covered ~ ' of ' ~ (coverage.covered + coverage.uncovered) ~ ' active PIRs with a product') }}
+          <div class="stats-metric d-block">
+            <div class="name mb-1">Products (7 / 30 days)</div>
+            <div class="d-flex align-items-baseline gap-2"><span class="figure">{{ products.last_7d }}</span><span class="text-muted">/ {{ products.last_30d }}</span></div>
+            {% set busiest = [products.last_30d, 1] | max %}
+            <div class="d-flex flex-column gap-1 mt-2" style="font-size:.72rem;color:var(--text-muted);">
+              <div class="d-flex align-items-center gap-2"><span style="width:4.2rem;">7 days</span>
+                <div class="stats-track flex-grow-1" style="--icon-color:var(--accent-blue);"><div style="width:{{ products.last_7d / busiest * 100 }}%;"></div></div></div>
+              <div class="d-flex align-items-center gap-2"><span style="width:4.2rem;">30 days</span>
+                <div class="stats-track flex-grow-1" style="--icon-color:var(--misp-navy);"><div style="width:{{ products.last_30d / busiest * 100 }}%;"></div></div></div>
+            </div>
+            <div class="sub mt-1">{{ products.total }} total products{% if products.drafts %} ({{ products.drafts }} in draft){% endif %}</div>
+          </div>
+        </div>
+      </div>
 
-    <div class="row g-3">
-      <div class="col-md-3">
-        <div class="text-muted small">Products linked to a PIR</div>
-        <div class="h3 mb-0">{{ program.products.pct_with_pir_link }}%</div>
-        <div class="text-muted small">{{ program.products.with_pir_link }} of {{ program.products.total }} products</div>
-      </div>
-      <div class="col-md-3">
-        <div class="text-muted small">Products with feedback</div>
-        <div class="h3 mb-0">{{ program.products.pct_with_feedback }}%</div>
-        <div class="text-muted small">{{ program.products.with_feedback }} of {{ program.products.total }} products</div>
-      </div>
-      <div class="col-md-3">
-        <div class="text-muted small">PIR coverage (last 90 days)</div>
-        <div class="h3 mb-0">{{ program.pir_coverage.pct }}%</div>
-        <div class="text-muted small">{{ program.pir_coverage.covered }} of {{ program.pir_coverage.covered + program.pir_coverage.uncovered }} active PIRs with a product</div>
-      </div>
-      <div class="col-md-3">
-        <div class="text-muted small">Products (7 / 30 days)</div>
-        <div class="h3 mb-0">{{ program.products.last_7d }} <span style="font-size:.9rem;font-weight:400;color:var(--text-muted)">/ {{ program.products.last_30d }}</span></div>
-        <div class="text-muted small">{{ program.products.total }} total products{% if program.products.drafts %} ({{ program.products.drafts }} in draft){% endif %}</div>
-      </div>
-    </div>
-
-    <hr class="my-3">
-
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="text-muted small mb-2">RFIs by status</div>
-        <ul class="list-unstyled small mb-0">
-          {% for status, n in program.rfis.by_status.items() %}
-          <li>{{ status }}: <strong>{{ n }}</strong></li>
+      <div class="col-xl-4 col-lg-12">
+        <div class="stats-group">
+          <div class="stats-group-head" style="--icon-color:var(--accent-orange);"><span class="stat-icon icon-sm"><i class="fas fa-people-group"></i></span>Requirements and stakeholders</div>
+          {% set coverage = program.stakeholder_coverage %}
+          {{ metric(coverage.pct_covered, 'Stakeholder coverage', coverage.with_pir ~ ' stakeholders owning an active PIR') }}
+          {% for levels, label in ((program.intel_levels.pir, 'PIRs by intel level'), (program.intel_levels.gir, 'GIRs by intel level')) %}
+          <div class="stats-metric d-block">{{ charts.mix(label, levels.most_common(), charts.intel_colors) }}</div>
           {% endfor %}
-        </ul>
+        </div>
       </div>
     </div>
 
-    {% if program.products.by_type %}
-    <hr class="my-3">
-    <div class="text-muted small mb-2">Products by type</div>
-    {% for ptype, n in program.products.by_type.items() %}
-      <a href="{{ url_for('products.index', type=ptype) }}" class="badge text-bg-light text-decoration-none me-1 mb-1">
-        {{ ptype }} <span class="ms-1 fw-bold">{{ n }}</span>
-        {%- if program.products.drafts_by_type.get(ptype) %} ({{ program.products.drafts_by_type[ptype] }} in draft){% endif %}
-      </a>
-    {% endfor %}
+    {% if products.by_type %}
+    {% set widest = products.by_type.values() | max %}
+    <div class="mt-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
+        <div class="chart-label">Products by type</div>
+        <div class="chart-legend">
+          <span><span class="chart-swatch" style="background:var(--accent-blue);"></span>Out</span>
+          <span><span class="chart-swatch stats-draft"></span>In draft</span>
+        </div>
+      </div>
+      <div class="row g-1">
+        {% for ptype, n in products.by_type | dictsort(by='value', reverse=true) %}
+        {% set drafts = products.drafts_by_type.get(ptype, 0) %}
+        <div class="col-lg-6">
+          <a href="{{ url_for('products.index', type=ptype) }}" class="stats-type">
+            <span class="name" title="{{ ptype }}">{{ ptype }}</span>
+            <span class="stats-type-bar" style="width:{{ n / widest * 100 }}%;">
+              {% if n > drafts %}<span class="out" style="flex:{{ n - drafts }};"></span>{% endif %}
+              {% if drafts %}<span class="stats-draft" style="flex:{{ drafts }};"></span>{% endif %}
+            </span>
+            <span class="num"><strong>{{ n }}</strong>{% if drafts %} <small>({{ drafts }} in draft)</small>{% endif %}</span>
+          </a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
     {% endif %}
-
-    <hr class="my-3">
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="text-muted small mb-2">PIRs by intel level</div>
-        {% for lvl, n in program.intel_levels.pir.most_common() %}
-          <span class="badge text-bg-light me-1">{{ lvl }} <span class="fw-bold ms-1">{{ n }}</span></span>
-        {% else %}
-          <span class="text-muted small">-</span>
-        {% endfor %}
-      </div>
-      <div class="col-md-6">
-        <div class="text-muted small mb-2">GIRs by intel level</div>
-        {% for lvl, n in program.intel_levels.gir.most_common() %}
-          <span class="badge text-bg-light me-1">{{ lvl }} <span class="fw-bold ms-1">{{ n }}</span></span>
-        {% else %}
-          <span class="text-muted small">-</span>
-        {% endfor %}
-      </div>
-    </div>
   </div>
 </div>
 {% endif %}
 
 {% if actor_type_product_counts %}
+{% set widest = actor_type_product_counts | map(attribute='total') | max %}
 <div class="card content-card mb-4">
   <div class="card-header d-flex align-items-center justify-content-between">
     <span><i class="fas fa-user-shield me-2"></i>Products by threat actor type</span>
     <span class="badge text-bg-light" style="font-size:.7rem;font-weight:400;">published briefings, alerts and profiles</span>
   </div>
-  <div class="card-body">
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Threat actor type</th>
-            <th class="text-end">Daily briefings</th>
-            <th class="text-end">Flash intel alerts</th>
-            <th class="text-end">Threat actor profiles</th>
-            <th class="text-end">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in actor_type_product_counts %}
-          <tr>
-            <td>{{ row.actor_type }}</td>
-            <td class="text-end">{{ row.daily_briefings }}</td>
-            <td class="text-end">{{ row.flash_intel_alerts }}</td>
-            <td class="text-end">{{ row.threat_actor_profiles }}</td>
-            <td class="text-end fw-semibold">{{ row.total }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="card-body pt-2 stats-actors">
+    <div class="stats-actor head">
+      <span>Threat actor type</span><span></span>
+      <span class="n"><span class="chart-swatch" style="background:var(--accent-blue);"></span>Daily briefings</span>
+      <span class="n"><span class="chart-swatch" style="background:var(--accent-orange);"></span>Flash intel alerts</span>
+      <span class="n"><span class="chart-swatch" style="background:var(--accent-green);"></span>Threat actor profiles</span>
+      <span class="n">Total</span>
     </div>
+    {% for row in actor_type_product_counts %}
+    <div class="stats-actor">
+      <span class="text-truncate" title="{{ row.actor_type }}">{{ row.actor_type }}</span>
+      <span class="stats-actor-bar" style="width:{{ (row.total / widest * 100) if widest else 0 }}%;">
+        {% if row.daily_briefings %}<span style="flex:{{ row.daily_briefings }};background:var(--accent-blue);" title="{{ row.daily_briefings }} daily briefing(s)"></span>{% endif %}
+        {% if row.flash_intel_alerts %}<span style="flex:{{ row.flash_intel_alerts }};background:var(--accent-orange);" title="{{ row.flash_intel_alerts }} flash intel alert(s)"></span>{% endif %}
+        {% if row.threat_actor_profiles %}<span style="flex:{{ row.threat_actor_profiles }};background:var(--accent-green);" title="{{ row.threat_actor_profiles }} threat actor profile(s)"></span>{% endif %}
+      </span>
+      <span class="n">{{ row.daily_briefings }}</span>
+      <span class="n">{{ row.flash_intel_alerts }}</span>
+      <span class="n">{{ row.threat_actor_profiles }}</span>
+      <span class="n fw-bold">{{ row.total }}</span>
+    </div>
+    {% endfor %}
   </div>
 </div>
 {% endif %}
 
 {% if maturity_signals %}
+{% set signal_colors = {'secondary': 'var(--text-muted)', 'warning': 'var(--accent-orange)',
+                        'primary': 'var(--accent-blue)', 'success': 'var(--accent-green)'} %}
 <div class="card content-card mb-4">
   <div class="card-header d-flex align-items-center justify-content-between">
     <span><i class="fas fa-chart-line me-2"></i>Observable maturity signals (CTI-CMM indicative)</span>
@@ -153,24 +286,21 @@
     <p class="text-muted small mb-3">Derived from what zsazsa can observe. These are indicative signals, not a definitive CTI-CMM score. Use the full self-assessment for an authoritative measure.</p>
     <div class="row g-3">
       {% for sig in maturity_signals %}
-      <div class="col-md-3">
-        <div class="border rounded p-3 h-100">
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <span class="fw-semibold small">{{ sig.domain }}</span>
-            <span class="badge text-bg-{{ sig.color }}">{{ sig.level }}</span>
+      <div class="col-md-6 col-xl-3">
+        <div class="stats-signal" style="--icon-color:{{ signal_colors[sig.color] }};">
+          <div class="d-flex align-items-center justify-content-between">
+            <span class="fw-semibold">{{ sig.domain }}</span>
+            <span class="chart-pill" style="font-size:.78rem;">{{ sig.level }}</span>
+          </div>
+          <div class="stats-steps">
+            {% for step in range(4) %}<div class="{{ 'on' if sig.rank and step <= sig.rank }}">CTI{{ step }}</div>{% endfor %}
           </div>
           {% if sig.observed %}
-          <ul class="list-unstyled mb-0" style="font-size:.78rem;color:var(--text-muted);">
-            {% for obs in sig.observed %}
-            <li class="mb-1"><i class="fas fa-check text-success me-1"></i>{{ obs }}</li>
-            {% endfor %}
-          </ul>
+          <ul>{% for obs in sig.observed %}<li><i class="fas fa-check text-success"></i>{{ obs }}</li>{% endfor %}</ul>
           {% endif %}
           {% if sig.gaps %}
-          <ul class="list-unstyled mb-0 mt-2" style="font-size:.78rem;color:var(--text-muted);">
-            {% for gap in sig.gaps %}
-            <li class="mb-1"><i class="fas fa-arrow-up text-warning me-1"></i>{{ gap }}</li>
-            {% endfor %}
+          <ul class="mt-2 pt-2" style="border-top:1px dashed var(--border-light);">
+            {% for gap in sig.gaps %}<li><i class="fas fa-arrow-up text-warning"></i>{{ gap }}</li>{% endfor %}
           </ul>
           {% endif %}
         </div>
@@ -181,110 +311,21 @@
 </div>
 {% endif %}
 
-<!-- CTI program coverage -->
-<div class="row g-3 mb-4">
-  <div class="col-sm-6 col-lg-3">
-    <a href="{{ url_for('requirements.pir_list') }}" class="text-decoration-none">
-    <div class="stat-card">
-      <div class="stat-icon" style="--icon-color: var(--accent-blue);"><i class="fas fa-star"></i></div>
-      <div class="stat-body">
-        <div class="stat-number">{{ active_pir_count }} <span style="font-size:1rem;font-weight:400;color:var(--text-muted)">/ {{ pir_count }}</span></div>
-        <div class="stat-label">Active / total PIRs</div>
-      </div>
-    </div>
-    </a>
-  </div>
-  <div class="col-sm-6 col-lg-3">
-    <a href="{{ url_for('requirements.gir_list') }}" class="text-decoration-none">
-    <div class="stat-card">
-      <div class="stat-icon" style="--icon-color: var(--accent-green);"><i class="fas fa-list-check"></i></div>
-      <div class="stat-body">
-        <div class="stat-number">{{ active_gir_count }} <span style="font-size:1rem;font-weight:400;color:var(--text-muted)">/ {{ gir_count }}</span></div>
-        <div class="stat-label">Active / total GIRs</div>
-      </div>
-    </div>
-    </a>
-  </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon" style="--icon-color: var(--accent-orange);"><i class="fas fa-users"></i></div>
-      <div class="stat-body">
-        <div class="stat-number">{{ stakeholder_count }}</div>
-        <div class="stat-label">Stakeholders</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon" style="--icon-color: {% if pirs_no_fp > 0 or girs_no_fp > 0 %}var(--accent-red){% else %}var(--accent-green){% endif %};">
-        <i class="fas fa-crosshairs"></i>
-      </div>
-      <div class="stat-body">
-        <div class="stat-number">{{ pirs_no_fp + girs_no_fp }}</div>
-        <div class="stat-label">Active requirements without scope items</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-{% if pirs_no_fp > 0 or girs_no_fp > 0 %}
-<div class="alert alert-warning mb-4" style="font-size:.875rem;">
-  <i class="fas fa-triangle-exclamation me-2"></i>
-  {% if pirs_no_fp > 0 %}{{ pirs_no_fp }} active PIR{{ 's have' if pirs_no_fp != 1 else ' has' }} no scope items{% if girs_no_fp > 0 %}, and {% endif %}{% endif %}
-  {% if girs_no_fp > 0 %}{{ girs_no_fp }} active GIR{{ 's have' if girs_no_fp != 1 else ' has' }} no scope items{% endif %}.
-  Without scope items the analyser cannot match articles to these requirements.
-  <a href="{{ url_for('requirements.pir_list') }}" class="alert-link ms-1">Review PIRs</a> or
-  <a href="{{ url_for('requirements.gir_list') }}" class="alert-link">GIRs</a>.
-</div>
-{% endif %}
-
-{% if program and (program.collection_gaps.pirs_without_sources > 0 or program.collection_gaps.girs_without_sources > 0) %}
-<div class="alert alert-info mb-4" style="font-size:.875rem;">
-  <i class="fas fa-circle-info me-2"></i>
-  Collection gap:
-  {% if program.collection_gaps.pirs_without_sources > 0 %}
-    {{ program.collection_gaps.pirs_without_sources }} active PIR{{ 's have' if program.collection_gaps.pirs_without_sources != 1 else ' has' }} no collection sources mapped
-    {%- if program.collection_gaps.girs_without_sources > 0 %}, and {% endif %}
-  {% endif %}
-  {% if program.collection_gaps.girs_without_sources > 0 %}
-    {{ program.collection_gaps.girs_without_sources }} active GIR{{ 's have' if program.collection_gaps.girs_without_sources != 1 else ' has' }} no collection sources mapped
-  {% endif %}.
-  Map collection sources on each requirement so analysts know where to look.
-  <a href="{{ url_for('requirements.pir_list') }}" class="alert-link ms-1">Review PIRs</a>{% if program.collection_gaps.girs_without_sources > 0 %} or
-  <a href="{{ url_for('requirements.gir_list') }}" class="alert-link">GIRs</a>{% endif %}.
-</div>
-{% endif %}
-
 <div class="row g-4">
   <div class="col-lg-6">
-    <div class="card content-card">
-      <div class="card-header"><i class="fas fa-file-export me-2"></i>Export</div>
-      <div class="card-body d-flex flex-column gap-2">
-        <a href="{{ url_for('export.pirs') }}" class="btn btn-outline-primary btn-sm">
-          <i class="fas fa-download me-2"></i>PIRs as Markdown
-        </a>
-        <a href="{{ url_for('export.girs') }}" class="btn btn-outline-success btn-sm">
-          <i class="fas fa-download me-2"></i>GIRs as Markdown
-        </a>
-        <a href="{{ url_for('export.stakeholders') }}" class="btn btn-outline-secondary btn-sm">
-          <i class="fas fa-download me-2"></i>Stakeholders as Markdown
-        </a>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-6">
-    <div class="card content-card">
+    <div class="card content-card h-100">
       <div class="card-header"><i class="fas fa-gauge-high me-2"></i>Program health</div>
       <div class="card-body p-0">
         <ul class="list-unstyled mb-0">
-          <li class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
-            <span class="text-muted small">PIRs with scope items</span>
-            <span class="fw-semibold">{{ active_pir_count - pirs_no_fp }} / {{ active_pir_count }}</span>
+          {% for label, done, of in (('PIRs with scope items', active_pir_count - pirs_no_fp, active_pir_count),
+                                     ('GIRs with scope items', active_gir_count - girs_no_fp, active_gir_count)) %}
+          <li class="px-3 py-2 border-bottom">
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="text-muted small">{{ label }}</span><span class="fw-semibold">{{ done }} / {{ of }}</span>
+            </div>
+            <div class="stats-track mt-1" style="--icon-color:var(--accent-green);"><div style="width:{{ (done / of * 100) if of else 0 }}%;"></div></div>
           </li>
-          <li class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
-            <span class="text-muted small">GIRs with scope items</span>
-            <span class="fw-semibold">{{ active_gir_count - girs_no_fp }} / {{ active_gir_count }}</span>
-          </li>
+          {% endfor %}
           <li class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
             <span class="text-muted small">PIRs with an owner</span>
             <span class="fw-semibold">-</span>
@@ -294,6 +335,22 @@
             <span class="fw-semibold">-</span>
           </li>
         </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card content-card h-100">
+      <div class="card-header"><i class="fas fa-file-export me-2"></i>Export</div>
+      <div class="card-body d-flex flex-column gap-2">
+        {% for endpoint, label, icon, color in (('export.pirs', 'PIRs as Markdown', 'fa-star', 'var(--accent-blue)'),
+                                                ('export.girs', 'GIRs as Markdown', 'fa-list-check', 'var(--accent-green)'),
+                                                ('export.stakeholders', 'Stakeholders as Markdown', 'fa-users', 'var(--accent-orange)')) %}
+        <a href="{{ url_for(endpoint) }}" class="stats-export" style="--icon-color:{{ color }};">
+          <span class="stat-icon icon-sm"><i class="fas {{ icon }}"></i></span>
+          <span class="flex-grow-1 fw-semibold" style="font-size:.84rem;">{{ label }}</span>
+          <i class="fas fa-download text-muted"></i>
+        </a>
+        {% endfor %}
       </div>
     </div>
   </div>

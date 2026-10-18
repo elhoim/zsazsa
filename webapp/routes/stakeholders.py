@@ -1,9 +1,11 @@
+from collections import Counter
+
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from notifier import dispatcher
 from webapp import audit, misp_session, misp_store, org_store
 from webapp.models import cti_products, STAKEHOLDER_ROLES, TLP_LEVELS
-from webapp.utils import product_detail_url
+from webapp.utils import matching, product_detail_url
 
 bp = Blueprint("stakeholders", __name__)
 
@@ -184,23 +186,42 @@ def list_stakeholders():
         key=lambda v: (org_map.get(v, v) or "").lower(),
     )
     org_options = [(v, org_map.get(v, v)) for v in org_values]
+    role_options = sorted({s.role for s in stakeholders if s.role}, key=str.lower)
+    product_options = sorted({p for s in stakeholders for p in s.products}, key=str.lower)
 
     type_filter = (request.args.get("type") or "").strip()
     org_filter = (request.args.get("organization") or "").strip()
+    role_filter = (request.args.get("role") or "").strip()
+    product_filter = (request.args.get("product") or "").strip()
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
     if type_filter:
-        stakeholders = [s for s in stakeholders if s.stakeholder_type == type_filter]
+        tests["type"] = lambda s: s.stakeholder_type == type_filter
     if org_filter:
-        stakeholders = [s for s in stakeholders if s.organization == org_filter]
-    stakeholders = _sort_stakeholders(stakeholders, request.args.get("sort"), request.args.get("dir"))
+        tests["organization"] = lambda s: s.organization == org_filter
+    if role_filter:
+        tests["role"] = lambda s: s.role == role_filter
+    if product_filter:
+        tests["product"] = lambda s: product_filter in s.products
+    shown = _sort_stakeholders(matching(stakeholders, tests), request.args.get("sort"), request.args.get("dir"))
+    by_product = matching(stakeholders, tests, skip="product")
 
     return render_template(
         "stakeholders/list.html",
-        stakeholders=stakeholders,
+        stakeholders=shown,
+        type_counts=Counter(s.stakeholder_type for s in matching(stakeholders, tests, skip="type")),
+        role_counts=Counter(s.role or "Unspecified" for s in matching(stakeholders, tests, skip="role")).most_common(),
+        subscription_counts=Counter(p for s in by_product for p in s.products).most_common(),
+        unsubscribed=sum(1 for s in by_product if not s.products),
         owned_records=misp_store.records_owned_by_stakeholders(),
         org_map=org_map,
         org_options=org_options,
+        role_options=role_options,
+        product_options=product_options,
         type_filter=type_filter,
         org_filter=org_filter,
+        role_filter=role_filter,
+        product_filter=product_filter,
     )
 
 

@@ -75,9 +75,10 @@ def _offline_patches(tmp):
     source = SimpleNamespace(uuid="66666666-7777-8888-9999-000000000000",
                              name=SOURCE_NAME, enabled=True)
     stakeholder = SimpleNamespace(id="sh-1", uuid="sh-1", name=BREAKOUT, organization="", email="",
-                                  tlp_clearance="amber", influence=5, interest=5)
+                                  tlp_clearance="amber", influence=5, interest=5, role="SOC",
+                                  stakeholder_type="Internal", products=[])
     feed = SimpleNamespace(uuid="f" * 36, id="f" * 36, feed_id="FEED-001", name=BREAKOUT,
-                           tlp="clear", review_state="draft", cache_interval="")
+                           tlp="clear", audience="", review_state="draft", cache_interval="")
     briefing = SimpleNamespace(
         uuid=BRIEFING_UUID, date=BREAKOUT, title="Daily briefing", author="", tlp="amber",
         escalations="", notes="", detection_rules="", summary="", summary_stale=False,

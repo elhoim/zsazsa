@@ -14,6 +14,7 @@ from flask import (Blueprint, Response, flash, jsonify, redirect, render_templat
 
 from webapp import audit, misp_session, misp_store, notify_jobs
 from webapp.models import cti_products, TLP_LEVELS
+from webapp.utils import matching, ordered_counts
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,16 @@ def _sla_status(rfi):
     if delta <= 1:
         return ("amber", delta)
     return ("green", delta)
+
+
+# The SLA states as the bar above the list names them, in its order.
+SLA_LABELS = ["Overdue", "Due soon", "No due date", "On track", "Done"]
+
+
+def _sla_label(state, days):
+    if state == "amber" and days is None:
+        return "No due date"
+    return {"red": "Overdue", "amber": "Due soon", "green": "On track", "done": "Done"}[state]
 
 
 def _output_formats(form):
@@ -132,17 +143,43 @@ def _sort_rfis(rfis, sort, direction):
 @bp.route("/")
 def rfi_list():
     rfis = misp_store.list_rfis()
-    status_filter = (request.args.get("status") or "").strip()
-    if status_filter:
-        rfis = [r for r in rfis if r.status == status_filter]
-    rfis = _sort_rfis(rfis, request.args.get("sort"), request.args.get("dir"))
     sla_map = {r.id: _sla_status(r) for r in rfis}
+    sla = {id_: _sla_label(*status) for id_, status in sla_map.items()}
+    status_filter = (request.args.get("status") or "").strip()
+    priority_filter = (request.args.get("priority") or "").strip()
+    sla_filter = (request.args.get("sla") or "").strip()
+    # Closed RFIs are done with, so the list leaves them out until asked for
+    # them, or for their status.
+    show_closed = request.args.get("closed") == "1"
+    hide_closed = not status_filter and not show_closed
+
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
+    if status_filter:
+        tests["status"] = lambda r: r.status == status_filter
+    if priority_filter:
+        tests["priority"] = lambda r: r.priority == priority_filter
+    if sla_filter:
+        tests["sla"] = lambda r: sla[r.id] == sla_filter
+    if hide_closed:
+        tests["closed"] = lambda r: r.status != "Closed"
+    shown = _sort_rfis(matching(rfis, tests), request.args.get("sort"), request.args.get("dir"))
     return render_template(
         "rfi/list.html",
-        rfis=rfis,
+        rfis=shown,
         sla_map=sla_map,
         statuses=RFI_STATUSES,
+        priorities=RFI_PRIORITIES,
+        sla_labels=SLA_LABELS,
         status_filter=status_filter,
+        priority_filter=priority_filter,
+        sla_filter=sla_filter,
+        show_closed=show_closed,
+        hide_closed=hide_closed,
+        closed_count=sum(1 for r in matching(rfis, tests, skip="closed") if r.status == "Closed"),
+        status_counts=ordered_counts((r.status for r in shown), RFI_STATUSES),
+        priority_counts=ordered_counts((r.priority for r in matching(rfis, tests, skip="priority")), RFI_PRIORITIES),
+        sla_counts=ordered_counts((sla[r.id] for r in matching(rfis, tests, skip="sla")), SLA_LABELS),
         triage_checklist=RFI_TRIAGE_CHECKLIST,
     )
 

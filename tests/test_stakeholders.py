@@ -284,6 +284,58 @@ class Pages(TempDatabase):
         self.assertEqual(update.call_args.args[1]["name"], "Ada Lovelace")
         self.assertTrue(reply.location.endswith(f"/stakeholders/{UUID}"))
 
+    STAKEHOLDERS = [
+        _stakeholder(name="Ada", role="SOC", products=["Flash intel alert", "Vulnerability advisory"]),
+        _stakeholder(uuid="b" * 36, id="b" * 36, name="Bob", role="SOC", products=["Flash intel alert"]),
+        _stakeholder(uuid="c" * 36, id="c" * 36, name="Cy", role="", stakeholder_type="External"),
+    ]
+
+    def listed(self, query=""):
+        with mock.patch.object(misp_store, "list_stakeholders", return_value=self.STAKEHOLDERS), \
+             mock.patch.object(misp_store, "records_owned_by_stakeholders", return_value={}):
+            return BeautifulSoup(self.client.get(f"/stakeholders/{query}").data, "html.parser")
+
+    def names(self, page):
+        return [a.get_text() for a in page.select("tbody tr td:first-child a")]
+
+    def test_the_list_counts_types_roles_and_subscriptions(self):
+        page = self.listed()
+        strip = page.select_one(".list-stats").get_text(" ", strip=True)
+        for shown in ("2 Internal 1 External", "SOC 2", "Unspecified 1", "1 without any",
+                      "Flash intel alert 2", "Vulnerability advisory 1"):
+            self.assertIn(shown, strip)
+        self.assertEqual(len(page.select("tbody tr")), 3)
+
+    def test_a_click_on_a_bar_filters_the_list_and_sets_the_dropdown(self):
+        page = self.listed()
+        role = page.select_one('.list-stats a.chart-filter[href*="role="]')
+        product = page.select_one(".list-stats a.subscription")
+        internal = page.select_one(".list-stats a.stakeholder-type")
+        self.assertEqual((role["href"], product["href"], internal["href"]),
+                         ("/stakeholders/?role=SOC", "/stakeholders/?product=Flash+intel+alert",
+                          "/stakeholders/?type=Internal"))
+        for query, field, value, shown in (("?role=SOC", "role", "SOC", ["Ada", "Bob"]),
+                                           ("?product=Vulnerability+advisory", "product", "Vulnerability advisory", ["Ada"]),
+                                           ("?type=External", "type", "External", ["Cy"])):
+            with self.subTest(query):
+                filtered = self.listed(query)
+                self.assertEqual(self.names(filtered), shown)
+                self.assertEqual(filtered.select_one(f'select[name="{field}"] option[selected]')["value"], value)
+
+    def test_a_bar_still_offers_every_choice_and_its_choice_takes_the_filter_off(self):
+        """Counted from the list it filters, the bar would only show the one
+        choice made, and no other could be picked."""
+        page = self.listed("?type=External&role=SOC")
+        self.assertEqual(self.names(page), [])
+        strip = page.select_one(".list-stats").get_text(" ", strip=True)
+        self.assertIn("2 Internal 0 External", strip)
+        self.assertIn("Unspecified 1", strip)
+        page = self.listed("?type=External")
+        self.assertIn("2 Internal 1 External", page.select_one(".list-stats").get_text(" ", strip=True))
+        external = page.select(".list-stats a.stakeholder-type")[1]
+        self.assertIn("selected", external["class"])
+        self.assertEqual(external["href"], "/stakeholders/")
+
     def test_a_product_without_a_stored_mode_keeps_the_default(self):
         """The hidden mode field said "None" for it."""
         with mock.patch.object(misp_store, "get_stakeholder", return_value=_stakeholder()):

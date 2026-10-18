@@ -21,7 +21,8 @@ from webapp.routes.source_event_utils import (
 
 from core.rulezet_lookup import validate_rule
 from webapp import audit, branding, misp_session, misp_store, notify_jobs, product_log
-from webapp.utils import md_to_html, sort_products
+from webapp.models import STAKEHOLDER_ROLES
+from webapp.utils import TLP_NAMES, matching, md_to_html, ordered_counts, sort_products, tlp_counts, tlp_of
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("detection_eng", __name__, url_prefix="/products/detection-eng")
@@ -121,18 +122,47 @@ def _start_der_delivery(der_id, uuid, reason):
     )
 
 
+# The priorities, most urgent first, as the list's filter and bar order them.
+PRIORITIES = misp_store.DER_PRIORITIES[::-1]
+
+
 @bp.route("/")
 def review():
-    state_filter = (request.args.get("state") or "").strip() or None
+    state_filter = (request.args.get("state") or "").strip()
+    tlp_filter = (request.args.get("tlp") or "").strip()
+    audience_filter = (request.args.get("audience") or "").strip()
+    priority_filter = (request.args.get("priority") or "").strip()
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
-    ders = misp_store.list_ders(review_state=state_filter)
-    sort_products(ders, sort, direction)
+    all_ders = misp_store.list_ders()
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
+    if state_filter:
+        tests["state"] = lambda d: d.review_state == state_filter
+    if tlp_filter:
+        tests["tlp"] = lambda d: tlp_of(d) == tlp_filter
+    if audience_filter:
+        tests["audience"] = lambda d: misp_store.has_audience(d, audience_filter)
+    if priority_filter:
+        tests["priority"] = lambda d: d.priority == priority_filter
+    ders = sort_products(matching(all_ders, tests), sort, direction)
     return render_template(
         "detection_eng/review.html",
         ders=ders,
-        state_filter=state_filter or "",
+        state_filter=state_filter,
         review_states=misp_store.DER_REVIEW_STATES,
+        priority_filter=priority_filter,
+        priorities=PRIORITIES,
+        state_counts=ordered_counts((d.review_state for d in matching(all_ders, tests, skip="state")),
+                                    misp_store.DER_REVIEW_STATES),
+        status_counts=ordered_counts((d.status for d in ders), misp_store.DER_STATUSES),
+        priority_counts=ordered_counts((d.priority for d in matching(all_ders, tests, skip="priority")), PRIORITIES),
+        tlp_filter=tlp_filter,
+        audience_filter=audience_filter,
+        tlp_choices=TLP_NAMES,
+        audience_choices=STAKEHOLDER_ROLES,
+        tlp_counts=tlp_counts(matching(all_ders, tests, skip="tlp")),
+        audience_counts=misp_store.audience_counts(matching(all_ders, tests, skip="audience")),
         sort=sort,
         dir=direction,
     )

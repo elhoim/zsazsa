@@ -3,7 +3,8 @@
 Products, RFIs and stakeholders point at a requirement by UUID, so an update of
 one that has gone fails rather than making a new one. The status of a PIR and an
 RFI changes through triage and the status board only, never through the edit
-form, and a triage is taken once. A product or an RFI is linked to an agreed PIR. Matching reads only Active requirements, so a
+form, and a triage is taken once. A PIR or a GIR is not saved from its form
+without an intelligence level. A product or an RFI is linked to an agreed PIR. Matching reads only Active requirements, so a
 change of status refreshes it. A product records the PIR it answers on its
 object, which is where the statistics and the stakeholder page have to look.
 
@@ -20,12 +21,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from bs4 import BeautifulSoup
 from flask import Flask
 from pymisp import MISPEvent, PyMISP
 
 import config
 from notifier import dispatcher
-from webapp import misp_store
+from webapp import collection_cache, create_app, misp_store
+from webapp.models import INTEL_LEVELS
 from webapp.routes import detection_eng, requirements, rfi, stats, threat_actor_profile, vea
 
 UUID = "5f0c7a3e-1b2c-4d5e-8f90-a1b2c3d4e5f6"
@@ -90,7 +93,7 @@ class StatusStaysOutOfTheEditForm(unittest.TestCase):
     def test_a_pir_edit_keeps_the_stored_status_and_intake(self):
         pir = _pir(intake_status="acknowledged", acknowledged_by="lead@example.org")
         data = self.capture(f"/pirs/{UUID}/edit", "update_pir",
-                            {"question": "Who targets the grid now?", "status": "Active"},
+                            {"question": "Who targets the grid now?", "status": "Active", "intel_level": "Strategic"},
                             getter="get_pir", stored=pir)
         self.assertEqual(data["status"], "Pending")
         self.assertEqual(data["intake_status"], "acknowledged")
@@ -99,7 +102,7 @@ class StatusStaysOutOfTheEditForm(unittest.TestCase):
 
     def test_a_gir_edit_ignores_a_status_it_does_not_know(self):
         gir = SimpleNamespace(uuid=UUID, gir_id="GIR-001", status="Active", focus_points=[])
-        data = self.capture(f"/girs/{UUID}/edit", "update_gir", {"topic": "t", "status": "Hacked"},
+        data = self.capture(f"/girs/{UUID}/edit", "update_gir", {"topic": "t", "status": "Hacked", "intel_level": "Tactical"},
                             getter="get_gir", stored=gir)
         self.assertEqual(data["status"], "Active")
 
@@ -112,6 +115,56 @@ class StatusStaysOutOfTheEditForm(unittest.TestCase):
         data = self.capture(f"/rfis/{UUID}/edit", "update_rfi", {"question": "q", "status": "Delivered"},
                             stored=stored)
         self.assertEqual(data["status"], "New")
+
+
+class IntelligenceLevelRequired(unittest.TestCase):
+    """A PIR or GIR is saved only with an intelligence level ticked. The form
+    blocks the submit without one, and the routes refuse it too, as they refuse
+    a value the form does not offer."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        galaxies = {"galaxy_countries": [], "galaxy_sectors": [], "galaxy_threat_actors": [],
+                    "galaxy_mitre_attack": [], "intel_levels": INTEL_LEVELS}
+        for patcher in (mock.patch.object(config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True),
+                        mock.patch.object(config, "LOG_FILE", str(Path(tmp.name) / "test.log"), create=True),
+                        mock.patch.object(config, "MISP_SESSION_COOKIE_NAME", "MISP-test", create=True),
+                        mock.patch.object(config, "MISP_SESSION_REDIRECT_TO_LOGIN", False),
+                        mock.patch.object(collection_cache, "start_worker"),
+                        mock.patch.object(misp_store, "list_stakeholders", return_value=[]),
+                        mock.patch.object(misp_store, "get_all_collection_source_labels", return_value=[]),
+                        mock.patch.object(misp_store, "get_pir", return_value=_pir()),
+                        mock.patch.object(misp_store, "get_gir", return_value=SimpleNamespace(
+                            uuid=UUID, gir_id="GIR-001", topic="t", status="Active", focus_points=[],
+                            intel_level=[], misp_url="")),
+                        mock.patch.object(requirements, "_galaxy_context", return_value=galaxies),
+                        mock.patch("webapp.audit.record")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.client = create_app().test_client()
+        with self.client.session_transaction() as session:
+            session["_csrf_token"] = "token"
+
+    def test_a_save_without_one_is_refused(self):
+        for path, store_call in (("/pirs/new", "create_pir"), (f"/pirs/{UUID}/edit", "update_pir"),
+                                 ("/girs/new", "create_gir"), (f"/girs/{UUID}/edit", "update_gir")):
+            for levels in ([], ["Nonsense"]):
+                with self.subTest(path=path, levels=levels), \
+                     mock.patch.object(misp_store, store_call) as store:
+                    reply = self.client.post(path, data={"csrf_token": "token", "question": "q", "topic": "t",
+                                                             "intel_level": levels})
+                    store.assert_not_called()
+                    self.assertEqual(reply.status_code, 200)
+                    self.assertIn(requirements.INTEL_LEVEL_REQUIRED, reply.get_data(as_text=True))
+
+    def test_the_form_marks_it_required(self):
+        for path in ("/pirs/new", "/girs/new"):
+            with self.subTest(path):
+                page = BeautifulSoup(self.client.get(path).data, "html.parser")
+                label = page.find("label", string="Intelligence level")
+                self.assertIn("required-label", label["class"])
+                self.assertIsNotNone(page.select_one("#intel-level-warn"))
 
 
 class RfiPirChoice(unittest.TestCase):

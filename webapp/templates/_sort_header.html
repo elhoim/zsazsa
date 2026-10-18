@@ -1,9 +1,10 @@
 {# Sortable table header cell. Links back to `endpoint` toggling the direction,
-   preserving the review-state filter. `sort`/`dir` are the active sort. #}
-{% macro sort_th(label, key, sort, dir, endpoint, state_filter="", width="") %}
+   keeping the page's filters. `sort`/`dir` are the active sort. Import with
+   context, for the filters. #}
+{% macro sort_th(label, key, sort, dir, endpoint, width="") %}
 {% set next_dir = 'desc' if (sort == key and dir == 'asc') else 'asc' %}
 <th{% if width %} style="width:{{ width }}"{% endif %}>
-  <a href="{{ url_for(endpoint, sort=key, dir=next_dir, state=(state_filter or none)) }}"
+  <a href="{{ url_for(endpoint, **dict(request.args.to_dict(), sort=key, dir=next_dir)) }}"
      class="text-decoration-none text-reset">
     {{ label }}
     {% if sort == key %}<i class="fas fa-caret-{{ 'up' if dir == 'asc' else 'down' }} ms-1"></i>

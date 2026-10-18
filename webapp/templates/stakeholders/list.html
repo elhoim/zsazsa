@@ -17,33 +17,120 @@
 {% endblock %}
 
 {% block content %}
-<div class="card content-card mb-3">
+<style>
+  .list-stats .figure { font-size: 1rem; font-weight: 700; line-height: 1; }
+  .stakeholder-type { color: inherit; text-decoration: none; white-space: nowrap; }
+  .stakeholder-type:hover .figure { color: var(--accent-blue); }
+  .stakeholder-type.selected .figure { color: var(--accent-blue); text-decoration: underline; }
+  .stakeholder-type.faded, .subscription.faded { opacity: .45; }
+  .subscriptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .05rem 1.2rem; }
+  .subscription { color: inherit; text-decoration: none; border-radius: 4px; display: grid; grid-template-columns: minmax(0, 1fr) 3.5rem 1.2rem; gap: .4rem; align-items: center; font-size: .74rem; }
+  .subscription:hover { background: var(--surface-hover); }
+  .subscription.selected .name { font-weight: 600; text-decoration: underline; }
+  .subscription .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .subscription .chart-bar { margin-top: 0; }
+  .subscription .n { text-align: right; font-weight: 600; }
+</style>
+{% import "_charts.html" as charts with context %}
+
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-orange);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Type</label>
-        <select name="type" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All</option>
-          <option value="Internal" {{ 'selected' if type_filter == 'Internal' }}>Internal</option>
-          <option value="External" {{ 'selected' if type_filter == 'External' }}>External</option>
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="Type">
+            <span class="stat-icon icon-xs"><i class="fas fa-circle-half-stroke"></i></span>
+            <select name="type" class="form-select form-select-sm" aria-label="Type" onchange="this.form.submit()">
+              <option value="">All types</option>
+              <option value="Internal" {{ 'selected' if type_filter == 'Internal' }}>Internal</option>
+              <option value="External" {{ 'selected' if type_filter == 'External' }}>External</option>
+            </select>
+          </div>
+          <div class="filter" title="Organisation">
+            <span class="stat-icon icon-xs"><i class="fas fa-sitemap"></i></span>
+            <select name="organization" class="form-select form-select-sm" aria-label="Organisation" onchange="this.form.submit()">
+              <option value="">All organisations</option>
+              {% for value, label in org_options %}
+              <option value="{{ value }}" {{ 'selected' if org_filter == value }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Role">
+            <span class="stat-icon icon-xs"><i class="fas fa-user-tag"></i></span>
+            <select name="role" class="form-select form-select-sm" aria-label="Role" onchange="this.form.submit()">
+              <option value="">All roles</option>
+              {% for role in role_options %}
+              <option value="{{ role }}" {{ 'selected' if role_filter == role }}>{{ role }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Product subscription">
+            <span class="stat-icon icon-xs"><i class="fas fa-cubes"></i></span>
+            <select name="product" class="form-select form-select-sm" aria-label="Product subscription" onchange="this.form.submit()">
+              <option value="">All subscriptions</option>
+              {% for product in product_options %}
+              <option value="{{ product }}" {{ 'selected' if product_filter == product }}>{{ product }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ stakeholders | length }} stakeholder{{ 's' if stakeholders|length != 1 }}</span>
+            {% if type_filter or org_filter or role_filter or product_filter %}
+            <a href="{{ url_for('stakeholders.list') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      <div class="col-auto">
-        <label class="form-label small mb-1">Organisation</label>
-        <select name="organization" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All organisations</option>
-          {% for value, label in org_options %}
-          <option value="{{ value }}" {{ 'selected' if org_filter == value }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      {% if type_filter or org_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('stakeholders.list') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+
+      {% if role_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-2">
+            <div class="chart-label mb-1">Internal | External</div>
+            <div class="d-flex flex-wrap gap-2 mb-1">
+              {% for kind, color in (('Internal', 'var(--accent-blue)'), ('External', 'var(--text-muted)')) %}
+              <a href="{{ charts.filtered_url('type', kind, type_filter) }}"
+                 class="stakeholder-type{{ ' selected' if type_filter == kind }}{{ ' faded' if type_filter and type_filter != kind }}"
+                 title="{{ 'Show all again' if type_filter == kind else 'Show only ' ~ kind | lower ~ ' stakeholders' }}">
+                <span class="figure">{{ type_counts[kind] }}</span>
+                <span class="small text-muted"><span class="chart-swatch ms-1" style="background:{{ color }};"></span>{{ kind }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            <div class="chart-segbar">
+              {% for kind, color in (('Internal', 'var(--accent-blue)'), ('External', 'var(--text-muted)')) if type_counts[kind] %}
+              <a href="{{ charts.filtered_url('type', kind, type_filter) }}" title="{{ kind }}: {{ type_counts[kind] }}"
+                 style="flex:{{ type_counts[kind] }};background:{{ color }};{{ 'opacity:.3;' if type_filter and type_filter != kind }}"></a>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-md-4">{{ charts.mix('Roles', role_counts, param='role', selected=role_filter) }}</div>
+          <div class="col-md-6">
+            <div class="d-flex justify-content-between align-items-baseline mb-1">
+              <span class="chart-label">Product subscriptions</span>
+              {% if unsubscribed %}<span class="text-muted" style="font-size:.72rem;">{{ unsubscribed }} without any</span>{% endif %}
+            </div>
+            {% if subscription_counts %}
+            {% set most = subscription_counts[0][1] %}
+            <div class="subscriptions">
+              {% for product, n in subscription_counts %}
+              <a href="{{ charts.filtered_url('product', product, product_filter) }}"
+                 class="subscription{{ ' selected' if product_filter == product }}{{ ' faded' if product_filter and product_filter != product }}"
+                 title="{{ 'Show all again' if product_filter == product else 'Show only the subscribers to ' ~ product }}">
+                <span class="name">{{ product }}</span>
+                <span class="chart-bar" style="width:{{ (n / most * 100) | round(1) }}%;"><span style="flex:1;background:var(--accent-orange);"></span></span>
+                <span class="n">{{ n }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            {% else %}
+            <span class="text-muted small">-</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ stakeholders | length }} stakeholder{{ 's' if stakeholders|length != 1 }}</div>
-    </form>
+    </div>
   </div>
 </div>
 

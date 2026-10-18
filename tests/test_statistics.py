@@ -21,11 +21,12 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from collections import Counter
 from types import SimpleNamespace
 from unittest import mock
 
 from bs4 import BeautifulSoup
-from flask import Flask
+from flask import Flask, url_for
 from pymisp import MISPEvent, PyMISP
 
 import config
@@ -59,9 +60,9 @@ def _product(published=None, changed=1, tag='zsazsa:ctiproduct="flash-intel"', l
     return event
 
 
-def _pir(uuid=PIR, pir_id="PIR-001", status="Active", owner_uuid=""):
+def _pir(uuid=PIR, pir_id="PIR-001", status="Active", owner_uuid="", intel_level=()):
     return SimpleNamespace(uuid=uuid, pir_id=pir_id, status=status, owner_uuid=owner_uuid,
-                           intel_level=[], collection_sources=[], focus_points=[])
+                           intel_level=list(intel_level), collection_sources=[], focus_points=[])
 
 
 def _metrics(products, pirs=(), stakeholders=(), misp=None):
@@ -127,6 +128,13 @@ class ProgramHealth(unittest.TestCase):
         self.assertEqual(metrics["by_type"], {"Flash intel alert": 3, "Threat actor profile": 1,
                                               "Indicator feed": 1})
         self.assertEqual(metrics["drafts_by_type"], {"Flash intel alert": 2, "Threat actor profile": 1})
+
+    def test_a_pir_counts_under_each_of_its_intel_levels(self):
+        """Only the first one counted, so the statistics page and the PIR list
+        gave different numbers for the same PIRs."""
+        pirs = [_pir(intel_level=["Strategic", "Operational"]), _pir(pir_id="PIR-002")]
+        self.assertEqual(_metrics([], pirs)["intel_levels"]["pir"],
+                         {"Strategic": 1, "Operational": 1, "Unspecified": 1})
 
     def test_a_stakeholder_is_covered_by_an_active_pir_they_own(self):
         pirs = [_pir(owner_uuid="ada"), _pir(pir_id="PIR-002", status="Pending", owner_uuid="bob")]
@@ -285,7 +293,7 @@ class SourceCounts(unittest.TestCase):
             self.assertEqual(misp_store.data_collection_source_counts(), [{"source_feed": "A", "n": 3}])
 
 
-class AuditLog(_TempDatabase):
+class _App(_TempDatabase):
     def setUp(self):
         super().setUp()
         for patcher in (
@@ -298,8 +306,15 @@ class AuditLog(_TempDatabase):
             self.addCleanup(patcher.stop)
         self.client = create_app().test_client()
 
+    def soup(self, path):
+        response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        return BeautifulSoup(response.data, "html.parser")
+
+
+class AuditLog(_App):
     def page(self, query=""):
-        return BeautifulSoup(self.client.get(f"/logs{query}").data, "html.parser").get_text(" ", strip=True)
+        return self.soup(f"/logs{query}").get_text(" ", strip=True)
 
     def write(self, n):
         with core_db.row_connection() as db:
@@ -317,6 +332,115 @@ class AuditLog(_TempDatabase):
     def test_a_short_list_does_not(self):
         self.write(3)
         self.assertNotIn("The newest 200", self.page())
+
+
+class StatisticsPage(_App):
+    """Every figure the page showed before it had charts is still on it."""
+
+    PROGRAM = {
+        "rfis": {"total": 7, "by_status": {"Acknowledged": 2, "Closed": 4, "In Progress": 1}, "open": 3, "overdue": 3,
+                 "feedback_collected": 1, "feedback_met": 1, "feedback_on_time": 1,
+                 "pct_feedback_collected": 14.3, "pct_on_time": 100.0},
+        "products": {"total": 32, "drafts": 8, "by_type": {"Flash intel alert": 8, "Daily threat briefing": 9},
+                     "drafts_by_type": {"Daily threat briefing": 5}, "with_pir_link": 6, "with_feedback": 5,
+                     "last_30d": 5, "last_7d": 2, "pct_with_pir_link": 18.8, "pct_with_feedback": 15.6},
+        "intel_levels": {"pir": Counter({"Operational": 5, "Strategic": 2}), "gir": Counter()},
+        "stakeholder_coverage": {"with_pir": 2, "without_pir": 8, "pct_covered": 20.0},
+        "pir_coverage": {"covered": 0, "uncovered": 2, "pct": 0.0},
+        "collection_gaps": {"pirs_with_sources": 1, "pirs_without_sources": 1,
+                            "girs_with_sources": 0, "girs_without_sources": 0},
+    }
+
+    def setUp(self):
+        super().setUp()
+        pirs = [_pir(), _pir(uuid="p" * 36, pir_id="PIR-002", status="Pending")]
+        rows = [{"actor_type": "State-Nexus Actors", "daily_briefings": 1, "flash_intel_alerts": 4,
+                 "threat_actor_profiles": 2, "total": 7}]
+        with mock.patch.object(misp_store, "list_pirs", return_value=pirs), \
+             mock.patch.object(misp_store, "list_girs", return_value=[]), \
+             mock.patch.object(misp_store, "list_stakeholders", return_value=[SimpleNamespace(uuid="s")] * 10), \
+             mock.patch.object(stats, "_program_metrics", return_value=self.PROGRAM), \
+             mock.patch.object(misp_store, "product_counts_by_threat_actor_type", return_value=rows), \
+             mock.patch.object(pipeline, "_source_health", return_value=[]):
+            self.page = self.soup("/stats")
+        self.text = self.page.get_text(" ", strip=True)
+
+    def test_the_counts_and_the_warnings(self):
+        for shown in ("1 / 2 Active / total PIRs", "0 / 0 Active / total GIRs", "10 Stakeholders",
+                      "1 Active requirements without scope items",
+                      "1 active PIR has no scope items.",
+                      "Collection gap: 1 active PIR has no collection sources mapped."):
+            self.assertIn(shown, self.text)
+
+    def test_the_counts_link_to_their_lists(self):
+        with self.client.application.test_request_context():
+            expected = {"Active / total PIRs": url_for("requirements.pir_list"),
+                        "Active / total GIRs": url_for("requirements.gir_list"),
+                        "Stakeholders": url_for("stakeholders.list"),
+                        "Open RFIs": url_for("rfi.rfi_list")}
+        links = {a.select_one(".label, .name").get_text(): a["href"]
+                 for a in self.page.select("a.stats-count, a.stats-metric")}
+        self.assertEqual(links, expected)
+
+    def test_the_program_health_figures(self):
+        for shown in ("Open RFIs 3 3 overdue 7 total RFIs",
+                      "RFI feedback collected 14.3% 1 of 7", "RFI on-time delivery 100.0% of feedback received",
+                      "RFIs by status Acknowledged 2 Closed 4 In Progress 1",
+                      "Products linked to a PIR 18.8% 6 of 32 products", "Products with feedback 15.6% 5 of 32 products",
+                      "PIR coverage (last 90 days) 0.0% 0 of 2 active PIRs with a product",
+                      "Products (7 / 30 days) 2 / 5", "32 total products (8 in draft)",
+                      "Stakeholder coverage 20.0% 2 stakeholders owning an active PIR",
+                      "PIRs by intel level Operational 5 Strategic 2", "GIRs by intel level -"):
+            self.assertIn(shown, self.text)
+
+    def test_products_by_type_link_to_their_list_busiest_first(self):
+        links = [(a.get_text(" ", strip=True), a["href"]) for a in self.page.select("a.stats-type")]
+        self.assertEqual(links, [("Daily threat briefing 9 (5 in draft)", "/products/?type=Daily+threat+briefing"),
+                                 ("Flash intel alert 8", "/products/?type=Flash+intel+alert")])
+
+    def test_the_actor_types_maturity_and_the_rest(self):
+        self.assertIn("State-Nexus Actors 1 4 2 7", self.text)
+        self.assertIn("published briefings, alerts and profiles", self.text)
+        program = self.page.find(string="Program").find_parent(class_="stats-signal")
+        self.assertEqual([s.get_text() for s in program.select(".stats-steps > .on")], ["CTI0", "CTI1"])
+        for shown in ("Observable maturity signals (CTI-CMM indicative)", "Fewer than 3 active PIRs (currently 1)",
+                      "PIRs with scope items 0 / 1", "GIRs with scope items 0 / 0", "PIRs with an owner -",
+                      "Stakeholders with products -", "PIRs as Markdown", "Stakeholders as Markdown"):
+            self.assertIn(shown, self.text)
+
+
+class ScopePage(_App):
+    def setUp(self):
+        super().setUp()
+        pir = {"kind": "pir", "label": "PIR-001 Wipers", "uuid": PIR}
+        alert = {"kind": "fia", "label": "FIA-00001 Grid", "uuid": "f" * 36}
+        categories = [
+            {"label": "Geographic scope", "attr": "geographic_scope", "total": 3, "distinct": 2,
+             "items": [{"value": "Belgium", "count": 2, "entries": [pir, alert]},
+                       {"value": "Europe", "count": 1, "entries": [pir]}]},
+            {"label": "Campaign", "attr": "campaign", "total": 0, "distinct": 0, "items": []},
+        ]
+        with mock.patch.object(misp_store, "scope_stats", return_value=categories):
+            self.page = self.soup("/stats/scope")
+        self.text = self.page.get_text(" ", strip=True)
+
+    def test_every_value_its_count_and_its_records(self):
+        geography = self.page.select_one("#scope-geographic_scope")
+        self.assertIn("2 distinct · 3 total", geography.get_text(" ", strip=True))
+        rows = [r.get_text(" ", strip=True) for r in geography.select(".scope-row")]
+        self.assertEqual(rows, ["1 Belgium 2", "2 Europe 1"])
+        records = [(a.find_previous_sibling().get_text(), a["href"]) for a in geography.select(".scope-entries a")]
+        self.assertEqual(records[:2], [("PIR", f"/pirs/{PIR}"), ("Alert", f"/products/flash-intel/{'f' * 36}")])
+
+    def test_bars_are_split_by_record_type(self):
+        belgium = self.page.select_one("#scope-geographic_scope .chart-bar")
+        self.assertEqual([s["title"] for s in belgium.find_all("span")], ["PIR: 1", "Alert: 1"])
+
+    def test_the_page_totals_and_an_empty_category(self):
+        self.assertIn("3 scope values counted 2 distinct values 1 / 2 categories in use", self.text)
+        self.assertIn("PIRs 1", self.text)
+        self.assertIn("Flash intel alerts 1", self.text)
+        self.assertIn("Campaign No scope items recorded. 0 distinct · 0 total", self.text)
 
 
 if __name__ == "__main__":

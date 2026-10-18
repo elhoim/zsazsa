@@ -14,25 +14,48 @@
 {% endblock %}
 
 {% block content %}
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-blue);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Intelligence level</label>
-        <select name="intel_level" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All levels</option>
-          {% for lvl in intel_levels %}
-          <option value="{{ lvl }}" {{ 'selected' if intel_filter == lvl }}>{{ lvl }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="Intelligence level">
+            <span class="stat-icon icon-xs"><i class="fas fa-layer-group"></i></span>
+            <select name="intel_level" class="form-select form-select-sm" aria-label="Intelligence level" onchange="this.form.submit()">
+              <option value="">All levels</option>
+              {% for lvl in intel_levels %}
+              <option value="{{ lvl }}" {{ 'selected' if intel_filter == lvl }}>{{ lvl }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Priority">
+            <span class="stat-icon icon-xs"><i class="fas fa-flag"></i></span>
+            <select name="priority" class="form-select form-select-sm" aria-label="Priority" onchange="this.form.submit()">
+              <option value="">All priorities</option>
+              {% for value in priorities %}
+              <option value="{{ value }}" {{ 'selected' if priority_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ pirs | length }} PIR{{ 's' if pirs|length != 1 }}</span>
+            {% if intel_filter or priority_filter %}
+            <a href="{{ url_for('requirements.pir_list') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if intel_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('requirements.pir_list') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if level_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-4">{{ charts.mix('Status', status_counts, charts.status_colors) }}</div>
+          <div class="col-md-4">{{ charts.mix('Priority', priority_counts, charts.priority_colors, param='priority', selected=priority_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('Intelligence level', level_counts, charts.intel_colors, param='intel_level', selected=intel_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ pirs | length }} PIR{{ 's' if pirs|length != 1 }}</div>
-    </form>
+    </div>
   </div>
 </div>
 

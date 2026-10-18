@@ -13,7 +13,8 @@ from core.db import log_pipeline_run_start, log_pipeline_run_end
 from webapp import analyser_pipeline, audit, collection_cache
 from webapp import job_store, misp_session, misp_store
 from webapp.routes import setup_wizard
-from webapp.utils import json_body as _json_object, scraper_enabled
+from webapp.models import MOSCOW_PRIORITIES, REVIEW_CYCLES
+from webapp.utils import json_body as _json_object, ordered_counts, scraper_enabled
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("dashboard", __name__)
@@ -151,32 +152,21 @@ def _pipeline_status():
     except Exception:
         logger.exception("Failed to query analyser DB for 24h event counts")
 
-    # Pending scraper events (workflow incomplete). MISP tag filters are OR,
-    # so search by the scraper marker and AND-filter the workflow tag locally.
-    # pythonify=False keeps this to plain dicts instead of building up to 500
-    # MISPEvent objects, which is the bulk of the cost for this count.
-    # Without a scraper there is nothing to count, and "pending" stays None,
-    # which the dashboard renders as "-".
+    # Pending scraper events: the marker and the incomplete workflow state as
+    # one AND query, so MISP sends only those, and all of them. Without a
+    # scraper there is nothing to count, and "pending" stays None, which the
+    # dashboard renders as "-".
     if not scraper_enabled():
         return status
     try:
         misp = misp_store._scraper_misp()
-        pending = misp.search(
-            tags=[config.SCRAPER_MARKER_TAG],
-            limit=getattr(config, "MISP_SCRAPER_LIMIT", 500), metadata=True, pythonify=False,
-            order=misp_store.NEWEST_FIRST,
-        )
+        query = misp.build_complex_query(
+            and_parameters=[config.SCRAPER_MARKER_TAG, 'workflow:state="incomplete"'])
+        pending = misp_store._search_all(misp, tags=query, metadata=True, pythonify=False)
         if isinstance(pending, dict):
-            pending = pending.get("response", [])
-        if isinstance(pending, list):
-            needed = 'workflow:state="incomplete"'
-            count = 0
-            for item in pending:
-                event = item.get("Event", item) if isinstance(item, dict) else {}
-                tags = event.get("Tag") or []
-                if any(t.get("name") == needed for t in tags):
-                    count += 1
-            status["pending"] = count
+            logger.warning("pending scraper events: MISP refused the search: %s", pending.get("errors") or pending)
+        else:
+            status["pending"] = len(pending)
     except Exception:
         logger.exception("Failed to query pending scraper events from MISP")
 
@@ -198,7 +188,8 @@ def widgets():
     try:
         pirs = misp_store.list_pirs()
         girs = misp_store.list_girs()
-        stakeholder_count = len(misp_store.list_stakeholders())
+        # Only the number is shown, so the stakeholders' metadata is enough.
+        stakeholder_count = misp_store.count_records(config.TAG_STAKEHOLDER)
         pir_count = len(pirs)
         gir_count = len(girs)
         active_pirs = [
@@ -216,8 +207,16 @@ def widgets():
     except Exception:
         pending_email_sources = 0
 
+    # Awaiting feedback and the threat actor chart both read the alerts, so
+    # they are fetched once for the two.
     try:
-        pending_feedback = misp_store.list_pending_feedback_products()
+        fias = misp_store.list_fias()
+    except Exception:
+        logger.exception("Failed to load flash intel alerts for the dashboard")
+        fias = []
+
+    try:
+        pending_feedback = misp_store.list_pending_feedback_products(fias)
     except Exception:
         logger.exception("Failed to load pending-feedback products")
         pending_feedback = []
@@ -225,7 +224,7 @@ def widgets():
     # Both summary charts show the eight busiest entries, most active first.
     try:
         actor_type_products = sorted(
-            misp_store.product_counts_by_threat_actor_type(),
+            misp_store.product_counts_by_threat_actor_type(fias),
             key=lambda r: r["total"], reverse=True,
         )[:8]
     except Exception:
@@ -251,6 +250,8 @@ def widgets():
         stakeholder_count=stakeholder_count,
         active_pirs=active_pirs,
         active_girs=active_girs,
+        priority_counts=ordered_counts((p.priority for p in active_pirs), MOSCOW_PRIORITIES),
+        cycle_counts=ordered_counts((g.review_cycle for g in active_girs), REVIEW_CYCLES),
         pending_email_sources=pending_email_sources,
         pending_feedback=pending_feedback,
         actor_type_products=actor_type_products,

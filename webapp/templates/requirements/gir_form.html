@@ -290,16 +290,19 @@
       <div class="card-header"><i class="fas fa-sliders me-2"></i>Classification</div>
       <div class="card-body">
         <div class="mb-3">
-          <label class="form-label">Intelligence level</label>
+          <label class="form-label required-label">Intelligence level</label>
           {% set current_intel = (gir.intel_level if is_edit else []) or [] %}
           <div class="d-flex flex-wrap gap-2 mt-1">
             {% for lvl in intel_levels %}
             <div class="form-check form-check-inline mb-0">
-              <input class="form-check-input" type="checkbox" name="intel_level" value="{{ lvl }}"
+              <input class="form-check-input intel-level" type="checkbox" name="intel_level" value="{{ lvl }}"
                      id="gir_il_{{ loop.index }}" {{ 'checked' if lvl in current_intel }}>
               <label class="form-check-label" for="gir_il_{{ loop.index }}">{{ lvl }}</label>
             </div>
             {% endfor %}
+          </div>
+          <div id="intel-level-warn" class="text-danger small mt-1" style="display:none;">
+            <i class="fas fa-triangle-exclamation me-1"></i>Select at least one intelligence level.
           </div>
           <div class="form-text small">Strategic (long-term, decision-support), Operational (campaigns, TTPs), Tactical (IOCs, signatures).</div>
         </div>
@@ -371,6 +374,28 @@
 
 {% block scripts %}
 <script>
+// The intelligence level is required: block the submit and say so when none is
+// ticked. Added now rather than on DOMContentLoaded, so that it runs before the
+// unsaved changes warning in base.html sees the submit.
+(function() {
+  var warn = document.getElementById('intel-level-warn');
+  function levelChecked() {
+    return document.querySelectorAll('.intel-level:checked').length > 0;
+  }
+  warn.closest('form').addEventListener('submit', function(e) {
+    if (!levelChecked()) {
+      e.preventDefault();
+      warn.style.display = '';
+      warn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+  document.querySelectorAll('.intel-level').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      if (levelChecked()) warn.style.display = 'none';
+    });
+  });
+})();
+
 function tiRender(field) {
   var display = document.getElementById('ti-display-' + field);
   var store = document.getElementById('ti-store-' + field);

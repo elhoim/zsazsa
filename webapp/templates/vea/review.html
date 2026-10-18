@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_sort_header.html" import sort_th %}
+{% from "_sort_header.html" import sort_th with context %}
 
 {% block title %}Vulnerability advisories | zsazsa CTI{% endblock %}
 {% block page_title %}Vulnerability advisories{% endblock %}
@@ -19,25 +19,70 @@
 {% endmacro %}
 
 {% block content %}
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+{% set exploitation_colors = {'Active': 'var(--accent-red)', 'KEV listed': 'var(--accent-orange)',
+                              'Weaponised': 'var(--priority-must-fg)', 'PoC public': 'var(--priority-should-fg)',
+                              'None known': 'var(--accent-green)', 'Unknown': 'var(--neutral-400)'} %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-red);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Review state</label>
-        <select name="state" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All states</option>
-          {% for s in review_states %}
-          <option value="{{ s }}" {{ 'selected' if state_filter == s }}>{{ s }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="Review state">
+            <span class="stat-icon icon-xs"><i class="fas fa-list-check"></i></span>
+            <select name="state" class="form-select form-select-sm" aria-label="Review state" onchange="this.form.submit()">
+              <option value="">All states</option>
+              {% for value in review_states %}
+              <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Exploitation">
+            <span class="stat-icon icon-xs"><i class="fas fa-bug"></i></span>
+            <select name="exploitation" class="form-select form-select-sm" aria-label="Exploitation" onchange="this.form.submit()">
+              <option value="">Any exploitation</option>
+              {% for value in exploitation_choices %}
+              <option value="{{ value }}" {{ 'selected' if exploitation_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="TLP">
+            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
+            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
+              <option value="">All TLP levels</option>
+              {% for value in tlp_choices %}
+              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Audience">
+            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
+            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
+              <option value="">All audiences</option>
+              {% for value in audience_choices %}
+              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ veas | length }} advisor{{ 'ies' if veas|length != 1 else 'y' }}</span>
+            {% if state_filter or exploitation_filter or tlp_filter or audience_filter %}
+            <a href="{{ url_for('vea.review') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if state_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('vea.review') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if state_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-6 col-xl-3">{{ charts.mix('Review state', state_counts, charts.review_colors, param='state', selected=state_filter) }}</div>
+          <div class="col-md-6 col-xl-3">{{ charts.mix('Exploitation', exploitation_counts, exploitation_colors, param='exploitation', selected=exploitation_filter) }}</div>
+          <div class="col-md-6 col-xl-3">{{ charts.mix('TLP', tlp_counts, charts.tlp_colors, param='tlp', selected=tlp_filter) }}</div>
+          <div class="col-md-6 col-xl-3">{{ charts.mix('Audience', audience_counts, param='audience', selected=audience_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ veas | length }} advisor{{ 'ies' if veas|length != 1 else 'y' }}</div>
-    </form>
+    </div>
   </div>
 </div>
 
@@ -47,13 +92,13 @@
     <table class="table table-hover zsazsa-table mb-0">
       <thead>
         <tr>
-          {{ sort_th('VEA', 'id', sort, dir, 'vea.review', state_filter, '120px') }}
-          {{ sort_th('CVE', 'cve', sort, dir, 'vea.review', state_filter, '130px') }}
-          {{ sort_th('Title', 'title', sort, dir, 'vea.review', state_filter) }}
+          {{ sort_th('VEA', 'id', sort, dir, 'vea.review', '120px') }}
+          {{ sort_th('CVE', 'cve', sort, dir, 'vea.review', '130px') }}
+          {{ sort_th('Title', 'title', sort, dir, 'vea.review') }}
           <th>TLP</th>
           <th>Exploitation</th>
-          {{ sort_th('State', 'state', sort, dir, 'vea.review', state_filter) }}
-          {{ sort_th('Published', 'date', sort, dir, 'vea.review', state_filter) }}
+          {{ sort_th('State', 'state', sort, dir, 'vea.review') }}
+          {{ sort_th('Published', 'date', sort, dir, 'vea.review') }}
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -79,12 +124,12 @@
           </td>
           <td><span class="tlp-badge tlp-{{ v.tlp | slug }}">TLP:{{ v.tlp | upper }}</span></td>
           <td>
-            {% if v.observed_exploitation and 'yes' in v.observed_exploitation.lower() %}
+            {% if exploitation[v.uuid] == 'Active' %}
               <span class="badge bg-danger">Active</span>
-            {% elif v.cisa_kev == 'Yes' %}
+            {% elif exploitation[v.uuid] == 'KEV listed' %}
               <span class="badge bg-warning text-dark">KEV listed</span>
             {% else %}
-              <span class="text-muted small">{{ v.exploit_availability or '-' }}</span>
+              <span class="text-muted small">{{ exploitation[v.uuid] }}</span>
             {% endif %}
           </td>
           <td>
@@ -226,6 +271,8 @@
         {% endfor %}
       </tbody>
     </table>
+    {% elif state_filter or exploitation_filter or tlp_filter or audience_filter %}
+    <div class="p-4 text-muted">No vulnerability advisories match these filters.</div>
     {% else %}
     <div class="p-4 text-muted">No vulnerability advisories yet. <a href="{{ url_for('vea.wizard_new') }}">Create one</a>.</div>
     {% endif %}

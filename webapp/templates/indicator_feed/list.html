@@ -16,25 +16,59 @@
 
 {% block content %}
 
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+{% set caching_colors = {'Not cached': 'var(--neutral-400)', 'Hourly': 'var(--accent-green)',
+                         'Daily': 'var(--accent-blue)', 'Weekly': 'var(--misp-navy)'} %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-green);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">State</label>
-        <select name="state" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All states</option>
-          {% for value, label in states %}
-          <option value="{{ value }}" {{ 'selected' if state_filter == value }}>{{ label }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          <div class="filter" title="Caching">
+            <span class="stat-icon icon-xs"><i class="fas fa-box-archive"></i></span>
+            <select name="caching" class="form-select form-select-sm" aria-label="Caching" onchange="this.form.submit()">
+              <option value="">Cached or not</option>
+              {% for value in caching_choices %}
+              <option value="{{ value }}" {{ 'selected' if caching_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="TLP">
+            <span class="stat-icon icon-xs"><i class="fas fa-traffic-light"></i></span>
+            <select name="tlp" class="form-select form-select-sm" aria-label="TLP" onchange="this.form.submit()">
+              <option value="">All TLP levels</option>
+              {% for value in tlp_choices %}
+              <option value="{{ value }}" {{ 'selected' if tlp_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Audience">
+            <span class="stat-icon icon-xs"><i class="fas fa-users"></i></span>
+            <select name="audience" class="form-select form-select-sm" aria-label="Audience" onchange="this.form.submit()">
+              <option value="">All audiences</option>
+              {% for value in audience_choices %}
+              <option value="{{ value }}" {{ 'selected' if audience_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ feeds | length }} indicator feed{{ 's' if feeds|length != 1 }}</span>
+            {% if caching_filter or tlp_filter or audience_filter %}
+            <a href="{{ url_for('indicator_feed.index') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if state_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('indicator_feed.index') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if caching_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-4">{{ charts.mix('Caching', caching_counts, caching_colors, param='caching', selected=caching_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('TLP', tlp_counts, charts.tlp_colors, param='tlp', selected=tlp_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('Audience', audience_counts, param='audience', selected=audience_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ feeds | length }} indicator feed{{ 's' if feeds|length != 1 }}</div>
-    </form>
+    </div>
   </div>
 </div>
 
@@ -133,8 +167,8 @@
     </div>
     {% else %}
     <p class="text-muted small m-3 mb-0">
-      {% if state_filter %}
-      No indicator feeds in this state.
+      {% if caching_filter or tlp_filter or audience_filter %}
+      No indicator feeds match these filters.
       {% else %}
       No indicator feeds yet. Build a query on the
       <a href="{{ url_for('indicator_feed.new') }}">query builder</a> and save it.

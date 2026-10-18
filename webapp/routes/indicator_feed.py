@@ -20,8 +20,8 @@ from flask import (
 
 from webapp import audit, feed_cache, indicator_meta_store, misp_session, misp_store, notify_jobs
 from webapp.rate_limit import rate_limited
-from webapp.models import TLP_LEVELS
-from webapp.utils import age_text
+from webapp.models import STAKEHOLDER_ROLES, TLP_LEVELS
+from webapp.utils import TLP_NAMES, age_text, matching, ordered_counts, tlp_counts, tlp_of
 from notifier import dispatcher
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,8 @@ EVENT_RANGES = [("0", "Today"), ("1", "Last day"), ("2", "Last 2 days"),
 
 # Whether the feed is served from disk or queried on every request. It is the
 # one thing about a feed that is worth filtering the list by.
-FEED_STATES = [("cached", "Cached"), ("not-cached", "Not cached")]
+# How a feed is cached, as the list shows it and filters on it.
+CACHING = ["Not cached"] + [interval.capitalize() for interval in feed_cache.INTERVALS]
 
 # `servers` is a list filter too, but it selects targets rather than narrowing
 # the indicator query, so it is kept out of _has_query.
@@ -298,23 +299,42 @@ def index():
     """The feeds as a product list, in the shape the other CTI products use.
 
     This used to be the query builder, so a link an analyst kept from before
-    carries filters. Those go to the builder, where they still mean something;
-    the list's own state filter does not, so it is not one of them.
+    has the builder's filters. Those go to the builder, where they still mean
+    something; the list's own filters do not, so they are not among them, and
+    neither is the state filter that caching replaced.
     """
-    if set(request.args) - {"state"}:
+    if set(request.args) - {"caching", "tlp", "audience", "state"}:
         return redirect(url_for("indicator_feed.new") + "?" + request.query_string.decode())
-    state = (request.args.get("state") or "").strip()
-    feeds = misp_store.list_indicator_feeds()
-    if state == "cached":
-        feeds = [f for f in feeds if f.cache_interval]
-    elif state == "not-cached":
-        feeds = [f for f in feeds if not f.cache_interval]
-    else:
-        # Anything else is not a state, so the list stays whole and says so.
-        state = ""
-    return render_template("indicator_feed/list.html", feeds=_with_schedule(feeds),
-                           states=FEED_STATES, state_filter=state,
-                           can_publish=misp_session.current_user_can_publish())
+    caching_filter = (request.args.get("caching") or "").strip()
+    tlp_filter = (request.args.get("tlp") or "").strip()
+    audience_filter = (request.args.get("audience") or "").strip()
+    all_feeds = misp_store.list_indicator_feeds()
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
+    if caching_filter:
+        tests["caching"] = lambda f: _caching(f) == caching_filter
+    if tlp_filter:
+        tests["tlp"] = lambda f: tlp_of(f) == tlp_filter
+    if audience_filter:
+        tests["audience"] = lambda f: misp_store.has_audience(f, audience_filter)
+    return render_template(
+        "indicator_feed/list.html",
+        feeds=_with_schedule(matching(all_feeds, tests)),
+        caching_choices=CACHING,
+        caching_filter=caching_filter,
+        caching_counts=ordered_counts((_caching(f) for f in matching(all_feeds, tests, skip="caching")), CACHING),
+        tlp_filter=tlp_filter,
+        audience_filter=audience_filter,
+        tlp_choices=TLP_NAMES,
+        audience_choices=STAKEHOLDER_ROLES,
+        tlp_counts=tlp_counts(matching(all_feeds, tests, skip="tlp")),
+        audience_counts=misp_store.audience_counts(matching(all_feeds, tests, skip="audience")),
+        can_publish=misp_session.current_user_can_publish(),
+    )
+
+
+def _caching(feed):
+    return feed_cache.interval(feed).capitalize() or "Not cached"
 
 
 @bp.route("/<string:id>")

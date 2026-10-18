@@ -37,7 +37,7 @@ from pymisp import MISPAttribute, MISPEvent, MISPObject, PyMISP
 from webapp import misp_session
 from webapp.collection_cache import AI_SUMMARY_PREFIX, source_slug
 from webapp.models import STAKEHOLDER_ROLES
-from webapp.utils import PRODUCT_TAG_PREFIX, human_size, scraper_enabled
+from webapp.utils import PRODUCT_TAG_PREFIX, human_size, ordered_counts, scraper_enabled
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
@@ -3416,13 +3416,14 @@ def add_product_feedback(event_uuid, author, rating, comment):
         logger.warning("tag %s with feedback failed: %s", event_uuid, exc)
 
 
-def list_pending_feedback_products():
+def list_pending_feedback_products(fias=None):
     """Published flash intel alerts and vulnerability advisories that asked for
     feedback by a deadline but have not received any yet.
 
     Products without a feedback deadline are never included. "Received" is judged
     from the feedback tag on the event, so this stays to a few MISP searches
-    rather than one lookup per product.
+    rather than one lookup per product. ``fias`` is every alert, for a caller
+    that has them already.
     """
     misp = _misp()
     have_feedback = set()
@@ -3435,7 +3436,7 @@ def list_pending_feedback_products():
 
     today = datetime.now(timezone.utc).date()
     pending = []
-    for kind, items in (("flash-intel", list_fias()), ("vea", list_veas())):
+    for kind, items in (("flash-intel", list_fias() if fias is None else fias), ("vea", list_veas())):
         for p in items:
             if not p.feedback_deadline or not p.published or p.uuid in have_feedback:
                 continue
@@ -5264,22 +5265,11 @@ def fia_attachment_files(attachments) -> list[tuple]:
     return files
 
 
-def counts():
-    misp = _misp()
-
-    def _count(tag):
-        events = _search_all(misp, tags=[tag], metadata=True, pythonify=True)
-        if not events or isinstance(events, dict):
-            return 0
-        return len(events)
-
-    return {
-        "pir": _count(config.TAG_PIR),
-        "gir": _count(config.TAG_GIR),
-        "stakeholder": _count(config.TAG_STAKEHOLDER),
-        "rfi": _count(config.TAG_RFI),
-        "fia": _count(config.TAG_FLASH_INTEL),
-    }
+def count_records(tag):
+    """How many events have ``tag``, from their metadata alone, for a page that
+    shows the number but not the records."""
+    events = _search_all(_misp(), tags=[tag], metadata=True, pythonify=True)
+    return 0 if not events or isinstance(events, dict) else len(events)
 
 
 # Scope categories shared by requirements (PIR/GIR) and products, in display order.
@@ -5350,21 +5340,22 @@ def scope_stats() -> list[dict]:
     return result
 
 
-def product_counts_by_threat_actor_type() -> list[dict]:
+def product_counts_by_threat_actor_type(fias=None) -> list[dict]:
     """Count published daily briefings, flash intel alerts and threat actor
     profiles per threat actor type. A draft or a rejected alert has not gone
     out, and the analyser leaves many of those behind.
 
     Each row is {"actor_type", "daily_briefings", "flash_intel_alerts",
     "threat_actor_profiles", "total"}. A product with no actor type counts under
-    "Unspecified", which sorts last. Used by the statistics page and dashboard.
+    "Unspecified", which sorts last. Used by the statistics page and dashboard;
+    ``fias`` is every alert, for a caller that has them already.
     """
     try:
         briefings = [b for b in list_briefings() if b.review_state == BRIEFING_REVIEW_PUBLISHED]
     except Exception:
         briefings = []
     try:
-        fias = list_fias(review_state=FIA_REVIEW_APPROVED)
+        fias = [f for f in (list_fias() if fias is None else fias) if f.review_state == FIA_REVIEW_APPROVED]
     except Exception:
         fias = []
     try:
@@ -5478,6 +5469,16 @@ def stakeholders_on_automated_mode(product_type: str, tlp: str) -> list:
 
 def _audiences(audience_str: str) -> set:
     return {_canonical_role(a) for a in (audience_str or "").split(",") if _canonical_role(a)}
+
+
+def has_audience(product, role) -> bool:
+    return role in _audiences(product.audience)
+
+
+def audience_counts(products) -> list:
+    """[(role, how many)] of the audiences of ``products``, for the bar above
+    their list, in the order of the stakeholder roles."""
+    return ordered_counts((role for p in products for role in _audiences(p.audience)), STAKEHOLDER_ROLES)
 
 
 def eligible_recipients(product_type: str, tlp: str, audience_str: str) -> list:

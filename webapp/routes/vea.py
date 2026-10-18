@@ -15,7 +15,8 @@ from webapp.routes.source_event_utils import (
     source_event_references,
 )
 from webapp import audit, branding, collection_cache, misp_session, misp_store, notify_jobs, product_log
-from webapp.utils import md_to_html, sort_products
+from webapp.models import STAKEHOLDER_ROLES
+from webapp.utils import TLP_NAMES, matching, md_to_html, ordered_counts, sort_products, tlp_counts, tlp_of
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("vea", __name__, url_prefix="/products/vea")
@@ -135,18 +136,57 @@ def _start_vea_delivery(vea_id, uuid, reason):
     )
 
 
+# What the list says of an advisory's exploitation, and filters it on: seen
+# exploited, listed by CISA as known exploited, or else how far an exploit is.
+EXPLOITATION = ["Active", "KEV listed"] + misp_store.VEA_EXPLOIT_AVAILABILITY
+
+
+def _exploitation(vea):
+    if "yes" in (vea.observed_exploitation or "").lower():
+        return "Active"
+    if vea.cisa_kev == "Yes":
+        return "KEV listed"
+    return vea.exploit_availability or "Unknown"
+
+
 @bp.route("/")
 def review():
-    state_filter = (request.args.get("state") or "").strip() or None
+    state_filter = (request.args.get("state") or "").strip()
+    exploitation_filter = (request.args.get("exploitation") or "").strip()
+    tlp_filter = (request.args.get("tlp") or "").strip()
+    audience_filter = (request.args.get("audience") or "").strip()
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
-    veas = misp_store.list_veas(review_state=state_filter)
-    sort_products(veas, sort, direction)
+    veas = misp_store.list_veas()
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
+    if state_filter:
+        tests["state"] = lambda v: v.review_state == state_filter
+    if tlp_filter:
+        tests["tlp"] = lambda v: tlp_of(v) == tlp_filter
+    if audience_filter:
+        tests["audience"] = lambda v: misp_store.has_audience(v, audience_filter)
+    if exploitation_filter:
+        tests["exploitation"] = lambda v: _exploitation(v) == exploitation_filter
+    shown = sort_products(matching(veas, tests), sort, direction)
     return render_template(
         "vea/review.html",
-        veas=veas,
-        state_filter=state_filter or "",
+        veas=shown,
+        exploitation={v.uuid: _exploitation(v) for v in shown},
+        state_filter=state_filter,
+        exploitation_filter=exploitation_filter,
         review_states=misp_store.VEA_REVIEW_STATES,
+        exploitation_choices=EXPLOITATION,
+        state_counts=ordered_counts((v.review_state for v in matching(veas, tests, skip="state")),
+                                    misp_store.VEA_REVIEW_STATES),
+        exploitation_counts=ordered_counts((_exploitation(v) for v in matching(veas, tests, skip="exploitation")),
+                                           EXPLOITATION),
+        tlp_filter=tlp_filter,
+        audience_filter=audience_filter,
+        tlp_choices=TLP_NAMES,
+        audience_choices=STAKEHOLDER_ROLES,
+        tlp_counts=tlp_counts(matching(veas, tests, skip="tlp")),
+        audience_counts=misp_store.audience_counts(matching(veas, tests, skip="audience")),
         sort=sort,
         dir=direction,
     )

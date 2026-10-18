@@ -1,0 +1,76 @@
+{# Charts shared by the dashboard, the statistics pages and the list pages, on
+   the chart classes in app.css. Import with {% import "_charts.html" as charts %}. #}
+
+{% set palette = ['var(--accent-blue)', 'var(--accent-green)', 'var(--accent-orange)', 'var(--accent-purple)',
+                  'var(--misp-navy)', 'var(--accent-red)', 'var(--neutral-500)', 'var(--accent-cyan)'] %}
+
+{# Requirement statuses, rejected PIRs and RFI statuses. #}
+{% set status_colors = {'Pending': 'var(--neutral-400)', 'Active': 'var(--accent-green)',
+                        'In Development': 'var(--accent-blue)', 'Under Evaluation': 'var(--accent-orange)',
+                        'Implemented': 'var(--misp-navy)', 'Retired': 'var(--neutral-600)', 'Rejected': 'var(--accent-red)',
+                        'New': 'var(--neutral-400)', 'Acknowledged': 'var(--accent-purple)', 'In Progress': 'var(--accent-blue)',
+                        'Delivered': 'var(--accent-green)', 'Closed': 'var(--neutral-600)',
+                        'In Dev': 'var(--accent-blue)', 'In Test': 'var(--accent-orange)'} %}
+{# The review states of the products, and the two of a threat actor profile. #}
+{% set review_colors = {'draft': 'var(--neutral-400)', 'pending-review': 'var(--accent-blue)',
+                        'approved': 'var(--accent-green)', 'rejected': 'var(--accent-red)',
+                        'published': 'var(--accent-green)',
+                        'Draft': 'var(--neutral-400)', 'Published': 'var(--accent-green)'} %}
+{% set tlp_colors = {'CLEAR': 'var(--adm-tlp-clear-border)', 'GREEN': 'var(--adm-tlp-green-border)',
+                     'AMBER': 'var(--adm-tlp-amber-border)', 'AMBER+STRICT': 'var(--tlp-amber-strict-fg)',
+                     'RED': 'var(--adm-tlp-red-border)'} %}
+{# MoSCoW for requirements, High to Low for RFIs. #}
+{% set priority_colors = {'Must have': 'var(--priority-must-fg)', 'Should have': 'var(--priority-should-fg)',
+                          'Could have': 'var(--priority-could-fg)', "Won't have": 'var(--priority-wont-fg)',
+                          'High': 'var(--priority-must-fg)', 'Medium': 'var(--priority-should-fg)',
+                          'Low': 'var(--priority-could-fg)'} %}
+{% set intel_colors = {'Strategic': 'var(--misp-navy)', 'Operational': 'var(--accent-blue)',
+                       'Tactical': 'var(--accent-green)', 'Unspecified': 'var(--neutral-400)'} %}
+{% set cycle_colors = {'Continuous': 'var(--accent-purple)', 'Weekly': 'var(--accent-orange)',
+                       'Monthly': 'var(--accent-blue)', 'Quarterly': 'var(--accent-green)'} %}
+
+{# A labelled bar of segments and its legend. ``counts`` is [(name, n)], as
+   utils.ordered_counts gives it; a name without a colour in ``colors`` takes
+   the next one of the palette.
+
+   With ``param``, each name links to the page filtered on it through that
+   query argument, keeping the others, and ``selected`` is the name it is
+   filtered on now: its link takes the filter off again, and the other names
+   fade. Unspecified has nothing to filter on. Import with context for this. #}
+{% macro mix(label, counts, colors={}, param=None, selected='') %}
+<div class="chart-label mb-1">{{ label }}</div>
+{% if counts %}
+<div class="chart-segbar">
+  {% for name, n in counts %}
+  {% set color = colors.get(name) or palette[loop.index0 % palette | length] %}
+  {% set faded = selected and name != selected %}
+  {% if param and name != 'Unspecified' %}
+  <a href="{{ filtered_url(param, name, selected) }}" style="flex:{{ n }};background:{{ color }};{{ 'opacity:.3;' if faded }}"
+     title="{{ name }}: {{ n }}"></a>
+  {% else %}
+  <span style="flex:{{ n }};background:{{ color }};{{ 'opacity:.3;' if faded }}" title="{{ name }}: {{ n }}"></span>
+  {% endif %}
+  {% endfor %}
+</div>
+<div class="chart-legend mt-1">
+  {% for name, n in counts %}
+  {% set color = colors.get(name) or palette[loop.index0 % palette | length] %}
+  {% set faded = selected and name != selected %}
+  {% set legend %}<span class="chart-swatch" style="background:{{ color }};"></span>{{ name }} <strong>{{ n }}</strong>{% endset %}
+  {% if param and name != 'Unspecified' %}
+  <a href="{{ filtered_url(param, name, selected) }}" class="chart-filter{{ ' selected' if name == selected }}{{ ' faded' if faded }}"
+     title="{{ 'Show all again' if name == selected else 'Show only ' ~ name }}">{{ legend }}</a>
+  {% else %}
+  <span class="{{ 'faded' if faded }}">{{ legend }}</span>
+  {% endif %}
+  {% endfor %}
+</div>
+{% else %}
+<span class="text-muted small">-</span>
+{% endif %}
+{% endmacro %}
+
+{# This page with its ``param`` filter set to ``name``, or taken off when it is ``selected``. #}
+{% macro filtered_url(param, name, selected) -%}
+{{ url_for(request.endpoint, **dict(request.args.to_dict(), **{param: (None if name == selected else name)})) }}
+{%- endmacro %}

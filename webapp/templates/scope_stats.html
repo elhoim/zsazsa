@@ -5,83 +5,209 @@
 
 {% block content %}
 <style>
-  .scope-bar-row { margin-bottom: .5rem; }
-  .scope-bar-head { display: flex; justify-content: space-between; gap: .5rem; font-size: .82rem; }
-  .scope-bar-head .scope-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .scope-bar-head .scope-cnt { color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .scope-bar-track { height: 8px; border-radius: 4px; background: var(--surface-muted); overflow: hidden; margin-top: 2px; }
-  .scope-bar-fill { height: 100%; border-radius: 4px; background: var(--accent-blue); }
-  .scope-list { max-height: 340px; overflow-y: auto; }
-  .scope-bar-link { display: block; color: inherit; text-decoration: none; }
-  .scope-bar-link:hover .scope-val { text-decoration: underline; }
-  .scope-entries { list-style: none; margin: .25rem 0 .5rem; padding-left: .25rem; font-size: .78rem; }
-  .scope-entries li { display: flex; align-items: baseline; gap: .35rem; padding: .1rem 0; }
-  .scope-entries .badge { font-weight: 400; flex-shrink: 0; }
+  .scope-hero { background: var(--brand-gradient); color: #fff; border-radius: 12px; padding: 1.4rem 1.6rem;
+                box-shadow: var(--card-shadow); position: relative; overflow: hidden; }
+  .scope-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 240px; height: 240px;
+                       border-radius: 50%; background: var(--overlay-white-15); pointer-events: none; }
+  .scope-hero .hero-number { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .scope-hero .hero-label { font-size: .75rem; opacity: .85; margin-top: .25rem; }
+  .scope-records { background: var(--card-bg); color: var(--text-primary); border-radius: 10px; padding: .8rem 1rem; }
+  .scope-records .kind-row { display: flex; align-items: center; gap: .5rem; font-size: .8rem; padding: .12rem 0; }
+
+  .scope-jump { display: inline-flex; align-items: center; gap: .45rem; background: var(--card-bg); border: 1px solid var(--border-light);
+                border-radius: 999px; padding: .3rem .75rem .3rem .35rem; font-size: .78rem; color: var(--text-primary); text-decoration: none; }
+  .scope-jump:hover { border-color: var(--icon-color); }
+  .scope-jump.empty { opacity: .55; }
+
+  .scope-summary { display: flex; gap: 1rem; align-items: center; padding-bottom: .9rem; margin-bottom: .6rem;
+                   border-bottom: 1px dashed var(--border-light); }
+  .scope-donut { width: 84px; height: 84px; border-radius: 50%; flex-shrink: 0; position: relative; }
+  .scope-donut::after { content: ""; position: absolute; inset: 13px; border-radius: 50%; background: var(--card-bg); }
+  .scope-donut span { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center;
+                      justify-content: center; font-weight: 700; font-size: 1.1rem; line-height: 1; }
+  .scope-donut small { font-size: .6rem; font-weight: 500; color: var(--text-muted); margin-top: 2px; }
+  .scope-top { display: flex; gap: .5rem; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .scope-top-item { flex: 1 1 0; min-width: 110px; border-radius: 8px; padding: .45rem .6rem;
+                    background: color-mix(in srgb, var(--icon-color) 8%, var(--card-bg));
+                    border: 1px solid color-mix(in srgb, var(--icon-color) 22%, var(--card-bg)); }
+  .scope-top-item .place { font-size: .62rem; font-weight: 700; color: var(--icon-color); text-transform: uppercase; letter-spacing: .06em; }
+  .scope-top-item .value { font-weight: 600; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scope-top-item .count { font-size: .72rem; color: var(--text-muted); }
+
+  .scope-list { max-height: 340px; overflow-y: auto; padding-right: .25rem; }
+  .scope-row .value-line { display: flex; align-items: center; min-width: 0; }
+  .scope-row .value-line .name { min-width: 0; }
+  .scope-row .chev { font-size: .6rem; color: var(--text-muted); margin-left: .3rem; transition: transform .15s; }
+  .scope-row[aria-expanded="true"] .chev { transform: rotate(90deg); }
+
+  .scope-entries { list-style: none; margin: .1rem 0 .45rem 2.1rem; padding: .35rem .55rem; font-size: .78rem;
+                   border-left: 2px solid color-mix(in srgb, var(--icon-color) 35%, transparent);
+                   background: var(--surface-muted); border-radius: 0 6px 6px 0; }
+  .scope-entries li { display: flex; align-items: baseline; gap: .4rem; padding: .1rem 0; }
   .scope-entries a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
   .scope-entries a:hover { text-decoration: underline; }
+  .scope-kind { font-size: .65rem; font-weight: 600; border-radius: 4px; padding: .1rem .35rem; flex-shrink: 0;
+                background: color-mix(in srgb, var(--kind-color) 14%, transparent); color: var(--kind-color); }
+  .scope-empty { border: 1px dashed var(--border-light); border-radius: var(--border-radius); background: var(--card-bg); }
 </style>
 
+{# The record types a scope value is counted from, in the order the bars stack them. #}
 {% set scope_kinds = {
-     'pir':      {'label': 'PIR',      'endpoint': 'requirements.pir_detail'},
-     'gir':      {'label': 'GIR',      'endpoint': 'requirements.gir_detail'},
-     'tap':      {'label': 'Profile',  'endpoint': 'threat_actor_profile.detail'},
-     'briefing': {'label': 'Briefing', 'endpoint': 'daily_briefing.detail'},
-     'fia':      {'label': 'Alert',    'endpoint': 'flash_intel.detail'},
+     'pir':      {'label': 'PIR',      'plural': 'PIRs',                  'color': 'var(--accent-blue)',   'endpoint': 'requirements.pir_detail'},
+     'gir':      {'label': 'GIR',      'plural': 'GIRs',                  'color': 'var(--accent-green)',  'endpoint': 'requirements.gir_detail'},
+     'tap':      {'label': 'Profile',  'plural': 'Threat actor profiles', 'color': 'var(--accent-purple)', 'endpoint': 'threat_actor_profile.detail'},
+     'briefing': {'label': 'Briefing', 'plural': 'Daily briefings',       'color': 'var(--misp-navy)',     'endpoint': 'daily_briefing.detail'},
+     'fia':      {'label': 'Alert',    'plural': 'Flash intel alerts',    'color': 'var(--accent-orange)', 'endpoint': 'flash_intel.detail'},
+   } %}
+{% set category_looks = {
+     'geographic_scope':        ('fa-earth-europe', 'var(--accent-blue)'),
+     'sectors':                 ('fa-industry', 'var(--accent-green)'),
+     'threat_actors':           ('fa-user-secret', 'var(--accent-red)'),
+     'mitre_attack_techniques': ('fa-chess-knight', 'var(--accent-purple)'),
+     'threat_types':            ('fa-biohazard', 'var(--accent-orange)'),
+     'technology':              ('fa-microchip', 'var(--accent-cyan)'),
+     'vendor':                  ('fa-building', 'var(--misp-navy)'),
+     'incident':                ('fa-fire', 'var(--accent-red)'),
+     'campaign':                ('fa-flag', 'var(--text-muted)'),
    } %}
 
-<p class="text-muted mb-3">
-  Frequency of each scope value across PIRs, GIRs, threat actor profiles, daily briefings and flash intel alerts.
-  Geography, sectors, threat actors and MITRE ATT&amp;CK techniques come from MISP galaxies; the rest are curated free-text scope items.
-  Values that differ only in case are counted together. Click a value to see which entries have it.
-</p>
+<div class="scope-hero mb-4">
+  <div class="row g-4 align-items-center position-relative" style="z-index:1;">
+    <div class="col-lg-7">
+      <p class="mb-3" style="font-size:.86rem;max-width:62ch;">
+        Frequency of each scope value across PIRs, GIRs, threat actor profiles, daily briefings and flash intel alerts.
+        Geography, sectors, threat actors and MITRE ATT&amp;CK techniques come from MISP galaxies; the rest are curated free-text scope items.
+        Values that differ only in case are counted together. Click a value to see which entries have it.
+      </p>
+      <div class="d-flex flex-wrap gap-4">
+        <div><div class="hero-number">{{ categories | sum(attribute='total') }}</div><div class="hero-label">scope values counted</div></div>
+        <div><div class="hero-number">{{ categories | sum(attribute='distinct') }}</div><div class="hero-label">distinct values</div></div>
+        <div>
+          <div class="hero-number">{{ categories | selectattr('total') | list | length }}<span style="font-size:1rem;opacity:.75;"> / {{ categories | length }}</span></div>
+          <div class="hero-label">categories in use</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="scope-records">
+        <div class="chart-label mb-1">Records with scope</div>
+        {% for kind, k in scope_kinds.items() %}
+        <div class="kind-row">
+          <span class="chart-swatch" style="background:{{ k.color }};"></span>
+          <span class="flex-grow-1">{{ k.plural }}</span>
+          <strong>{{ records_by_kind[kind] }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-4">
+  {% for cat in categories %}
+  {% set icon, color = category_looks.get(cat.attr, ('fa-crosshairs', 'var(--accent-blue)')) %}
+  <a href="#scope-{{ cat.attr }}" class="scope-jump{{ ' empty' if not cat['items'] }}" style="--icon-color:{{ color }};">
+    <span class="stat-icon icon-xs"><i class="fas {{ icon }}"></i></span>{{ cat.label }}
+    <span class="text-muted">{{ cat.distinct }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="chart-legend mb-3">
+  <span class="fw-semibold">Bars split by record type:</span>
+  {% for k in scope_kinds.values() %}
+  <span><span class="chart-swatch" style="background:{{ k.color }};"></span>{{ k.label }}</span>
+  {% endfor %}
+</div>
 
 <div class="row g-4">
-  {% for cat in categories %}
-  <div class="col-lg-6">
-    <div class="card content-card h-100">
+  {% for cat in categories if cat['items'] %}
+  {% set icon, color = category_looks.get(cat.attr, ('fa-crosshairs', 'var(--accent-blue)')) %}
+  {% set top = cat['items'][0].count %}
+  {# The share of the category's counts each record type has, as conic-gradient stops. #}
+  {% set donut = namespace(at=0, stops=[]) %}
+  {% for kind, k in scope_kinds.items() if cat.by_kind[kind] %}
+    {% set share = cat.by_kind[kind] / cat.total * 100 %}
+    {% set donut.stops = donut.stops + [k.color ~ ' ' ~ donut.at | round(2) ~ '% ' ~ (donut.at + share) | round(2) ~ '%'] %}
+    {% set donut.at = donut.at + share %}
+  {% endfor %}
+  <div class="col-xl-6" id="scope-{{ cat.attr }}">
+    <div class="card content-card chart-card h-100" style="--icon-color:{{ color }};">
       <div class="card-header d-flex align-items-center justify-content-between">
-        <span><i class="fas fa-crosshairs me-2"></i>{{ cat.label }}</span>
-        <span class="badge text-bg-light" style="font-weight:400;">{{ cat.distinct }} distinct · {{ cat.total }} total</span>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas {{ icon }}"></i></span>{{ cat.label }}</span>
+        <span class="chart-badge">{{ cat.distinct }} distinct · {{ cat.total }} total</span>
       </div>
       <div class="card-body">
-        {% if cat['items'] %}
-        {% set top = cat['items'][0].count %}
+        <div class="scope-summary">
+          <div class="scope-donut" style="background:conic-gradient({{ donut.stops | join(', ') }});"
+               title="{% for kind, k in scope_kinds.items() if cat.by_kind[kind] %}{{ k.label }} {{ cat.by_kind[kind] }}{{ ', ' if not loop.last }}{% endfor %}">
+            <span>{{ cat.total }}<small>total</small></span>
+          </div>
+          <div class="scope-top">
+            {% for item in cat['items'][:3] %}
+            <div class="scope-top-item">
+              <div class="place">{{ ['1st', '2nd', '3rd'][loop.index0] }}</div>
+              <div class="value" title="{{ item.value }}">{{ item.value }}</div>
+              <div class="count">{{ item.count }} record{{ 's' if item.count != 1 }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
         <div class="scope-list">
           {% for item in cat['items'] %}
           {% set entries_id = 'scope-' ~ cat.attr ~ '-' ~ loop.index %}
-          <div class="scope-bar-row">
-            <a class="scope-bar-link" data-bs-toggle="collapse" href="#{{ entries_id }}"
-               role="button" aria-expanded="false" aria-controls="{{ entries_id }}">
-              <div class="scope-bar-head">
-                <span class="scope-val" title="{{ item.value }}">{{ item.value }}</span>
-                <span class="scope-cnt">{{ item.count }}</span>
-              </div>
-              <div class="scope-bar-track">
-                <div class="scope-bar-fill" style="width: {{ (item.count / top * 100) | round(1) }}%;"></div>
-              </div>
-            </a>
-            <ul class="collapse scope-entries" id="{{ entries_id }}">
-              {% for entry in item.entries %}
-              {% set kind = scope_kinds.get(entry.kind) %}
-              <li>
-                <span class="badge text-bg-light">{{ kind.label if kind else entry.kind }}</span>
-                {% if kind %}
-                <a href="{{ url_for(kind.endpoint, id=entry.uuid) }}" title="{{ entry.label }}">{{ entry.label }}</a>
-                {% else %}
-                {{ entry.label }}
-                {% endif %}
-              </li>
-              {% endfor %}
-            </ul>
-          </div>
+          <a class="chart-row scope-row" data-bs-toggle="collapse" href="#{{ entries_id }}"
+             role="button" aria-expanded="false" aria-controls="{{ entries_id }}">
+            <span class="rank">{{ loop.index }}</span>
+            <span class="d-block" style="min-width:0;">
+              <span class="value-line"><span class="name" title="{{ item.value }}">{{ item.value }}</span><i class="fas fa-chevron-right chev"></i></span>
+              <span class="chart-bar" style="width:{{ (item.count / top * 100) | round(1) }}%;">
+                {% for kind, k in scope_kinds.items() if item.by_kind[kind] %}
+                <span style="flex:{{ item.by_kind[kind] }};background:{{ k.color }};" title="{{ k.label }}: {{ item.by_kind[kind] }}"></span>
+                {% endfor %}
+              </span>
+            </span>
+            <span class="chart-pill">{{ item.count }}</span>
+          </a>
+          <ul class="collapse scope-entries" id="{{ entries_id }}">
+            {% for entry in item.entries %}
+            {% set kind = scope_kinds.get(entry.kind) %}
+            <li>
+              <span class="scope-kind" style="--kind-color:{{ kind.color if kind else 'var(--text-muted)' }};">{{ kind.label if kind else entry.kind }}</span>
+              {% if kind %}
+              <a href="{{ url_for(kind.endpoint, id=entry.uuid) }}" title="{{ entry.label }}">{{ entry.label }}</a>
+              {% else %}
+              {{ entry.label }}
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
           {% endfor %}
         </div>
-        {% else %}
-        <p class="text-muted mb-0"><em>No scope items recorded.</em></p>
-        {% endif %}
       </div>
     </div>
   </div>
   {% endfor %}
 </div>
+
+{% set empty_categories = categories | rejectattr('total') | list %}
+{% if empty_categories %}
+<div class="chart-label mt-4 mb-2">Categories with no scope items</div>
+<div class="row g-3">
+  {% for cat in empty_categories %}
+  {% set icon, color = category_looks.get(cat.attr, ('fa-crosshairs', 'var(--accent-blue)')) %}
+  <div class="col-md-6 col-xl-3" id="scope-{{ cat.attr }}">
+    <div class="scope-empty d-flex align-items-center gap-2 p-3" style="--icon-color:{{ color }};">
+      <span class="stat-icon icon-sm"><i class="fas {{ icon }}"></i></span>
+      <div class="flex-grow-1">
+        <div class="fw-semibold" style="font-size:.84rem;">{{ cat.label }}</div>
+        <div class="text-muted" style="font-size:.75rem;"><em>No scope items recorded.</em></div>
+      </div>
+      <span class="chart-badge">{{ cat.distinct }} distinct · {{ cat.total }} total</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

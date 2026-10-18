@@ -159,19 +159,25 @@
   </div>
 </div>
 
+{% import "_charts.html" as charts %}
+
 <div class="row g-4">
 
   <!-- Active PIRs -->
   <div class="col-lg-6">
-    <div class="card content-card">
+    <div class="card content-card chart-card h-100" style="--icon-color:var(--accent-blue);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-star me-2 text-primary"></i>Active PIRs</span>
-        <a href="{{ url_for('requirements.pir_new') }}" class="btn btn-xs btn-outline-primary">
-          <i class="fas fa-plus"></i>
-        </a>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-star"></i></span>Active PIRs</span>
+        <span class="d-flex align-items-center gap-2">
+          {% if active_pirs %}<span class="chart-badge">{{ active_pirs | length }} active</span>{% endif %}
+          <a href="{{ url_for('requirements.pir_new') }}" class="btn btn-xs btn-outline-primary" title="New PIR">
+            <i class="fas fa-plus"></i>
+          </a>
+        </span>
       </div>
       <div class="card-body p-0">
         {% if active_pirs %}
+        <div class="chart-summary">{{ charts.mix('Priority', priority_counts, charts.priority_colors) }}</div>
         <ul class="req-list">
           {% for pir in active_pirs %}
           <li class="req-item">
@@ -198,15 +204,19 @@
 
   <!-- Active GIRs -->
   <div class="col-lg-6">
-    <div class="card content-card">
+    <div class="card content-card chart-card h-100" style="--icon-color:var(--accent-green);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-list-check me-2 text-success"></i>Active GIRs</span>
-        <a href="{{ url_for('requirements.gir_new') }}" class="btn btn-xs btn-outline-success">
-          <i class="fas fa-plus"></i>
-        </a>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-list-check"></i></span>Active GIRs</span>
+        <span class="d-flex align-items-center gap-2">
+          {% if active_girs %}<span class="chart-badge">{{ active_girs | length }} active</span>{% endif %}
+          <a href="{{ url_for('requirements.gir_new') }}" class="btn btn-xs btn-outline-success" title="New GIR">
+            <i class="fas fa-plus"></i>
+          </a>
+        </span>
       </div>
       <div class="card-body p-0">
         {% if active_girs %}
+        <div class="chart-summary">{{ charts.mix('Review cycle', cycle_counts, charts.cycle_colors) }}</div>
         <ul class="req-list">
           {% for gir in active_girs %}
           <li class="req-item">
@@ -236,35 +246,32 @@
 <div class="row g-4 mt-0">
 
   <!-- Products by threat actor type -->
-  <div class="col-lg-6">
-    <div class="card content-card h-100">
+  <div class="col-xl-4 col-lg-6">
+    <div class="card content-card chart-card h-100" style="--icon-color:var(--accent-blue);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-user-shield me-2 text-primary"></i>Products by threat actor type</span>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-user-shield"></i></span>Products by threat actor type</span>
         <a href="{{ url_for('stats.index') }}" class="btn btn-xs btn-outline-secondary">Stats</a>
       </div>
       <div class="card-body">
         {% if actor_type_products %}
         {% set max_total = actor_type_products[0].total %}
-        {% set swatch = "display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle;" %}
-        <div class="d-flex gap-3 mb-3 small text-muted">
-          <span><span style="{{ swatch }}background:var(--accent-blue);"></span>Daily briefings</span>
-          <span><span style="{{ swatch }}background:var(--accent-orange);"></span>Flash intel</span>
-          <span><span style="{{ swatch }}background:var(--accent-green);"></span>Threat actor profiles</span>
+        <div class="chart-legend mb-2">
+          <span><span class="chart-swatch" style="background:var(--accent-blue);"></span>Daily briefings</span>
+          <span><span class="chart-swatch" style="background:var(--accent-orange);"></span>Flash intel</span>
+          <span><span class="chart-swatch" style="background:var(--accent-green);"></span>Threat actor profiles</span>
         </div>
         {% for row in actor_type_products %}
-        <div class="mb-2">
-          <div class="d-flex justify-content-between small mb-1">
-            <span class="fw-semibold">{{ row.actor_type }}</span>
-            <span class="text-muted">{{ row.total }}</span>
-          </div>
-          <div class="progress" style="height:8px;border-radius:4px;">
-            <div class="progress-bar" style="width:{{ (row.daily_briefings / max_total * 100) | round(1) }}%;background:var(--accent-blue);"
-                 title="{{ row.daily_briefings }} daily briefing(s)"></div>
-            <div class="progress-bar" style="width:{{ (row.flash_intel_alerts / max_total * 100) | round(1) }}%;background:var(--accent-orange);"
-                 title="{{ row.flash_intel_alerts }} flash intel alert(s)"></div>
-            <div class="progress-bar" style="width:{{ (row.threat_actor_profiles / max_total * 100) | round(1) }}%;background:var(--accent-green);"
-                 title="{{ row.threat_actor_profiles }} threat actor profile(s)"></div>
-          </div>
+        <div class="chart-row">
+          <span class="rank">{{ loop.index }}</span>
+          <span class="d-block" style="min-width:0;">
+            <span class="name" title="{{ row.actor_type }}">{{ row.actor_type }}</span>
+            <span class="chart-bar" style="width:{{ (row.total / max_total * 100) | round(1) }}%;">
+              {% if row.daily_briefings %}<span style="flex:{{ row.daily_briefings }};background:var(--accent-blue);" title="{{ row.daily_briefings }} daily briefing(s)"></span>{% endif %}
+              {% if row.flash_intel_alerts %}<span style="flex:{{ row.flash_intel_alerts }};background:var(--accent-orange);" title="{{ row.flash_intel_alerts }} flash intel alert(s)"></span>{% endif %}
+              {% if row.threat_actor_profiles %}<span style="flex:{{ row.threat_actor_profiles }};background:var(--accent-green);" title="{{ row.threat_actor_profiles }} threat actor profile(s)"></span>{% endif %}
+            </span>
+          </span>
+          <span class="chart-pill">{{ row.total }}</span>
         </div>
         {% endfor %}
         {% else %}
@@ -278,24 +285,23 @@
   </div>
 
   <!-- Throughput by collection source -->
-  <div class="col-lg-6">
-    <div class="card content-card h-100">
+  <div class="col-xl-4 col-lg-6">
+    <div class="card content-card chart-card h-100" style="--icon-color:var(--accent-green);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-satellite-dish me-2 text-success"></i>Throughput by collection source</span>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-satellite-dish"></i></span>Throughput by collection source</span>
         <a href="{{ url_for('pipeline.index') }}" class="btn btn-xs btn-outline-secondary">Details</a>
       </div>
       <div class="card-body">
         {% if throughput_by_source %}
         {% set max_n = throughput_by_source[0].n %}
         {% for row in throughput_by_source %}
-        <div class="mb-2">
-          <div class="d-flex justify-content-between small mb-1">
-            <span class="fw-semibold">{{ row.source_feed or 'Unknown' }}</span>
-            <span class="text-muted">{{ row.n }}</span>
-          </div>
-          <div class="progress" style="height:8px;border-radius:4px;">
-            <div class="progress-bar" style="width:{{ (row.n / max_n * 100) | round(1) }}%;background:var(--accent-green);"></div>
-          </div>
+        <div class="chart-row">
+          <span class="rank">{{ loop.index }}</span>
+          <span class="d-block" style="min-width:0;">
+            <span class="name" title="{{ row.source_feed or 'Unknown' }}">{{ row.source_feed or 'Unknown' }}</span>
+            <span class="chart-bar" style="width:{{ (row.n / max_n * 100) | round(1) }}%;"><span style="flex:1;background:var(--accent-green);"></span></span>
+          </span>
+          <span class="chart-pill">{{ row.n }}</span>
         </div>
         {% endfor %}
         {% else %}
@@ -309,25 +315,24 @@
   </div>
 
   <!-- Events held per source configured under Collection sources. The card
-       above counts per collection-source tag, which is a different question. -->
-  <div class="col-lg-6">
-    <div class="card content-card h-100">
+       before it counts per collection-source tag, which is a different question. -->
+  <div class="col-xl-4 col-lg-6">
+    <div class="card content-card chart-card h-100" style="--icon-color:var(--misp-navy);">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="fas fa-server me-2 text-primary"></i>By configured source</span>
+        <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-server"></i></span>By configured source</span>
         <a href="{{ url_for('collection_sources.index') }}" class="btn btn-xs btn-outline-secondary">Sources</a>
       </div>
       <div class="card-body">
         {% if configured_sources and configured_sources[0].events %}
         {% set max_events = configured_sources[0].events %}
         {% for row in configured_sources %}
-        <div class="mb-2">
-          <div class="d-flex justify-content-between small mb-1">
-            <span class="fw-semibold">{{ row.label }}</span>
-            <span class="text-muted">{{ row.events }}</span>
-          </div>
-          <div class="progress" style="height:8px;border-radius:4px;">
-            <div class="progress-bar" style="width:{{ (row.events / max_events * 100) | round(1) }}%;background:var(--accent-blue);"></div>
-          </div>
+        <div class="chart-row">
+          <span class="rank">{{ loop.index }}</span>
+          <span class="d-block" style="min-width:0;">
+            <span class="name" title="{{ row.label }}">{{ row.label }}</span>
+            <span class="chart-bar" style="width:{{ (row.events / max_events * 100) | round(1) }}%;"><span style="flex:1;background:var(--misp-navy);"></span></span>
+          </span>
+          <span class="chart-pill">{{ row.events }}</span>
         </div>
         {% endfor %}
         {% else %}

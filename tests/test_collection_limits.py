@@ -1,7 +1,7 @@
 """Searches capped by a limit, and what the pipeline page says about a source.
 
-Asked for no order, MISP answers oldest first, so a refresh, a page or a count
-cut off by its limit dropped the newest events. Every limited search asks for
+Asked for no order, MISP answers oldest first, so a refresh or a page cut off
+by its limit dropped the newest events. Every limited search asks for
 the newest first. A refresh records whether it filled its limit, from what MISP
 sent rather than what the org filter kept; a server's own limit is the one
 used, and each manual source is searched on its own tag. The source health
@@ -26,7 +26,7 @@ from pymisp import MISPEvent, MISPOrganisation, PyMISP
 import config
 from core import db as core_db
 from webapp import analyser_pipeline, collection_cache, create_app, misp_store
-from webapp.routes import config_page, dashboard, pipeline, products
+from webapp.routes import config_page, pipeline, products
 
 PARTNER = {"id": "partner", "kind": "misp", "label": "Partner", "url": "https://partner.example.org",
            "api_key": "k", "verify_tls": True, "tags": [], "tags_and": [], "tags_not": [],
@@ -199,18 +199,6 @@ class OtherLimitedSearches(unittest.TestCase):
         self.assertEqual(self.order(), misp_store.NEWEST_FIRST)
         self.misp.build_complex_query.assert_called_once_with(
             or_parameters=None, and_parameters=None, not_parameters=["tlp:red"])
-
-    def test_pending_events_on_the_dashboard(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with mock.patch.object(config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True):
-            core_db.init_db()
-            with mock.patch.object(dashboard, "load_last_run", return_value=None), \
-                 mock.patch.object(dashboard, "load_last_action", return_value=None), \
-                 mock.patch.object(dashboard, "scraper_enabled", return_value=True), \
-                 mock.patch.object(misp_store, "_scraper_misp", return_value=self.misp):
-                dashboard._pipeline_status()
-        self.assertEqual(self.order(), misp_store.NEWEST_FIRST)
 
 
 if __name__ == "__main__":

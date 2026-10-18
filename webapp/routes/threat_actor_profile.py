@@ -13,7 +13,8 @@ import config
 from webapp import audit, branding, misp_session, misp_store, notify_jobs
 from webapp.rate_limit import rate_limited
 from webapp.diamond import render_diamond_png
-from webapp.utils import sort_products
+from webapp.models import STAKEHOLDER_ROLES
+from webapp.utils import TLP_NAMES, matching, ordered_counts, sort_products, tlp_counts, tlp_of
 from notifier import dispatcher
 
 logger = logging.getLogger(__name__)
@@ -89,16 +90,33 @@ def _form_context(tap=None):
 
 @bp.route("/")
 def review():
-    state_filter = (request.args.get("state") or "").strip() or None
+    state_filter = (request.args.get("state") or "").strip()
+    tlp_filter = (request.args.get("tlp") or "").strip()
+    audience_filter = (request.args.get("audience") or "").strip()
     sort = (request.args.get("sort") or "").strip()
     direction = (request.args.get("dir") or "asc").strip()
-    taps = misp_store.list_threat_actor_profiles(status=state_filter)
-    sort_products(taps, sort, direction)
+    all_taps = misp_store.list_threat_actor_profiles()
+    # The filters that are set, each under the query argument it comes from.
+    tests = {}
+    if state_filter:
+        tests["state"] = lambda t: t.status == state_filter
+    if tlp_filter:
+        tests["tlp"] = lambda t: tlp_of(t) == tlp_filter
+    if audience_filter:
+        tests["audience"] = lambda t: misp_store.has_audience(t, audience_filter)
+    taps = sort_products(matching(all_taps, tests), sort, direction)
     return render_template(
         "threat_actor_profile/review.html",
         taps=taps,
-        state_filter=state_filter or "",
+        state_filter=state_filter,
         states=STATES,
+        state_counts=ordered_counts((t.status for t in matching(all_taps, tests, skip="state")), STATES),
+        tlp_filter=tlp_filter,
+        audience_filter=audience_filter,
+        tlp_choices=TLP_NAMES,
+        audience_choices=STAKEHOLDER_ROLES,
+        tlp_counts=tlp_counts(matching(all_taps, tests, skip="tlp")),
+        audience_counts=misp_store.audience_counts(matching(all_taps, tests, skip="audience")),
         sort=sort,
         dir=direction,
     )

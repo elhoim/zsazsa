@@ -14,6 +14,11 @@
 {% endblock %}
 
 {% block content %}
+<style>
+  .kanban-closed { display: block; text-align: center; padding: .9rem .5rem; border: 1px dashed var(--border-light);
+                   border-radius: 6px; color: var(--text-muted); font-size: .8rem; }
+  .kanban-closed:hover { border-color: var(--accent-purple); color: var(--accent-purple); }
+</style>
 {% set rfi_priority_class = {
   'High': 'must-have',
   'Medium': 'should-have',
@@ -26,25 +31,67 @@
   'Delivered': 'implemented',
   'Closed': 'retired'
 } %}
-<div class="card content-card mb-3">
+{% import "_charts.html" as charts with context %}
+{% set sla_colors = {'Overdue': 'var(--accent-red)', 'Due soon': 'var(--accent-orange)', 'No due date': 'var(--neutral-400)',
+                     'On track': 'var(--accent-green)', 'Done': 'var(--neutral-600)'} %}
+<div class="card content-card chart-card mb-3" style="--icon-color:var(--accent-purple);">
   <div class="card-body py-2">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-auto">
-        <label class="form-label small mb-1">Status</label>
-        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
-          <option value="">All statuses</option>
-          {% for s in statuses %}
-          <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s }}</option>
-          {% endfor %}
-        </select>
+    <div class="row g-3">
+      <div class="col-lg-3">
+        <form method="get" class="list-filters">
+          {% if show_closed %}<input type="hidden" name="closed" value="1">{% endif %}
+          <div class="filter" title="Status">
+            <span class="stat-icon icon-xs"><i class="fas fa-bars-progress"></i></span>
+            <select name="status" class="form-select form-select-sm" aria-label="Status" onchange="this.form.submit()">
+              <option value="">All statuses</option>
+              {% for s in statuses %}
+              <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="Priority">
+            <span class="stat-icon icon-xs"><i class="fas fa-flag"></i></span>
+            <select name="priority" class="form-select form-select-sm" aria-label="Priority" onchange="this.form.submit()">
+              <option value="">All priorities</option>
+              {% for value in priorities %}
+              <option value="{{ value }}" {{ 'selected' if priority_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter" title="SLA">
+            <span class="stat-icon icon-xs"><i class="fas fa-stopwatch"></i></span>
+            <select name="sla" class="form-select form-select-sm" aria-label="SLA" onchange="this.form.submit()">
+              <option value="">Any SLA</option>
+              {% for value in sla_labels %}
+              <option value="{{ value }}" {{ 'selected' if sla_filter == value }}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% if not status_filter and closed_count %}
+          <a href="{{ url_for('rfi.rfi_list', **dict(request.args.to_dict(), closed=None if show_closed else 1)) }}"
+             class="btn btn-xs btn-outline-secondary w-100 mb-2">
+            <i class="fas {{ 'fa-eye-slash' if show_closed else 'fa-box-archive' }} me-1"></i>
+            {{ 'Hide closed RFIs' if show_closed else 'Show closed RFIs (' ~ closed_count ~ ')' }}
+          </a>
+          {% endif %}
+          <div class="d-flex align-items-center justify-content-between small text-muted">
+            <span>{{ rfis | length }} RFI{{ 's' if rfis|length != 1 }}{{ ' open' if hide_closed }}</span>
+            {% if status_filter or priority_filter or sla_filter %}
+            <a href="{{ url_for('rfi.rfi_list') }}" class="btn btn-xs btn-outline-secondary">Clear</a>
+            {% endif %}
+          </div>
+        </form>
       </div>
-      {% if status_filter %}
-      <div class="col-auto">
-        <a href="{{ url_for('rfi.rfi_list') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+      {% if priority_counts or sla_counts %}
+      <div class="col-lg-9 list-stats">
+        <div class="row g-3">
+          <div class="col-md-4">{{ charts.mix('Status', status_counts, charts.status_colors) }}</div>
+          <div class="col-md-4">{{ charts.mix('Priority', priority_counts, charts.priority_colors, param='priority', selected=priority_filter) }}</div>
+          <div class="col-md-4">{{ charts.mix('SLA', sla_counts, sla_colors, param='sla', selected=sla_filter) }}</div>
+        </div>
       </div>
       {% endif %}
-      <div class="col-auto ms-auto text-muted small">{{ rfis | length }} RFI{{ 's' if rfis|length != 1 }}</div>
-    </form>
+    </div>
   </div>
 </div>
 
@@ -63,9 +110,17 @@
           {% elif col_status == 'Delivered' %}bg-success-subtle text-success-emphasis
           {% else %}bg-light text-muted{% endif %}">
           {{ col_status }}
-          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">{{ rfis | selectattr('status', 'equalto', col_status) | list | length }}</span>
+          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">
+            {{- closed_count if col_status == 'Closed' and hide_closed else rfis | selectattr('status', 'equalto', col_status) | list | length -}}
+          </span>
         </div>
         <div class="kanban-cards" style="min-height:60px;">
+          {% if col_status == 'Closed' and hide_closed %}
+          <a href="{{ url_for('rfi.rfi_list', **dict(request.args.to_dict(), closed=1)) }}" class="kanban-closed text-decoration-none" title="Show the closed RFIs">
+            <span class="fw-bold">{{ closed_count }}</span> closed
+            <i class="fas fa-eye ms-1"></i>
+          </a>
+          {% endif %}
           {% for rfi in rfis %}
           {% if rfi.status == col_status %}
           {% set can_drag = rfi.status != 'New' %}

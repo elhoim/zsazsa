@@ -117,14 +117,9 @@ def _program_metrics(pirs, girs, stakeholders):
     metrics["pir_coverage"]["covered"] = len(pirs_covered & active_pir_ids)
     metrics["pir_coverage"]["uncovered"] = len(active_pir_ids - pirs_covered)
 
-    for p in pirs:
-        _il = getattr(p, "intel_level", None)
-        lvl = (_il[0] if isinstance(_il, list) and _il else _il) or "Unspecified"
-        metrics["intel_levels"]["pir"][lvl] += 1
-    for g in girs:
-        _il = getattr(g, "intel_level", None)
-        lvl = (_il[0] if isinstance(_il, list) and _il else _il) or "Unspecified"
-        metrics["intel_levels"]["gir"][lvl] += 1
+    # A requirement counts under each of its levels, as on the PIR and GIR lists.
+    for kind, reqs in (("pir", pirs), ("gir", girs)):
+        metrics["intel_levels"][kind].update(level for r in reqs for level in (r.intel_level or ["Unspecified"]))
 
     for p in active_pirs:
         if p.collection_sources:
@@ -181,6 +176,7 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
     def _signal(domain, level, observed, gaps):
         return {
             "domain": domain,
+            "rank": level,
             "level": level_label[level],
             "color": level_color[level],
             "observed": observed,
@@ -381,4 +377,13 @@ def index():
 @bp.route("/stats/scope")
 def scope():
     categories = misp_store.scope_stats()
-    return render_template("scope_stats.html", categories=categories)
+    # The bars and rings split each count by the kind of record it came from.
+    records = set()
+    for cat in categories:
+        cat["by_kind"] = Counter()
+        for item in cat["items"]:
+            item["by_kind"] = Counter(e["kind"] for e in item["entries"])
+            cat["by_kind"] += item["by_kind"]
+            records.update((e["kind"], e["uuid"]) for e in item["entries"])
+    return render_template("scope_stats.html", categories=categories,
+                           records_by_kind=Counter(kind for kind, _uuid in records))

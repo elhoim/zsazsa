@@ -26,6 +26,7 @@
   --accent-green:     #22a06b;
   --accent-orange:    #e07c1e;
   --accent-red:       #d93025;
+  --accent-purple:    #7b61c9;
 
   --border-radius:    8px;
   --card-shadow:      0 1px 3px rgba(4,28,68,.09), 0 0 1px rgba(4,28,68,.06);
@@ -976,6 +977,110 @@ body {
 
 .stat-link:hover {
   opacity: 1;
+}
+
+/* ─── Charts ─────────────────────────────────────────────────────────────── */
+/* Shared by the dashboard, the statistics pages and the list pages. A chart
+   takes its colour from --icon-color, as the stat icons do. */
+.stat-icon.icon-sm { width: 32px; height: 32px; border-radius: 9px; font-size: .85rem; }
+.stat-icon.icon-xs { width: 24px; height: 24px; border-radius: 50%; font-size: .68rem; }
+
+.chart-card { border-top: 3px solid var(--icon-color, var(--accent-blue)); }
+.content-card.chart-card .card-header { background: var(--card-bg); }
+
+.chart-badge {
+  background: var(--card-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: .72rem;
+  padding: .2rem .6rem;
+  white-space: nowrap;
+}
+
+/* A strip of summary above a card's list. */
+.chart-summary { padding: .85rem 1rem; border-bottom: 1px solid var(--border-faint); }
+
+.chart-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chart-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: .3rem;
+  vertical-align: -1px;
+  flex-shrink: 0;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .9rem;
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+.chart-legend strong { color: var(--text-primary); }
+/* A legend entry that filters the list it is beside. */
+.chart-legend .faded { opacity: .45; }
+a.chart-filter { color: inherit; text-decoration: none; }
+a.chart-filter:hover { color: var(--text-primary); text-decoration: underline; }
+a.chart-filter.selected { color: var(--text-primary); font-weight: 600; text-decoration: underline; }
+
+/* A bar of segments, each sized by its flex value. */
+.chart-segbar {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-muted);
+}
+.chart-segbar > * + * { border-left: 2px solid var(--card-bg); }
+
+.chart-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: .05rem .5rem;
+  font-size: .75rem;
+  font-weight: 700;
+  text-align: center;
+  background: color-mix(in srgb, var(--icon-color, var(--accent-blue)) 12%, transparent);
+  color: var(--icon-color, var(--accent-blue));
+}
+
+/* A ranked row: its place, a name over a bar, and a count. */
+.chart-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  gap: .5rem;
+  align-items: center;
+  padding: .3rem .35rem;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+a.chart-row:hover { background: var(--surface-hover); }
+.chart-row .rank { font-size: .7rem; color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.chart-row .name { display: block; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-row .chart-pill { min-width: 2.2rem; }
+.chart-bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; margin-top: 3px; }
+.chart-bar > span + span { border-left: 1px solid var(--card-bg); }
+
+/* A list page's filter card: the filters and their count on the left, the
+   statistics of what the list shows on the right. */
+.list-filters .filter { display: flex; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+.list-filters .form-select { flex: 1; min-width: 0; }
+.list-stats { border-left: 1px dashed var(--border-light); }
+.list-stats .chart-segbar { height: 6px; }
+.list-stats .chart-legend { font-size: .72rem; }
+@media (max-width: 991.98px) {
+  .list-stats { border-left: 0; border-top: 1px dashed var(--border-light); padding-top: .6rem; }
 }
 
 /* ─── Requirements list widget ──────────────────────────────────────────── */

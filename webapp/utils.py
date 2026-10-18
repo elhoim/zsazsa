@@ -2,10 +2,11 @@
 
 import ast
 import re
-from collections import namedtuple
+from collections import Counter, namedtuple
 from datetime import datetime
 
 import config
+from webapp.models import TLP_LEVELS
 from flask import jsonify, request
 from markdown_it import MarkdownIt
 from werkzeug.routing import BuildError
@@ -92,6 +93,35 @@ def dedup_lower(values: list) -> list:
             seen.add(key)
             result.append(value.strip())
     return result
+
+
+def ordered_counts(values, order=()) -> list:
+    """[(value, how often)] for the bars above a list: the values of ``order``
+    first, in that order, then any others, most frequent first."""
+    counts = Counter(values)
+    return [(v, counts.pop(v)) for v in order if v in counts] + counts.most_common()
+
+
+# The TLP levels as the product lists show them and filter on them.
+TLP_NAMES = [t.upper() for t in TLP_LEVELS]
+
+
+def tlp_of(product) -> str:
+    return (product.tlp or "clear").upper()
+
+
+def tlp_counts(products) -> list:
+    """[(TLP, how many)] for the bar above a product list, from CLEAR to RED."""
+    return ordered_counts(map(tlp_of, products), TLP_NAMES)
+
+
+def matching(items, tests, skip=None) -> list:
+    """The items that pass every test in ``tests`` but the one named ``skip``.
+
+    A bar beside a list counts what the other filters let through, so that it
+    still offers every choice of the filter it sets.
+    """
+    return [i for i in items if all(test(i) for name, test in tests.items() if name != skip)]
 
 
 def json_body():
