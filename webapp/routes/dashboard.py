@@ -164,6 +164,7 @@ def _pipeline_status():
         pending = misp.search(
             tags=[config.SCRAPER_MARKER_TAG],
             limit=getattr(config, "MISP_SCRAPER_LIMIT", 500), metadata=True, pythonify=False,
+            order=misp_store.NEWEST_FIRST,
         )
         if isinstance(pending, dict):
             pending = pending.get("response", [])

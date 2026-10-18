@@ -16,7 +16,7 @@ from markupsafe import escape
 from core import flowintel_client
 from core.atomic_write import write_atomically
 from webapp import audit, misp_session, misp_store, newsletter_parsers
-from webapp.collection_cache import _split_tags, filter_events_by_org
+from webapp.collection_cache import _split_tags, filter_events_by_org, partner_tag_filter
 from webapp.rate_limit import rate_limited
 from webapp.routes import setup_wizard
 from webapp.utils import (
@@ -1352,19 +1352,15 @@ def pull_estimate():
         limit = 500
 
     try:
-        m = PyMISP(misp_url, misp_key, verify_tls)
+        m = PyMISP(misp_url, misp_key, verify_tls, timeout=misp_store.HTTP_TIMEOUT)
         use_published = body.get("published", True)
-        kwargs = dict(limit=limit, page=1, metadata=True, pythonify=True)
+        # Asked as the cache refresh asks, so the estimate is what a refresh stores.
+        kwargs = dict(limit=limit, page=1, metadata=True, pythonify=True, order=misp_store.NEWEST_FIRST)
         if use_published:
             kwargs["published"] = True
-        if tags_and or tags_not:
-            kwargs["tags"] = m.build_complex_query(
-                or_parameters=tags_or or None,
-                and_parameters=tags_and or None,
-                not_parameters=tags_not or None,
-            )
-        elif tags_or:
-            kwargs["tags"] = tags_or
+        tags = partner_tag_filter(m, {"tags": tags_or, "tags_and": tags_and, "tags_not": tags_not})
+        if tags:
+            kwargs["tags"] = tags
         if since_days:
             cutoff = (_dt.date.today() - _dt.timedelta(days=since_days)).isoformat()
             kwargs["date_from"] = cutoff

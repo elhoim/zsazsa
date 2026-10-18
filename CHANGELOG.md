@@ -59,6 +59,11 @@
 - The PIR filter on All products found no product: it now reads each product's link.
 - Statistics showed no products for the last 7 and 30 days and 0% PIR coverage.
 - Flash intel alerts without their MISP object now show their title and id.
+- A source with more events than its limit had its oldest cached, not its newest.
+- Source health showed no event count or last event. It
+  now shows the newest cached event.
+- The "Max events" of a MISP server under Collection sources was saved but not used: the cache
+  always read 500 events.
 
 ### Security
 
@@ -78,6 +83,8 @@
   doing: zsazsa finds the object by name, so existing reports keep working,
   and a report's object takes the new UUID the next time it is saved.
 - The collection cache has an `indicator_stats` table, created when the web app starts.
+- The collection cache's `source_status` table has a new `last_limit_reached` column, added when the
+  web app starts. Until a source's next refresh, it shows no limit warning.
 
 ## 1.0.8
 

@@ -196,6 +196,7 @@ def _today_incomplete_scraper_events():
         limit=getattr(config, "MISP_SCRAPER_LIMIT", 500),
         page=1,
         pythonify=True,
+        order=misp_store.NEWEST_FIRST,
     )
     if isinstance(events, dict):
         # An error answer and an empty one both end the run reporting no

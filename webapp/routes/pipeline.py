@@ -3,7 +3,7 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 
@@ -184,14 +184,17 @@ def _refresh_status(status: dict | None, interval_s: int) -> dict:
     ``status`` is one row of collection_cache.get_source_status(). A refresh
     re-fetches everything the source's filters match and replaces the cached
     copy, so ``matched`` is the size of that set and only ``matched_new`` says
-    what this run actually brought in. A run older than twice the refresh
-    interval is marked overdue: the worker lives in this process, so a growing
-    age is how a dead or stuck worker shows itself.
+    what this run actually brought in. ``limit_reached`` means MISP answered
+    with as many events as the source's limit allows, so older ones in its
+    window may be missing. A run older than twice the refresh interval is
+    marked overdue: the worker lives in this process, so a growing age is how a
+    dead or stuck worker shows itself.
     """
     if not status or not status.get("last_fetch"):
         return {"last_refresh": "", "refresh_age": "", "matched": None,
                 "matched_new": None, "refresh_duration": None,
-                "refresh_error": "", "refresh_overdue": False, "cached_events": 0}
+                "refresh_error": "", "refresh_overdue": False, "cached_events": 0,
+                "newest_event": "", "limit_reached": False}
 
     age_s = max(0.0, time.time() - status["last_fetch"])
     return {
@@ -203,14 +206,20 @@ def _refresh_status(status: dict | None, interval_s: int) -> dict:
         "refresh_error": status.get("error") or "",
         "refresh_overdue": age_s > 2 * interval_s,
         "cached_events": status.get("event_count", 0),
+        "newest_event": status.get("newest_event") or "",
+        "limit_reached": bool(status.get("last_limit_reached")),
     }
 
 
 def _source_health():
+    """One row per collection source: whether its server answers, and what the
+    cache worker last read from it.
+
+    The events themselves come from the cache, not from the server: this runs
+    on every load of the pipeline and statistics pages, and a partner server can
+    hold tens of thousands of events.
+    """
     from webapp.routes.data_collection import _sources
-    from pymisp import PyMISP
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     cache_status = collection_cache.get_source_status()
     interval_s = collection_cache.interval_s()
@@ -221,62 +230,22 @@ def _source_health():
         if src["kind"] == "manual":
             results.append({
                 "label": src["label"], "url": "", "kind": "manual",
-                "ok": True, "version": "", "error": "",
-                "last_event_date": "", "event_count": None, "manual": True,
+                "ok": True, "version": "", "error": "", "manual": True,
                 **refresh,
             })
             continue
 
-        row = {"label": src["label"], "url": src.get("url", ""), "kind": src["kind"], **refresh}
         if src["kind"] == "scraper":
             conn = misp_store.test_scraper_misp()
         else:
             conn = misp_store._test_connection(
                 src.get("url", ""), src.get("api_key", ""), src.get("verify_tls", True),
             )
-        row["ok"] = conn.get("ok", False)
-        row["version"] = conn.get("version", "")
-        row["error"] = conn.get("error", "")
-
-        if row["ok"]:
-            try:
-                if src["kind"] == "scraper":
-                    misp = misp_store._scraper_misp()
-                    search_kwargs = dict(tags=[config.SCRAPER_MARKER_TAG], limit=1, page=1, metadata=True, pythonify=True)
-                    count_kwargs = dict(tags=[config.SCRAPER_MARKER_TAG], limit=1, page=1, metadata=True, return_format="count")
-                else:
-                    misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
-                                  timeout=misp_store.HEALTH_CHECK_TIMEOUT)
-                    # The same filter the cache refresh reads the source with, so the
-                    # count is what the source can see.
-                    search_kwargs = dict(limit=1, page=1, metadata=True, pythonify=True, published=True)
-                    count_kwargs = dict(limit=1, page=1, metadata=True, return_format="count", published=True)
-                    tags = collection_cache.partner_tag_filter(misp, src)
-                    if tags:
-                        search_kwargs["tags"] = count_kwargs["tags"] = tags
-                    if src.get("since_days"):
-                        cutoff = (date.today() - timedelta(days=int(src["since_days"]))).isoformat()
-                        search_kwargs["date_from"] = cutoff
-
-                recent = misp.search(**search_kwargs)
-                row["last_event_date"] = str(recent[0].date) if recent and not isinstance(recent, dict) and recent[0].date else ""
-
-                count_resp = misp.search(**count_kwargs)
-                if isinstance(count_resp, dict) and "count" in count_resp:
-                    row["event_count"] = count_resp["count"]
-                elif isinstance(count_resp, int):
-                    row["event_count"] = count_resp
-                else:
-                    row["event_count"] = None
-            except Exception as exc:
-                logger.debug("source health check failed for %s: %s", src["label"], exc)
-                row["last_event_date"] = ""
-                row["event_count"] = None
-        else:
-            row["last_event_date"] = ""
-            row["event_count"] = None
-
-        results.append(row)
+        results.append({
+            "label": src["label"], "url": src.get("url", ""), "kind": src["kind"],
+            "ok": conn.get("ok", False), "version": conn.get("version", ""), "error": conn.get("error", ""),
+            **refresh,
+        })
     return results
 
 
@@ -352,13 +321,12 @@ def _configured_source_volume(source_health):
 
     Reuses the health rows so the panel costs no extra MISP calls. ``cached`` is
     what the local cache holds for the source, capped by its limit and date
-    window; ``on_server`` is everything matching its filter, so the two together
-    show whether a source is being read in full.
+    window, and ``limit_reached`` says the last refresh filled that limit.
     """
     rows = [{
         "label": src["label"],
-        "cached": src.get("cached_events") or 0,
-        "on_server": src.get("event_count"),
+        "cached": src["cached_events"],
+        "limit_reached": src["limit_reached"],
     } for src in source_health]
     rows.sort(key=lambda r: r["cached"], reverse=True)
     return rows

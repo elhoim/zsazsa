@@ -13,6 +13,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from pymisp import PyMISP
+
 from webapp import collection_cache
 
 
@@ -104,15 +106,16 @@ class GetEvents(unittest.TestCase):
         collection_cache.insert_event(_row("stale", "2024-01-01", [], source_id="manual-x"))
         time.sleep(0.01)
 
-        class _Misp:
-            def search(self, **kwargs):
-                collection_cache.insert_event(
-                    _row("entered-meanwhile", "2024-06-01", [], source_id="manual-x"))
-                return []
+        def search(**kwargs):
+            collection_cache.insert_event(_row("entered-meanwhile", "2024-06-01", [], source_id="manual-x"))
+            return []
 
-        src = {"id": "manual-x", "kind": "manual", "url": "u", "api_key": "k", "source_tag": ""}
-        with mock.patch.object(collection_cache, "PyMISP", lambda *a, **k: _Misp()):
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.search.side_effect = search
+        src = {"id": "manual-x", "kind": "manual", "url": "u", "api_key": "k", "source_tag": 'zsazsa:source="x"'}
+        with mock.patch.object(collection_cache, "PyMISP", return_value=misp):
             collection_cache.refresh_source(src)
+        self.assertIsNone(collection_cache.get_source_status()["manual-x"]["error"])
 
         cached = [e["uuid"] for e in collection_cache.get_events(["manual-x"], [], limit=10)]
         self.assertEqual(cached, ["entered-meanwhile"])

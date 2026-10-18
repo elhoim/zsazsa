@@ -90,6 +90,11 @@ _GALAXY_TTL = 600  # seconds
 HTTP_TIMEOUT = 30
 HEALTH_CHECK_TIMEOUT = 8
 _SEARCH_PAGE_SIZE = 500
+# restSearch sets no order unless asked, and the database then answers oldest
+# first, so a search cut off by its limit drops the newest events. PyMISP passes
+# `order` on as it is; a MISP that does not accept it drops it from the request
+# and answers as before.
+NEWEST_FIRST = "id desc"
 # A server that ignores `page` would hand back a full page forever; stop there.
 _SEARCH_MAX_PAGES = 200
 
@@ -1420,11 +1425,18 @@ def update_stakeholder(uuid, data):
 
 
 def delete_stakeholder(uuid):
-    """Delete a stakeholder, unless a PIR, GIR or RFI still names it as owner."""
-    owned = records_owned_by_stakeholders().get(uuid)
+    """Delete a stakeholder, unless a PIR, GIR or RFI still names it as owner.
+
+    Owners are kept by UUID, and ``uuid`` may be the event's numeric id, so the
+    check goes by the UUID of the event it names.
+    """
+    event = _zsazsa_event(uuid, "zsazsa-stakeholder", config.TAG_STAKEHOLDER)
+    if event is None:
+        raise ValueError(f"stakeholder {uuid} not found")
+    owned = records_owned_by_stakeholders().get(event.uuid)
     if owned:
         raise ValueError(f"it owns {', '.join(owned)}")
-    _delete_record(uuid, "zsazsa-stakeholder", config.TAG_STAKEHOLDER, "stakeholder")
+    _check(_misp().delete_event(event.uuid), "delete stakeholder")
 
 
 def rename_subscription_product(old_name: str, new_name: str, apply: bool = False) -> list[str]:

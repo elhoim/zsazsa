@@ -47,6 +47,9 @@ docs/MISSING_FEATURES.md
 data/analyser.db
 data/analyser.db
 data/collection_cache.db
+# The cache runs in WAL mode; SQLite keeps these next to it while it is open.
+data/collection_cache.db-shm
+data/collection_cache.db-wal
 data/feed_cache/
 docs/.$zsazsa.drawio.bkp
 data/demo_seed_registry_energy.json

@@ -74,7 +74,7 @@ def _offline_patches(tmp):
              "date": "2026-10-01", "source_id": "scraper", "source_label": "Scraper"}
     source = SimpleNamespace(uuid="66666666-7777-8888-9999-000000000000",
                              name=SOURCE_NAME, enabled=True)
-    stakeholder = SimpleNamespace(id="sh-1", name=BREAKOUT, organization="", email="",
+    stakeholder = SimpleNamespace(id="sh-1", uuid="sh-1", name=BREAKOUT, organization="", email="",
                                   tlp_clearance="amber", influence=5, interest=5)
     feed = SimpleNamespace(uuid="f" * 36, id="f" * 36, feed_id="FEED-001", name=BREAKOUT,
                            tlp="clear", review_state="draft", cache_interval="")

@@ -60,7 +60,8 @@ def _list_product_events(type_filter: str | None, linked_pir=None):
         # Match any zsazsa:ctiproduct value via wildcard
         tags = [f'{PRODUCT_TAG_PREFIX}"%"']
     try:
-        events = misp.search(tags=tags, limit=_LIMIT, metadata=False, pythonify=True)
+        events = misp.search(tags=tags, limit=_LIMIT, metadata=False, pythonify=True,
+                             order=misp_store.NEWEST_FIRST)
     except Exception as exc:
         logger.warning("Analyser MISP search for products failed: %s", exc)
         return []

@@ -843,7 +843,7 @@
 
       const cutoff = new Date(Date.now() - sinceDays * 86400000).toISOString().split('T')[0];
 
-      const lines = ['misp.search(', '    published=True,', `    limit=${limitVal},`];
+      const lines = ['misp.search(', '    published=True,', `    limit=${limitVal},`, '    order="id desc",  # newest first'];
       if (sinceDays) lines.push(`    date_from="${cutoff}",  # last ${sinceDays} day${sinceDays !== 1 ? 's' : ''}`);
 
       if (tagsAnd.length || tagsNot.length) {
@@ -1033,7 +1033,8 @@
           'misp.search(\n' +
           '    tags=[' + JSON.stringify(scraperMarkerTag) + '],\n' +
           '    limit=' + scraperLimit + ',\n' +
-          '    page=1,\n';
+          '    page=1,\n' +
+          '    order="id desc",  # newest first\n';
         if (sinceDays > 0) {
           const from = new Date(Date.now() - sinceDays * 86400000).toISOString().slice(0, 10);
           query += '    date_from=' + JSON.stringify(from) + ',\n';

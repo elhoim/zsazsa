@@ -237,10 +237,12 @@ def detail(id):
     if stakeholder is None:
         return "Stakeholder not found", 404
     _place_on_matrix(stakeholder)
-    owned_pirs = misp_store.pirs_for_stakeholder(id)
-    distributed_pirs = misp_store.pirs_distributed_to_stakeholder(id, stakeholder.name, stakeholder.email)
-    owned_girs = misp_store.girs_for_stakeholder(id)
-    distributed_girs = misp_store.girs_distributed_to_stakeholder(id, stakeholder.name, stakeholder.email)
+    # By UUID, which records keep: the id in the URL may be the numeric one.
+    uuid = stakeholder.uuid
+    owned_pirs = misp_store.pirs_for_stakeholder(uuid)
+    distributed_pirs = misp_store.pirs_distributed_to_stakeholder(uuid, stakeholder.name, stakeholder.email)
+    owned_girs = misp_store.girs_for_stakeholder(uuid)
+    distributed_girs = misp_store.girs_distributed_to_stakeholder(uuid, stakeholder.name, stakeholder.email)
     recent_products = misp_store.products_for_stakeholder(
         stakeholder, owned_pirs + distributed_pirs, owned_girs + distributed_girs)
     for ev in recent_products:
@@ -253,7 +255,7 @@ def detail(id):
         owned_girs=owned_girs,
         distributed_girs=distributed_girs,
         recent_products=recent_products,
-        owned_records=misp_store.records_owned_by_stakeholders().get(id, []),
+        owned_records=misp_store.records_owned_by_stakeholders().get(uuid, []),
         org_map=org_store.org_map(),
         notification_channel_names={c["id"]: c["name"] for c in dispatcher.notification_channels() if c.get("id")},
     )

@@ -19,9 +19,9 @@
       </div>
       <div class="card-body p-0">
         <p class="text-muted small px-3 pt-3 mb-2">
-          Events held in the collection cache per source configured under Collection sources,
-          against everything matching that source's filter on its server. A large gap means the
-          source's limit or date window is cutting the refresh short.
+          Events held in the collection cache per source configured under Collection sources.
+          A source marked <i class="fas fa-scissors"></i> filled its limit on the last refresh, so older
+          events in its date window may not be cached.
         </p>
         {% set max_cached = configured_source_volume | map(attribute='cached') | max %}
         <ul class="list-unstyled mb-0">
@@ -30,7 +30,7 @@
             <div class="d-flex justify-content-between align-items-center mb-1">
               <span class="fw-semibold" style="font-size:.875rem;">{{ row.label }}</span>
               <span class="text-muted small">
-                {{ row.cached }}{% if row.on_server is not none %} / {{ row.on_server }}{% endif %}
+                {% if row.limit_reached %}<i class="fas fa-scissors text-warning me-1" title="Limit reached"></i>{% endif %}{{ row.cached }}
               </span>
             </div>
             <div class="progress" style="height:4px;border-radius:2px;">
@@ -391,22 +391,14 @@
             </div>
             {% if src.manual %}
             <div style="font-size:.78rem;color:var(--text-muted);">Human-curated source, no automated connectivity check.</div>
-            {% elif src.ok %}
-            <div class="d-flex gap-3" style="font-size:.78rem;color:var(--text-muted);">
-              {% if src.last_event_date %}
-              <span><i class="fas fa-calendar-day me-1"></i>Last event: {{ src.last_event_date }}</span>
-              {% endif %}
-              {% if src.event_count is not none %}
-              <span><i class="fas fa-layer-group me-1"></i>{{ src.event_count }} on server</span>
-              {% endif %}
-            </div>
-            {% else %}
+            {% elif not src.ok %}
             <div class="text-danger" style="font-size:.78rem;">{{ src.error }}</div>
             {% endif %}
 
             {# Local refresh: what the collection cache worker last read from this
                source. A refresh re-reads the whole set the source's filters match,
-               so the count is that set's size and "new" is what it added. #}
+               so the count is that set's size and "new" is what it added. The
+               newest event is the latest event date the cache holds for it. #}
             <div class="d-flex gap-3 flex-wrap" style="font-size:.78rem;color:var(--text-muted);">
               {% if not src.last_refresh %}
               <span><i class="fas fa-inbox me-1"></i>Never refreshed</span>
@@ -420,6 +412,11 @@
               <span title="Every refresh re-reads all events matching this source's filters, so this is the size of that set, not what arrived since the last run">
                 <i class="fas fa-download me-1"></i>{{ src.matched }} event{{ 's' if src.matched != 1 }} matched
               </span>
+              {% if src.limit_reached %}
+              <span class="text-warning" title="The last refresh filled the source's limit, so older events in its date window may not be cached. Raise the limit or shorten the window under Collection sources.">
+                <i class="fas fa-scissors me-1"></i>limit reached
+              </span>
+              {% endif %}
               {% if src.matched_new is not none %}
               <span title="Events this refresh added that were not cached before">
                 {% if src.matched_new %}<span class="text-success">{{ src.matched_new }} new</span>{% else %}no new events{% endif %}
@@ -428,6 +425,9 @@
               {% if src.refresh_duration is not none %}
               <span><i class="fas fa-stopwatch me-1"></i>{{ src.refresh_duration }}s</span>
               {% endif %}
+              {% endif %}
+              {% if src.newest_event %}
+              <span><i class="fas fa-calendar-day me-1"></i>Newest event: {{ src.newest_event }}</span>
               {% endif %}
               {# Only worth showing when the cache holds something other than what
                  the last run read, which is what a failed run leaves behind. #}

@@ -284,24 +284,6 @@ class SourceCounts(unittest.TestCase):
              mock.patch.object(misp_store, "_scraper_misp", return_value=misp):
             self.assertEqual(misp_store.data_collection_source_counts(), [{"source_feed": "A", "n": 3}])
 
-    def test_a_partner_source_is_counted_with_the_filter_the_cache_reads_it_with(self):
-        """Only its any-of tags were applied, so "on server" counted events the
-        source never takes in."""
-        src = {"id": "partner", "label": "Partner", "kind": "misp", "url": "https://partner.example.org",
-               "api_key": "k", "verify_tls": True, "tags": ["tlp:clear"], "tags_and": [], "tags_not": ["tlp:red"]}
-        misp = mock.create_autospec(PyMISP, instance=True)
-        misp.search.return_value = []
-        with mock.patch("webapp.routes.data_collection._sources", return_value=[src]), \
-             mock.patch.object(collection_cache, "get_source_status", return_value={}), \
-             mock.patch.object(misp_store, "_test_connection", return_value={"ok": True}), \
-             mock.patch("pymisp.PyMISP", return_value=misp):
-            pipeline._source_health()
-        for call in misp.search.call_args_list:
-            self.assertTrue(call.kwargs["published"])
-            self.assertEqual(call.kwargs["tags"], misp.build_complex_query.return_value)
-        misp.build_complex_query.assert_called_with(or_parameters=["tlp:clear"], and_parameters=None,
-                                                    not_parameters=["tlp:red"])
-
 
 class AuditLog(_TempDatabase):
     def setUp(self):

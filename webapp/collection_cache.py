@@ -108,6 +108,7 @@ def init_db():
             "ALTER TABLE source_status ADD COLUMN last_duration_s REAL",
             "ALTER TABLE source_status ADD COLUMN last_event_count INTEGER",
             "ALTER TABLE source_status ADD COLUMN last_new_count INTEGER",
+            "ALTER TABLE source_status ADD COLUMN last_limit_reached INTEGER",
         ]:
             try:
                 conn.execute(_col_ddl)
@@ -120,20 +121,21 @@ def get_source_status() -> dict:
     """Return {source_id: {last_fetch, error, event_count, ...}} from the status table.
 
     event_count reflects the actual current row count in the events table,
-    not the stale value recorded at the last refresh. last_event_count and
-    last_new_count are what the most recent refresh fetched, and are None when
-    that refresh failed.
+    not the stale value recorded at the last refresh, and newest_event is the
+    latest event date among those rows. last_event_count, last_new_count and
+    last_limit_reached are what the most recent refresh fetched, and are None
+    when that refresh failed.
     """
     try:
         with _db() as conn:
             rows = conn.execute("SELECT * FROM source_status").fetchall()
-            counts = {r["source_id"]: r["cnt"] for r in conn.execute(
-                "SELECT source_id, COUNT(*) AS cnt FROM events GROUP BY source_id"
+            cached = {r["source_id"]: (r["cnt"], r["newest"] or "") for r in conn.execute(
+                "SELECT source_id, COUNT(*) AS cnt, MAX(date) AS newest FROM events GROUP BY source_id"
             ).fetchall()}
         result = {}
         for r in rows:
             d = dict(r)
-            d["event_count"] = counts.get(r["source_id"], 0)
+            d["event_count"], d["newest_event"] = cached.get(r["source_id"], (0, ""))
             result[r["source_id"]] = d
         return result
     except Exception as exc:
@@ -352,6 +354,7 @@ def _build_sources(with_manual: bool = True) -> list:
             "org_filter_type": s.get("org_filter_type", "") or "",
             "org_filter": _split_tags(s.get("org_filter", "")),
             "since_days": int(s.get("since_days") or 7),
+            "limit": int(s.get("limit") or 500),
         })
     if not with_manual:
         return srcs
@@ -433,6 +436,9 @@ def refresh_source(src: dict) -> dict:
     t0 = time.time()
     error = None
     rows = []
+    # MISP sent as many events as the limit allows, so older ones in the window
+    # may be missing. Taken from its answer, before the org filter thins it.
+    limit_reached = False
 
     if src["kind"] == "scraper":
         scraper_limit = getattr(config, "MISP_SCRAPER_LIMIT", 500)
@@ -447,9 +453,8 @@ def refresh_source(src: dict) -> dict:
             kwargs = dict(
                 tags=[config.SCRAPER_MARKER_TAG],
                 limit=scraper_limit, page=1, metadata=False, pythonify=True,
+                order=misp_store.NEWEST_FIRST,
             )
-            # Restrict to a recent date window so growth past the limit drops the
-            # oldest events rather than silently hiding the newest ones.
             if since_days > 0:
                 kwargs["date_from"] = (_dt.date.today() - _dt.timedelta(days=since_days)).isoformat()
             events = misp.search(**kwargs)
@@ -457,6 +462,7 @@ def refresh_source(src: dict) -> dict:
             if payload_err:
                 error = payload_err
             elif events and not isinstance(events, dict):
+                limit_reached = len(events) >= scraper_limit
                 for e in events:
                     rows.append(_extract_row(e, source_id))
         except Exception as exc:
@@ -469,21 +475,20 @@ def refresh_source(src: dict) -> dict:
             try:
                 misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
                               timeout=misp_store.HTTP_TIMEOUT)
+                # This source's entries only, so the limit is its own and not
+                # shared with every other manual source.
+                limit = src.get("limit") or 500
                 events = misp.search(
-                    tags=[misp_store.TAG_MANUAL_ENTRY],
-                    limit=src.get("limit") or 500, page=1, metadata=False, pythonify=True,
+                    tags=misp.build_complex_query(
+                        and_parameters=[misp_store.TAG_MANUAL_ENTRY, src["source_tag"]]),
+                    limit=limit, page=1, metadata=False, pythonify=True, order=misp_store.NEWEST_FIRST,
                 )
                 payload_err = _search_payload_error(events)
                 if payload_err:
                     error = payload_err
                 elif events and not isinstance(events, dict):
-                    source_tag = src.get("source_tag", "")
-                    for e in events:
-                        if source_tag:
-                            event_tags = [t.name for t in getattr(e, "tags", []) or []]
-                            if source_tag not in event_tags:
-                                continue
-                        rows.append(_extract_row(e, source_id))
+                    limit_reached = len(events) >= limit
+                    rows = [_extract_row(e, source_id) for e in events]
             except Exception as exc:
                 error = str(exc)
                 logger.warning("collection cache: %s error - %s", source_id, exc)
@@ -494,7 +499,9 @@ def refresh_source(src: dict) -> dict:
             try:
                 misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
                               timeout=misp_store.HTTP_TIMEOUT)
-                kwargs = dict(limit=src.get("limit") or 500, page=1, metadata=False, pythonify=True, published=True)
+                limit = src.get("limit") or 500
+                kwargs = dict(limit=limit, page=1, metadata=False, pythonify=True, published=True,
+                              order=misp_store.NEWEST_FIRST)
                 tags = partner_tag_filter(misp, src)
                 if tags:
                     kwargs["tags"] = tags
@@ -506,6 +513,7 @@ def refresh_source(src: dict) -> dict:
                 if payload_err:
                     error = payload_err
                 elif events and not isinstance(events, dict):
+                    limit_reached = len(events) >= limit
                     org_filter_type = src.get("org_filter_type", "")
                     org_filter = {o.lower() for o in (src.get("org_filter") or [])}
                     events = filter_events_by_org(events, org_filter_type, org_filter)
@@ -560,10 +568,11 @@ def refresh_source(src: dict) -> dict:
         # NULL rather than repeating the previous numbers as if they were fresh.
         conn.execute(
             """INSERT OR REPLACE INTO source_status
-               (source_id, last_fetch, error, last_duration_s, last_event_count, last_new_count)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (source_id, last_fetch, error, last_duration_s, last_event_count, last_new_count,
+                last_limit_reached)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (source_id, now, error, duration,
-             None if error else len(rows), new_count),
+             None if error else len(rows), new_count, None if error else int(limit_reached)),
         )
     logger.info("collection cache: %s done - %d events in %.1fs", source_id, len(rows), duration)
     return {"events": len(rows), "new": new_count or 0, "error": error or ""}
@@ -628,8 +637,8 @@ def _sweep():
     # After the sources, so a slow statistics call never holds up the cache.
     try:
         refresh_indicator_stats()
-    except Exception as exc:
-        logger.exception("collection cache: indicator statistics failed: %s", exc)
+    except Exception:
+        logger.exception("collection cache: indicator statistics failed")
 
     message = f"{events} event(s) from {len(sources) - failures} source(s), {new} new"
     if failures:

@@ -135,6 +135,14 @@ class Delete(unittest.TestCase):
                 misp_store.delete_stakeholder(UUID)
         self.misp.delete_event.assert_not_called()
 
+    def test_an_owner_named_by_its_event_id_is_not_deleted_either(self):
+        """MISP finds a stakeholder by its numeric event id too, and owners are
+        kept by UUID, so that id got past the check."""
+        with self.owning(pirs=[SimpleNamespace(owner_uuid=UUID, pir_id="PIR-001")]), \
+             self.assertRaisesRegex(ValueError, "owns PIR-001"):
+            misp_store.delete_stakeholder("42")
+        self.misp.delete_event.assert_not_called()
+
     def test_a_stakeholder_who_owns_nothing_is_deleted(self):
         with self.owning(pirs=[SimpleNamespace(owner_uuid="b" * 36, pir_id="PIR-001")]):
             misp_store.delete_stakeholder(UUID)
