@@ -26,12 +26,13 @@
      'gir':      {'label': 'GIR',      'endpoint': 'requirements.gir_detail'},
      'tap':      {'label': 'Profile',  'endpoint': 'threat_actor_profile.detail'},
      'briefing': {'label': 'Briefing', 'endpoint': 'daily_briefing.detail'},
+     'fia':      {'label': 'Alert',    'endpoint': 'flash_intel.detail'},
    } %}
 
 <p class="text-muted mb-3">
-  Frequency of each scope value across PIRs, GIRs, threat actor profiles and daily briefings.
-  Geography, sectors and MITRE ATT&amp;CK techniques come from MISP galaxies; the rest are curated free-text scope items.
-  Click a value to see which entries carry it.
+  Frequency of each scope value across PIRs, GIRs, threat actor profiles, daily briefings and flash intel alerts.
+  Geography, sectors, threat actors and MITRE ATT&amp;CK techniques come from MISP galaxies; the rest are curated free-text scope items.
+  Values that differ only in case are counted together. Click a value to see which entries have it.
 </p>
 
 <div class="row g-4">

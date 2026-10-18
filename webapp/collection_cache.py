@@ -91,6 +91,13 @@ def init_db():
                 uuid TEXT PRIMARY KEY,
                 flagged_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS indicator_stats (
+                server_id TEXT PRIMARY KEY,
+                label TEXT,
+                by_type TEXT,
+                fetched_at REAL,
+                error TEXT
+            );
         """)
         # Migrations: add columns to existing databases that lack them. Only a
         # "duplicate column" error (column already present) is expected and
@@ -401,6 +408,18 @@ def cached_source_ids() -> list:
     return ids
 
 
+def partner_tag_filter(misp, src: dict):
+    """The tags a configured MISP server source is searched with, or None: its
+    any-of tags, with the all-of and none-of ones when it has them."""
+    tags_or = src.get("tags") or []
+    tags_and = src.get("tags_and") or []
+    tags_not = src.get("tags_not") or []
+    if tags_and or tags_not:
+        return misp.build_complex_query(or_parameters=tags_or or None, and_parameters=tags_and or None,
+                                        not_parameters=tags_not or None)
+    return tags_or or None
+
+
 def refresh_source(src: dict) -> dict:
     """Re-read one source into the cache.
 
@@ -476,17 +495,9 @@ def refresh_source(src: dict) -> dict:
                 misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
                               timeout=misp_store.HTTP_TIMEOUT)
                 kwargs = dict(limit=src.get("limit") or 500, page=1, metadata=False, pythonify=True, published=True)
-                tags_or = src.get("tags") or []
-                tags_and = src.get("tags_and") or []
-                tags_not = src.get("tags_not") or []
-                if tags_and or tags_not:
-                    kwargs["tags"] = misp.build_complex_query(
-                        or_parameters=tags_or or None,
-                        and_parameters=tags_and or None,
-                        not_parameters=tags_not or None,
-                    )
-                elif tags_or:
-                    kwargs["tags"] = tags_or
+                tags = partner_tag_filter(misp, src)
+                if tags:
+                    kwargs["tags"] = tags
                 if src.get("since_days"):
                     cutoff = (_dt.date.today() - _dt.timedelta(days=int(src["since_days"]))).isoformat()
                     kwargs["date_from"] = cutoff
@@ -613,6 +624,12 @@ def _sweep():
         else:
             events += outcome["events"]
             new += outcome["new"]
+
+    # After the sources, so a slow statistics call never holds up the cache.
+    try:
+        refresh_indicator_stats()
+    except Exception as exc:
+        logger.exception("collection cache: indicator statistics failed: %s", exc)
 
     message = f"{events} event(s) from {len(sources) - failures} source(s), {new} new"
     if failures:
@@ -831,3 +848,56 @@ def get_flagged_uuids() -> set:
     except Exception as exc:
         logger.warning("get_flagged_uuids failed: %s", exc)
         return set()
+
+
+def refresh_indicator_stats() -> None:
+    """Re-read the attribute counts per type of every server the pipeline shows.
+
+    MISP's attribute statistics take a while on a large instance, so the page
+    reads them from here. A server that does not answer keeps the counts it last
+    gave, with the error next to them, and one no longer configured drops out.
+    """
+    from webapp import misp_store
+
+    servers = misp_store.indicator_stat_servers()
+    with _db() as conn:
+        conn.execute(
+            f"DELETE FROM indicator_stats WHERE server_id NOT IN ({','.join('?' * len(servers))})",
+            [misp_store._server_id(s) for s in servers],
+        )
+    for s in servers:
+        sid, label = misp_store._server_id(s), s.get("label") or s["url"]
+        try:
+            misp = PyMISP(s["url"], s["api_key"], s.get("verify_tls", True), False,
+                          timeout=misp_store.HTTP_TIMEOUT)
+            raw = misp.attributes_statistics("type", percentage=False)
+            if isinstance(raw, dict):
+                error = str(raw["errors"]) if "errors" in raw else ""
+            else:
+                error = f"unexpected answer: {raw!r}"[:200]
+        except Exception as exc:
+            error = str(exc)
+        with _db() as conn:
+            if error:
+                logger.warning("indicator statistics: %s failed: %s", sid, error)
+                conn.execute(
+                    "INSERT INTO indicator_stats (server_id, label, by_type, error) VALUES (?, ?, '{}', ?)"
+                    " ON CONFLICT(server_id) DO UPDATE SET label = excluded.label, error = excluded.error",
+                    (sid, label, error))
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO indicator_stats (server_id, label, by_type, fetched_at, error)"
+                    " VALUES (?, ?, ?, ?, '')",
+                    (sid, label, json.dumps({kind: int(n) for kind, n in raw.items()}), time.time()))
+
+
+def indicator_stats() -> list[dict]:
+    """The cached counts, one {id, label, by_type, fetched_at, error} per server."""
+    try:
+        with _db() as conn:
+            rows = conn.execute("SELECT * FROM indicator_stats ORDER BY rowid").fetchall()
+    except sqlite3.Error as exc:
+        logger.warning("indicator_stats failed: %s", exc)
+        return []
+    return [{"id": r["server_id"], "label": r["label"], "by_type": json.loads(r["by_type"] or "{}"),
+             "fetched_at": r["fetched_at"], "error": r["error"] or ""} for r in rows]

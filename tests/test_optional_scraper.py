@@ -324,9 +324,12 @@ class CachedScraperEvents(unittest.TestCase):
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
         self.addCleanup(os.unlink, tmp.name)
-        patcher = mock.patch.object(collection_cache, "_DB_FILE", tmp.name)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # The sweep also reads the indicator statistics of every configured
+        # server, which would reach this install's MISP and its partners.
+        for patcher in (mock.patch.object(collection_cache, "_DB_FILE", tmp.name),
+                        mock.patch.object(collection_cache, "refresh_indicator_stats")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         collection_cache.init_db()
 
         with collection_cache._db() as conn:

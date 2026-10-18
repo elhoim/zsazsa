@@ -5,17 +5,46 @@ from datetime import date, datetime, timezone
 from flask import Blueprint, render_template
 
 from webapp import misp_store
+from webapp.utils import PRODUCT_TAG_PREFIX, product_type_label
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("stats", __name__)
 
 
-def _program_metrics(pirs, girs):
+def _product_date(event, state):
+    """When a product went out, or None when it has not: its MISP publish time,
+    or its last change for a published profile and for a feed, which zsazsa
+    puts out without publishing the event."""
+    published = misp_store._published_at(event)
+    if published or state not in ("", "published"):
+        return published
+    changed = getattr(event, "timestamp", None)
+    return changed.replace(tzinfo=None) if isinstance(changed, datetime) else None
+
+
+def _review_state(event):
+    """A product's review state as its object records it, in lower case.
+
+    A profile keeps it as its status, and a feed has no review. An alert the
+    analyser filed while MISP refused its object has neither and reads as a
+    draft, as the alert list has it.
+    """
+    for obj in event.objects:
+        if obj.name == "zsazsa-indicator-feed":
+            return ""
+        relation = "status" if obj.name == "zsazsa-threat-actor-profile" else "review-state"
+        states = obj.get_attributes_by_relation(relation)
+        if states:
+            return (states[0].value or "").lower()
+    return "draft"
+
+
+def _program_metrics(pirs, girs, stakeholders):
     metrics = {
         "rfis": {"total": 0, "by_status": {}, "open": 0, "overdue": 0,
                   "feedback_collected": 0, "feedback_met": 0,
                   "feedback_on_time": 0},
-        "products": {"total": 0, "by_type": {}, "with_pir_link": 0,
+        "products": {"total": 0, "drafts": 0, "by_type": {}, "drafts_by_type": {}, "with_pir_link": 0,
                       "with_feedback": 0, "last_30d": 0, "last_7d": 0},
         "intel_levels": {"pir": Counter(), "gir": Counter()},
         "stakeholder_coverage": {"with_pir": 0, "without_pir": 0},
@@ -26,12 +55,8 @@ def _program_metrics(pirs, girs):
         },
     }
 
-    try:
-        rfis = misp_store.list_rfis()
-    except Exception:
-        rfis = []
     today = date.today()
-    for r in rfis:
+    for r in misp_store.list_rfis():
         metrics["rfis"]["total"] += 1
         metrics["rfis"]["by_status"][r.status] = (
             metrics["rfis"]["by_status"].get(r.status, 0) + 1
@@ -47,60 +72,48 @@ def _program_metrics(pirs, girs):
         if r.feedback_on_time == "Yes":
             metrics["rfis"]["feedback_on_time"] += 1
 
-    try:
-        misp = misp_store._misp()
-        events = misp.search(
-            tags=['zsazsa:ctiproduct="%"'], limit=500,
-            metadata=False, pythonify=True,
-        )
-        if isinstance(events, dict):
-            events = []
-    except Exception:
+    events = misp_store._search_all(misp_store._misp(), tags=[f'{PRODUCT_TAG_PREFIX}"%"'],
+                                    metadata=False, pythonify=True)
+    if isinstance(events, dict):
         events = []
 
     pir_ids = {p.pir_id for p in pirs if p.pir_id}
     pir_ids_by_uuid = {p.uuid: p.pir_id for p in pirs if p.pir_id}
-    now_ts = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     pirs_covered = set()
-    for ev in events or []:
-        ev_tags = [t.name for t in (getattr(ev, "tags", []) or [])]
-        ptype = ""
-        for t in ev_tags:
-            if t.startswith('zsazsa:ctiproduct='):
-                ptype = t.split('=', 1)[1].strip('"')
-                break
+    for ev in events:
+        # A rejected product never went out; a draft has not yet.
+        state = _review_state(ev)
+        if state == "rejected":
+            continue
+        ev_tags = [t.name for t in ev.tags]
+        tag = next((t for t in ev_tags if t.startswith(PRODUCT_TAG_PREFIX)), "")
+        ptype = product_type_label(tag[len(PRODUCT_TAG_PREFIX):].strip('"')) if tag else ""
         metrics["products"]["total"] += 1
         if ptype:
-            metrics["products"]["by_type"][ptype] = (
-                metrics["products"]["by_type"].get(ptype, 0) + 1
-            )
-        info = ev.info or ""
-        matched_pirs = ({pid for pid in pir_ids if pid in info}
+            metrics["products"]["by_type"][ptype] = metrics["products"]["by_type"].get(ptype, 0) + 1
+        if state == "draft":
+            metrics["products"]["drafts"] += 1
+            if ptype:
+                drafts_by_type = metrics["products"]["drafts_by_type"]
+                drafts_by_type[ptype] = drafts_by_type.get(ptype, 0) + 1
+        went_out = _product_date(ev, state)
+        age_days = (now - went_out).days if went_out else None
+        if age_days is not None and age_days < 7:
+            metrics["products"]["last_7d"] += 1
+        if age_days is not None and age_days < 30:
+            metrics["products"]["last_30d"] += 1
+        matched_pirs = ({pid for pid in pir_ids if pid in (ev.info or "")}
                         | {pir_ids_by_uuid[u] for u in misp_store.linked_pir_uuids(ev) if u in pir_ids_by_uuid})
         if matched_pirs:
             metrics["products"]["with_pir_link"] += 1
-            pub_ts = getattr(ev, "publish_timestamp", None) or getattr(ev, "timestamp", None)
-            try:
-                pub_ts = int(pub_ts)
-            except (TypeError, ValueError):
-                pub_ts = 0
-            if pub_ts and (now_ts - pub_ts) <= 90 * 86400:
+            if age_days is not None and age_days < 90:
                 pirs_covered.update(matched_pirs)
-        if 'curation:feedback' in ev_tags:
+        if misp_store.TAG_FEEDBACK in ev_tags:
             metrics["products"]["with_feedback"] += 1
-        pub_ts = getattr(ev, "publish_timestamp", None) or getattr(ev, "timestamp", None)
-        try:
-            pub_ts = int(pub_ts)
-        except (TypeError, ValueError):
-            pub_ts = 0
-        if pub_ts:
-            age_days = (now_ts - pub_ts) / 86400
-            if age_days <= 7:
-                metrics["products"]["last_7d"] += 1
-            if age_days <= 30:
-                metrics["products"]["last_30d"] += 1
 
-    active_pir_ids = {p.pir_id for p in pirs if p.pir_id and getattr(p, "status", "") == "Active"}
+    active_pirs = [p for p in pirs if p.status == "Active"]
+    active_pir_ids = {p.pir_id for p in active_pirs if p.pir_id}
     metrics["pir_coverage"]["covered"] = len(pirs_covered & active_pir_ids)
     metrics["pir_coverage"]["uncovered"] = len(active_pir_ids - pirs_covered)
 
@@ -113,26 +126,23 @@ def _program_metrics(pirs, girs):
         lvl = (_il[0] if isinstance(_il, list) and _il else _il) or "Unspecified"
         metrics["intel_levels"]["gir"][lvl] += 1
 
-    for p in pirs:
-        if getattr(p, "status", "") == "Active":
-            if getattr(p, "collection_sources", None):
-                metrics["collection_gaps"]["pirs_with_sources"] += 1
-            else:
-                metrics["collection_gaps"]["pirs_without_sources"] += 1
+    for p in active_pirs:
+        if p.collection_sources:
+            metrics["collection_gaps"]["pirs_with_sources"] += 1
+        else:
+            metrics["collection_gaps"]["pirs_without_sources"] += 1
     for g in girs:
-        if getattr(g, "status", "") == "Active":
-            if getattr(g, "collection_sources", None):
+        if g.status == "Active":
+            if g.collection_sources:
                 metrics["collection_gaps"]["girs_with_sources"] += 1
             else:
                 metrics["collection_gaps"]["girs_without_sources"] += 1
 
-    pir_owners = {p.owner_uuid for p in pirs if p.owner_uuid}
-    try:
-        stakeholders = misp_store.list_stakeholders()
-    except Exception:
-        stakeholders = []
+    # A stakeholder is covered by an agreed requirement: an active PIR, not one
+    # still in intake, rejected, merged away or retired.
+    pir_owners = {p.owner_uuid for p in active_pirs if p.owner_uuid}
     for s in stakeholders:
-        if s.id in pir_owners:
+        if s.uuid in pir_owners:
             metrics["stakeholder_coverage"]["with_pir"] += 1
         else:
             metrics["stakeholder_coverage"]["without_pir"] += 1
@@ -186,9 +196,9 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
     pct_rfi_feedback = program["rfis"]["pct_feedback_collected"]
     sources_ok = sum(1 for s in source_health if s.get("ok"))
     pirs_with_sources = program["collection_gaps"]["pirs_with_sources"]
-    fi_count = by_type.get("flash-intel", 0)
-    vea_count = by_type.get("vea", 0)
-    tlr_count = by_type.get("threat-landscape-report", 0)
+    fi_count = by_type.get("Flash intel alert", 0)
+    vea_count = by_type.get("Vulnerability advisory", 0)
+    tlr_count = by_type.get("Threat landscape report", 0)
     feedback_count = program["products"]["with_feedback"]
 
     results = []
@@ -228,6 +238,8 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
                 gaps.append(f"Fewer than 3 active PIRs (currently {active_pirs})")
             if pct_pir_link < 50:
                 gaps.append(f"Products linked to PIRs below 50% (currently {pct_pir_link}%)")
+            if pir_cov_pct == 0:
+                gaps.append("No active PIR had a product in the last 90 days")
     else:
         level = 0
         observed = []
@@ -273,7 +285,7 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
                 level = 3
                 observed = [
                     f"{fi_count} flash intel alerts",
-                    f"{vea_count} vulnerability assessments",
+                    f"{vea_count} vulnerability advisories",
                     f"{pct_pir_link}% products linked to requirements",
                 ]
                 gaps = []
@@ -281,24 +293,24 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
                 level = 2
                 observed = [
                     f"{fi_count} flash intel alerts",
-                    f"{vea_count} vulnerability assessments",
+                    f"{vea_count} vulnerability advisories",
                 ]
                 gaps = [f"Products linked to PIRs below 75% (currently {pct_pir_link}%)"]
         else:
             level = 1
             observed = [x for x in [
                 f"{fi_count} flash intel alerts" if fi_count > 0 else "",
-                f"{vea_count} vulnerability assessments" if vea_count > 0 else "",
+                f"{vea_count} vulnerability advisories" if vea_count > 0 else "",
             ] if x]
             gaps = []
             if fi_count < 3:
                 gaps.append(f"Fewer than 3 flash intel alerts (currently {fi_count})")
             if vea_count < 3:
-                gaps.append(f"Fewer than 3 vulnerability assessments (currently {vea_count})")
+                gaps.append(f"Fewer than 3 vulnerability advisories (currently {vea_count})")
     else:
         level = 0
         observed = []
-        gaps = ["No intelligence products (flash intel or VEAs) produced"]
+        gaps = ["No flash intel alerts or vulnerability advisories produced"]
     results.append(_signal("Threat", level, observed, gaps))
 
     if feedback_count > 0:
@@ -332,25 +344,14 @@ def _maturity_signals(program, pirs, girs, stakeholder_count, source_health):
 
 @bp.route("/stats")
 def index():
-    try:
-        c = misp_store.counts()
-        pir_count = c["pir"]
-        gir_count = c["gir"]
-        stakeholder_count = c["stakeholder"]
+    # A MISP that cannot be reached shows its own error page rather than a page
+    # of zeros that reads as an empty program.
+    pirs = misp_store.list_pirs()
+    girs = misp_store.list_girs()
+    stakeholders = misp_store.list_stakeholders()
+    stakeholder_count = len(stakeholders)
 
-        pirs = misp_store.list_pirs()
-        girs = misp_store.list_girs()
-        active_pir_count = sum(1 for p in pirs if p.status == "Active")
-        active_gir_count = sum(1 for g in girs if g.status == "Active")
-        pirs_no_fp = sum(1 for p in pirs if p.status == "Active" and not p.focus_points)
-        girs_no_fp = sum(1 for g in girs if g.status == "Active" and not g.focus_points)
-    except Exception:
-        pir_count = gir_count = stakeholder_count = 0
-        active_pir_count = active_gir_count = 0
-        pirs_no_fp = girs_no_fp = 0
-        pirs, girs = [], []
-
-    program = _program_metrics(pirs, girs)
+    program = _program_metrics(pirs, girs, stakeholders)
     actor_type_product_counts = misp_store.product_counts_by_threat_actor_type()
 
     from webapp.routes.pipeline import _source_health
@@ -364,13 +365,13 @@ def index():
 
     return render_template(
         "stats.html",
-        pir_count=pir_count,
-        gir_count=gir_count,
+        pir_count=len(pirs),
+        gir_count=len(girs),
         stakeholder_count=stakeholder_count,
-        active_pir_count=active_pir_count,
-        active_gir_count=active_gir_count,
-        pirs_no_fp=pirs_no_fp,
-        girs_no_fp=girs_no_fp,
+        active_pir_count=sum(1 for p in pirs if p.status == "Active"),
+        active_gir_count=sum(1 for g in girs if g.status == "Active"),
+        pirs_no_fp=sum(1 for p in pirs if p.status == "Active" and not p.focus_points),
+        girs_no_fp=sum(1 for g in girs if g.status == "Active" and not g.focus_points),
         program=program,
         actor_type_product_counts=actor_type_product_counts,
         maturity_signals=maturity_signals,

@@ -1,14 +1,15 @@
 import logging
 import os
 import sqlite3
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 
 import config
-from core.db import get_recent_pipeline_runs, get_latest_pipeline_run
-from webapp import collection_cache, misp_store
+from core.db import get_latest_pipeline_run, get_recent_pipeline_runs, row_connection
+from webapp import collection_cache, job_store, misp_store
 from webapp.utils import age_text, scraper_enabled
 
 logger = logging.getLogger(__name__)
@@ -19,43 +20,34 @@ def _pipeline_stats(source_counts):
     if not os.path.exists(config.DB_FILE):
         return None
     try:
-        con = sqlite3.connect(config.DB_FILE)
-        con.row_factory = sqlite3.Row
-        cur = con.cursor()
-
-        total = cur.execute("SELECT COUNT(*) FROM event_log").fetchone()[0]
-
+        with row_connection() as db:
+            total = db.execute("SELECT COUNT(*) FROM event_log").fetchone()[0]
+            by_outcome = [
+                dict(r) for r in db.execute(
+                    "SELECT outcome, COUNT(*) AS n FROM event_log"
+                    " GROUP BY outcome ORDER BY n DESC"
+                ).fetchall()
+            ]
+            last_7d = db.execute(
+                "SELECT COUNT(*) FROM event_log"
+                " WHERE processed_at >= datetime('now', '-7 days')"
+            ).fetchone()[0]
+            last_30d = db.execute(
+                "SELECT COUNT(*) FROM event_log"
+                " WHERE processed_at >= datetime('now', '-30 days')"
+            ).fetchone()[0]
+    except sqlite3.Error as exc:
+        logger.warning("could not read the analyser history: %s", exc)
+        return None
+    return {
+        "total": total,
         # Live per-source counts straight from MISP, so this reflects the actual
         # tagged events rather than the analyser's processing log.
-        by_source = source_counts
-
-        by_outcome = [
-            dict(r) for r in cur.execute(
-                "SELECT outcome, COUNT(*) AS n FROM event_log"
-                " GROUP BY outcome ORDER BY n DESC"
-            ).fetchall()
-        ]
-
-        last_7d = cur.execute(
-            "SELECT COUNT(*) FROM event_log"
-            " WHERE processed_at >= datetime('now', '-7 days')"
-        ).fetchone()[0]
-
-        last_30d = cur.execute(
-            "SELECT COUNT(*) FROM event_log"
-            " WHERE processed_at >= datetime('now', '-30 days')"
-        ).fetchone()[0]
-
-        con.close()
-        return {
-            "total": total,
-            "by_source": by_source,
-            "by_outcome": by_outcome,
-            "last_7d": last_7d,
-            "last_30d": last_30d,
-        }
-    except Exception:
-        return None
+        "by_source": source_counts,
+        "by_outcome": by_outcome,
+        "last_7d": last_7d,
+        "last_30d": last_30d,
+    }
 
 
 # Relative windows offered by the activity filter, as SQLite date modifiers.
@@ -108,20 +100,15 @@ def _activity_page(args, offset, limit):
         return {"rows": [], "total": 0, "has_more": False, "hidden_orphaned": 0}
 
     where, params = _activity_filters(args)
-    con = sqlite3.connect(config.DB_FILE)
-    con.row_factory = sqlite3.Row
-    try:
-        cur = con.cursor()
-        total = cur.execute(f"SELECT COUNT(*) FROM event_log{where}", params).fetchone()[0]
+    with row_connection() as db:
+        total = db.execute(f"SELECT COUNT(*) FROM event_log{where}", params).fetchone()[0]
         rows = [
-            dict(r) for r in cur.execute(
+            dict(r) for r in db.execute(
                 "SELECT processed_at, event_uuid, event_info, source_feed, outcome, detail"
                 f" FROM event_log{where} ORDER BY processed_at DESC, id DESC LIMIT ? OFFSET ?",
                 params + [limit, offset],
             ).fetchall()
         ]
-    finally:
-        con.close()
 
     # Paging counts database rows, so it stays correct whether or not the
     # orphaned ones below are dropped from this page.
@@ -155,21 +142,18 @@ _IOC_TYPES = frozenset({
 
 
 def _indicator_stats():
-    try:
-        misp = misp_store._misp()
-        raw = misp.attributes_statistics("type", percentage=False)
-        if not isinstance(raw, dict) or "errors" in raw:
-            return {"ok": False, "by_type": {}, "total_ioc": 0, "all_total": 0}
-        by_type = {k: int(v) for k, v in raw.items() if k in _IOC_TYPES and int(v) > 0}
-        return {
-            "ok": True,
-            "by_type": dict(sorted(by_type.items(), key=lambda x: x[1], reverse=True)),
-            "total_ioc": sum(by_type.values()),
-            "all_total": sum(int(v) for v in raw.values()),
-        }
-    except Exception as exc:
-        logger.warning("indicator stats failed: %s", exc)
-        return {"ok": False, "by_type": {}, "total_ioc": 0, "all_total": 0}
+    """The cached counts per server, indicator types only, for the pane to add up
+    over the servers ticked. ``age`` is that of the oldest counts shown."""
+    servers = [{
+        "id": row["id"],
+        "label": row["label"],
+        "error": row["error"],
+        "by_type": {kind: n for kind, n in row["by_type"].items() if kind in _IOC_TYPES and n > 0},
+        "all_total": sum(row["by_type"].values()),
+        "fetched_at": row["fetched_at"],
+    } for row in collection_cache.indicator_stats()]
+    read = [s["fetched_at"] for s in servers if s["fetched_at"]]
+    return {"servers": servers, "age": age_text(time.time() - min(read)) if read else ""}
 
 
 # Matches the stalled threshold the job badge uses, so the two agree on a run.
@@ -263,11 +247,13 @@ def _source_health():
                 else:
                     misp = PyMISP(src["url"], src["api_key"], src.get("verify_tls", True), False,
                                   timeout=misp_store.HEALTH_CHECK_TIMEOUT)
-                    search_kwargs = dict(limit=1, page=1, metadata=True, pythonify=True)
-                    count_kwargs = dict(limit=1, page=1, metadata=True, return_format="count")
-                    if src.get("tags"):
-                        search_kwargs["tags"] = src["tags"]
-                        count_kwargs["tags"] = src["tags"]
+                    # The same filter the cache refresh reads the source with, so the
+                    # count is what the source can see.
+                    search_kwargs = dict(limit=1, page=1, metadata=True, pythonify=True, published=True)
+                    count_kwargs = dict(limit=1, page=1, metadata=True, return_format="count", published=True)
+                    tags = collection_cache.partner_tag_filter(misp, src)
+                    if tags:
+                        search_kwargs["tags"] = count_kwargs["tags"] = tags
                     if src.get("since_days"):
                         cutoff = (date.today() - timedelta(days=int(src["since_days"]))).isoformat()
                         search_kwargs["date_from"] = cutoff
@@ -297,30 +283,24 @@ def _source_health():
 def _purge_orphaned_rows():
     if not os.path.exists(config.DB_FILE):
         return 0, 0
-    con = sqlite3.connect(config.DB_FILE)
-    try:
-        cur = con.cursor()
-        rows = cur.execute(
+    with row_connection() as db:
+        candidates = [r[0] for r in db.execute(
             "SELECT DISTINCT event_uuid FROM event_log"
             " WHERE event_uuid IS NOT NULL AND event_uuid != ''"
-        ).fetchall()
-        candidates = [r[0] for r in rows]
-        if not candidates:
-            return 0, 0
-        existing = misp_store.scraper_existing_uuids(candidates)
-        orphans = [u for u in candidates if u not in existing]
-        if not orphans:
-            return 0, len(candidates)
-        deleted = 0
+        ).fetchall()]
+    if not candidates:
+        return 0, 0
+    # Asked before anything is deleted, and outside the transaction: it raises
+    # when MISP refuses, and nothing is purged on a partial answer.
+    existing = misp_store.scraper_existing_uuids(candidates)
+    orphans = [u for u in candidates if u not in existing]
+    deleted = 0
+    with row_connection() as db:
         for i in range(0, len(orphans), 500):
             part = orphans[i:i + 500]
             placeholders = ",".join("?" * len(part))
-            cur.execute(f"DELETE FROM event_log WHERE event_uuid IN ({placeholders})", part)
-            deleted += cur.rowcount or 0
-        con.commit()
-        return deleted, len(candidates)
-    finally:
-        con.close()
+            deleted += db.execute(f"DELETE FROM event_log WHERE event_uuid IN ({placeholders})", part).rowcount
+    return deleted, len(candidates)
 
 
 def _imap_mailbox_status():
@@ -434,6 +414,25 @@ def activity():
         return jsonify({"ok": False, "error": "The analyser database is busy. Retry in a moment."}), 503
 
     return jsonify({"ok": True, "offset": offset, "limit": limit, **page})
+
+
+@bp.route("/pipeline/indicator-stats/refresh", methods=["POST"])
+def refresh_indicator_stats():
+    """Read the indicator counts from every server again, as a job the pane follows."""
+    job_id = job_store.create_job("indicator-stats", label="Refresh indicator health")["id"]
+
+    def run():
+        job_store.update_job(job_id, status="running", message="Reading the attribute statistics...")
+        try:
+            collection_cache.refresh_indicator_stats()
+        except Exception as exc:
+            logger.exception("indicator statistics refresh failed")
+            job_store.update_job(job_id, status="failed", error=str(exc), message=f"Failed: {exc}")
+            return
+        job_store.update_job(job_id, status="completed", message="Indicator health refreshed.")
+
+    threading.Thread(target=run, daemon=True, name=job_store.thread_name(job_id)).start()
+    return jsonify({"ok": True, "job_id": job_id})
 
 
 @bp.route("/pipeline/purge-orphaned", methods=["POST"])

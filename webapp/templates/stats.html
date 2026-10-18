@@ -32,7 +32,7 @@
       <div class="col-md-3">
         <div class="text-muted small">Stakeholder coverage</div>
         <div class="h3 mb-0">{{ program.stakeholder_coverage.pct_covered }}%</div>
-        <div class="text-muted small">{{ program.stakeholder_coverage.with_pir }} stakeholders linked to a PIR</div>
+        <div class="text-muted small">{{ program.stakeholder_coverage.with_pir }} stakeholders owning an active PIR</div>
       </div>
     </div>
 
@@ -40,7 +40,7 @@
 
     <div class="row g-3">
       <div class="col-md-3">
-        <div class="text-muted small">Products tagged with linked PIR</div>
+        <div class="text-muted small">Products linked to a PIR</div>
         <div class="h3 mb-0">{{ program.products.pct_with_pir_link }}%</div>
         <div class="text-muted small">{{ program.products.with_pir_link }} of {{ program.products.total }} products</div>
       </div>
@@ -57,7 +57,7 @@
       <div class="col-md-3">
         <div class="text-muted small">Products (7 / 30 days)</div>
         <div class="h3 mb-0">{{ program.products.last_7d }} <span style="font-size:.9rem;font-weight:400;color:var(--text-muted)">/ {{ program.products.last_30d }}</span></div>
-        <div class="text-muted small">{{ program.products.total }} total products</div>
+        <div class="text-muted small">{{ program.products.total }} total products{% if program.products.drafts %} ({{ program.products.drafts }} in draft){% endif %}</div>
       </div>
     </div>
 
@@ -80,6 +80,7 @@
     {% for ptype, n in program.products.by_type.items() %}
       <a href="{{ url_for('products.index', type=ptype) }}" class="badge text-bg-light text-decoration-none me-1 mb-1">
         {{ ptype }} <span class="ms-1 fw-bold">{{ n }}</span>
+        {%- if program.products.drafts_by_type.get(ptype) %} ({{ program.products.drafts_by_type[ptype] }} in draft){% endif %}
       </a>
     {% endfor %}
     {% endif %}
@@ -111,7 +112,7 @@
 <div class="card content-card mb-4">
   <div class="card-header d-flex align-items-center justify-content-between">
     <span><i class="fas fa-user-shield me-2"></i>Products by threat actor type</span>
-    <span class="badge text-bg-light" style="font-size:.7rem;font-weight:400;">daily briefings + flash intel + threat actor profiles</span>
+    <span class="badge text-bg-light" style="font-size:.7rem;font-weight:400;">published briefings, alerts and profiles</span>
   </div>
   <div class="card-body">
     <div class="table-responsive">

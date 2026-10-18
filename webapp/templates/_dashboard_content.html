@@ -249,6 +249,7 @@
         <div class="d-flex gap-3 mb-3 small text-muted">
           <span><span style="{{ swatch }}background:var(--accent-blue);"></span>Daily briefings</span>
           <span><span style="{{ swatch }}background:var(--accent-orange);"></span>Flash intel</span>
+          <span><span style="{{ swatch }}background:var(--accent-green);"></span>Threat actor profiles</span>
         </div>
         {% for row in actor_type_products %}
         <div class="mb-2">
@@ -261,6 +262,8 @@
                  title="{{ row.daily_briefings }} daily briefing(s)"></div>
             <div class="progress-bar" style="width:{{ (row.flash_intel_alerts / max_total * 100) | round(1) }}%;background:var(--accent-orange);"
                  title="{{ row.flash_intel_alerts }} flash intel alert(s)"></div>
+            <div class="progress-bar" style="width:{{ (row.threat_actor_profiles / max_total * 100) | round(1) }}%;background:var(--accent-green);"
+                 title="{{ row.threat_actor_profiles }} threat actor profile(s)"></div>
           </div>
         </div>
         {% endfor %}

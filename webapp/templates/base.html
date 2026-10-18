@@ -108,9 +108,9 @@
           <li><hr class="dropdown-divider"></li>
           <li><a href="{{ url_for('daily_briefing.list_briefings') }}" class="dropdown-item {{ 'active' if request.blueprint == 'daily_briefing' }}"><i class="fas fa-newspaper fa-fw"></i> Daily briefings</a></li>
           <li><a href="{{ url_for('threat_landscape.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'threat_landscape' }}"><i class="fas fa-globe fa-fw"></i> Threat landscapes</a></li>
-          <li><a href="{{ url_for('flash_intel.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'flash_intel' }}"><i class="fas fa-bolt fa-fw"></i> Flash intel alert</a></li>
+          <li><a href="{{ url_for('flash_intel.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'flash_intel' }}"><i class="fas fa-bolt fa-fw"></i> Flash intel alerts</a></li>
           <li><a href="{{ url_for('vea.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'vea' }}"><i class="fas fa-bug fa-fw"></i> Vuln advisories</a></li>
-          <li><a href="{{ url_for('threat_actor_profile.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'threat_actor_profile' }}"><i class="fas fa-user-secret fa-fw"></i> Threat actor profile</a></li>
+          <li><a href="{{ url_for('threat_actor_profile.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'threat_actor_profile' }}"><i class="fas fa-user-secret fa-fw"></i> Threat actor profiles</a></li>
           <li><a href="{{ url_for('indicator_feed.index') }}" class="dropdown-item {{ 'active' if request.blueprint == 'indicator_feed' }}"><i class="fas fa-satellite-dish fa-fw"></i> Indicator feeds</a></li>
           <li><a href="{{ url_for('detection_eng.review') }}" class="dropdown-item {{ 'active' if request.blueprint == 'detection_eng' }}"><i class="fas fa-crosshairs fa-fw"></i> Detection eng. requests</a></li>
           <li><hr class="dropdown-divider"></li>
@@ -255,7 +255,7 @@
       </li>
       <li>
         <a href="{{ url_for('flash_intel.review') }}" class="{{ 'active' if request.blueprint == 'flash_intel' }}">
-          <i class="fas fa-bolt fa-fw"></i> Flash intel alert
+          <i class="fas fa-bolt fa-fw"></i> Flash intel alerts
         </a>
       </li>
       <li>
@@ -265,7 +265,7 @@
       </li>
       <li>
         <a href="{{ url_for('threat_actor_profile.review') }}" class="{{ 'active' if request.blueprint == 'threat_actor_profile' }}">
-          <i class="fas fa-user-secret fa-fw"></i> Threat actor profile
+          <i class="fas fa-user-secret fa-fw"></i> Threat actor profiles
         </a>
       </li>
       <li>

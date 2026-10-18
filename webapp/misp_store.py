@@ -26,7 +26,7 @@ import threading
 import time
 import urllib3
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -2587,6 +2587,27 @@ def _feed_client(s):
     return cache[key]
 
 
+def indicator_stat_servers():
+    """The server configs the pipeline counts indicators on: zsazsa's own store,
+    the scraper and every enabled collection-source server, each once.
+
+    Once by URL, as the scraper is often the store itself, and counting one
+    server twice doubles its numbers. A server without an API key is left out.
+    """
+    configs = [s for s in [_webapp_store_server()] if s]
+    if scraper_enabled():
+        configs.append({"id": "scraper", "label": "MISP scraper", "url": config.MISP_URL,
+                        "api_key": config.MISP_KEY, "verify_tls": config.MISP_VERIFYCERT})
+    configs += [s for s in getattr(config, "MISP_SERVERS", []) or [] if s.get("enabled", True)]
+    servers, seen = [], set()
+    for s in configs:
+        url = (s.get("url") or "").rstrip("/")
+        if _server_usable(s) and url not in seen:
+            seen.add(url)
+            servers.append(s)
+    return servers
+
+
 def indicator_feed_servers():
     """Selectable MISP servers for the indicator feed, in precedence order.
 
@@ -4454,7 +4475,10 @@ def data_collection_source_counts() -> list[dict]:
             n = int(count)
         except (TypeError, ValueError):
             continue
-        rows.append({"source_feed": name[len(_DATA_COLLECTION_SOURCE_TAG_PREFIX):], "n": n})
+        # A tag no event has any more is no volume, and the panel scales its
+        # bars by the busiest source.
+        if n > 0:
+            rows.append({"source_feed": name[len(_DATA_COLLECTION_SOURCE_TAG_PREFIX):], "n": n})
     rows.sort(key=lambda r: r["n"], reverse=True)
     return rows
 
@@ -4602,14 +4626,21 @@ def _fia_ns(event):
     except Exception:
         _src_hints_parsed = {}
     source_event_hints = _clean_source_hints(_src_hints_parsed, source_event_uuids)
+    # An alert the analyser filed while MISP refused its object has its title
+    # only in the event info, and the id its report was named after.
+    if obj is None:
+        fia_id = _fia_id_from_event_id(event.id)
+        title = (event.info or "").removeprefix("[zsazsa:fia] ")
+    else:
+        fia_id, title = g("fia-id"), g("title")
 
     return SimpleNamespace(
         id=uuid,
         uuid=uuid,
         misp_url=f"{config.MISP_WEBAPP_URL}/events/view/{uuid}",
         history_url=f"{config.MISP_WEBAPP_URL}/audit_logs/eventIndex/{uuid}",
-        fia_id=g("fia-id"),
-        title=g("title"),
+        fia_id=fia_id,
+        title=title,
         audience=g("audience"),
         tlp=g("tlp") or "amber",
         summary=g("summary"),
@@ -5243,6 +5274,7 @@ def counts():
 SCOPE_CATEGORIES = [
     ("Geographic scope", "geographic_scope"),
     ("Sector scope", "sectors"),
+    ("Threat actors", "threat_actors"),
     ("MITRE ATT&CK techniques", "mitre_attack_techniques"),
     ("Threat types", "threat_types"),
     ("Technology", "technology"),
@@ -5253,12 +5285,13 @@ SCOPE_CATEGORIES = [
 
 
 def scope_stats() -> list[dict]:
-    """Frequency of each scope value across all entities that carry scope (PIRs,
-    GIRs, threat actor profiles and daily briefings).
+    """Frequency of each scope value across the records that have scope: PIRs,
+    GIRs, threat actor profiles, daily briefings and flash intel alerts.
 
     Returns one entry per category: {"label", "attr", "items", "total", "distinct"},
     where items is [{"value", "count", "entries"}] sorted by count descending and
-    entries is the [{"kind", "label", "uuid"}] the value was counted from.
+    entries is the [{"kind", "label", "uuid"}] the value was counted from. Values
+    that differ only in case are one value, and a record counts once for it.
     """
     # Entity types that carry scope, with the description shown in the drill-down
     # list. The kind is what the template maps to a detail page.
@@ -5267,6 +5300,7 @@ def scope_stats() -> list[dict]:
         ("gir", list_girs, lambda e: f"{e.gir_id} {e.topic}"),
         ("tap", list_threat_actor_profiles, lambda e: f"{e.tap_id} {e.title}"),
         ("briefing", list_briefings, lambda e: f"{e.date} {e.title}"),
+        ("fia", list_fias, lambda e: f"{e.fia_id} {e.title}"),
     ]
 
     entities = []
@@ -5283,13 +5317,16 @@ def scope_stats() -> list[dict]:
 
     result = []
     for label, attr in SCOPE_CATEGORIES:
-        entries = defaultdict(list)
+        found = {}
         for entity, ref in entities:
             for value in (getattr(entity, attr, None) or []):
                 value = (value or "").strip()
-                if value:
-                    entries[value].append(ref)
-        items = [{"value": v, "count": len(refs), "entries": refs} for v, refs in entries.items()]
+                if not value:
+                    continue
+                spelling, refs = found.setdefault(value.casefold(), (value, []))
+                if ref not in refs:
+                    refs.append(ref)
+        items = [{"value": v, "count": len(refs), "entries": refs} for v, refs in found.values()]
         items.sort(key=lambda i: (-i["count"], i["value"].lower()))
         result.append({
             "label": label,
@@ -5302,23 +5339,24 @@ def scope_stats() -> list[dict]:
 
 
 def product_counts_by_threat_actor_type() -> list[dict]:
-    """Count daily briefings, flash intel alerts and threat actor profiles per
-    threat actor type.
+    """Count published daily briefings, flash intel alerts and threat actor
+    profiles per threat actor type. A draft or a rejected alert has not gone
+    out, and the analyser leaves many of those behind.
 
     Each row is {"actor_type", "daily_briefings", "flash_intel_alerts",
     "threat_actor_profiles", "total"}. A product with no actor type counts under
     "Unspecified", which sorts last. Used by the statistics page and dashboard.
     """
     try:
-        briefings = list_briefings()
+        briefings = [b for b in list_briefings() if b.review_state == BRIEFING_REVIEW_PUBLISHED]
     except Exception:
         briefings = []
     try:
-        fias = list_fias()
+        fias = list_fias(review_state=FIA_REVIEW_APPROVED)
     except Exception:
         fias = []
     try:
-        taps = list_threat_actor_profiles()
+        taps = list_threat_actor_profiles(status="Published")
     except Exception:
         taps = []
 
@@ -6930,8 +6968,8 @@ def scraper_existing_uuids(uuids):
     """Return subset of UUIDs that currently exist in scraper/analyser MISP.
 
     Callers read a UUID missing from the result as an event that is gone, so
-    they check there is a scraper before calling: a blanket "none of these
-    exist" would have them hide or delete the lot.
+    they check there is a scraper before calling, and a search MISP refuses
+    raises: a blanket "none of these exist" would have them hide or delete the lot.
     """
     candidates = [u for u in set(uuids or []) if u]
     if not candidates:
@@ -6945,11 +6983,9 @@ def scraper_existing_uuids(uuids):
         chunk = candidates[i:i + chunk_size]
         events = misp.search(uuid=chunk, metadata=True, pythonify=True)
         if isinstance(events, dict):
-            # The caller hides activity rows whose event is missing, so a failed
-            # search would quietly hide the lot as orphaned.
-            logger.warning("scraper existence check failed for %d uuid(s): %s",
-                           len(chunk), events.get("errors") or events)
-            continue
+            # Not an answer: read as "gone", these events would be hidden from
+            # the activity log, or their history purged.
+            raise RuntimeError(f"scraper existence check failed: {events.get('errors') or events}")
         if not events:
             continue
         for e in events:

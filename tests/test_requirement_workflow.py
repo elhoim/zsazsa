@@ -269,9 +269,8 @@ class ProductLinks(unittest.TestCase):
         misp = mock.create_autospec(PyMISP, instance=True)
         misp.search.return_value = [_product(**{"linked-pir-uuid": UUID})]
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
-             mock.patch.object(misp_store, "list_rfis", return_value=[]), \
-             mock.patch.object(misp_store, "list_stakeholders", return_value=[]):
-            metrics = stats._program_metrics([_pir(status="Active")], [])
+             mock.patch.object(misp_store, "list_rfis", return_value=[]):
+            metrics = stats._program_metrics([_pir(status="Active")], [], [])
         self.assertEqual(metrics["products"]["with_pir_link"], 1)
 
     def test_the_stakeholder_page_lists_a_product_that_answers_their_pir(self):

@@ -287,6 +287,21 @@ class StoredFields(unittest.TestCase):
         self.assertEqual(fia.write_up, "")
         self.assertEqual(fia.intelligence_gaps, "")
 
+    def test_an_alert_without_its_object_takes_its_title_and_id_from_the_event(self):
+        """The analyser filed alerts without their object while MISP refused it,
+        and those showed with no title or id anywhere. The title is still in the
+        event info, and the report was named after the event id."""
+        event = SimpleNamespace(
+            uuid="u" * 36, id="9390", info="[zsazsa:fia] StealC You Later", objects=[], attributes=[],
+            event_reports=[], published=False, publish_timestamp=None, timestamp=None, date=None,
+        )
+        fia = misp_store._fia_ns(event)
+        self.assertEqual((fia.fia_id, fia.title), ("FIA-09390", "StealC You Later"))
+
+    def test_an_alert_with_its_object_keeps_what_the_object_says(self):
+        fia = self._reread({"fia_id": "FIA-00042", "title": "From the form"})
+        self.assertEqual((fia.fia_id, fia.title), ("FIA-00042", "From the form"))
+
     def test_the_misp_object_template_declares_them(self):
         """An attribute the template does not declare still writes, since _oa()
         passes the type itself, but MISP then shows it unnamed on the event."""

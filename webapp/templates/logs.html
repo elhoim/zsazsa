@@ -41,7 +41,7 @@
     <table class="table table-hover zsazsa-table mb-0">
       <thead>
         <tr>
-          <th style="width:160px">Timestamp</th>
+          <th style="width:160px">Timestamp (UTC)</th>
           <th style="width:160px">User</th>
           <th style="width:100px">Action</th>
           <th style="width:110px">Type</th>
@@ -71,10 +71,17 @@
         {% endfor %}
       </tbody>
     </table>
+    {% if entries | length >= limit %}
+    <p class="text-muted small px-3 py-2 mb-0 border-top">
+      The newest {{ limit }} entries are shown. Filter by action or type to reach older ones.
+    </p>
+    {% endif %}
     {% else %}
     <div class="empty-state py-5">
       <i class="fas fa-scroll fa-2x text-muted mb-3 d-block"></i>
-      <p class="text-muted mb-0">No log entries yet.</p>
+      <p class="text-muted mb-0">
+        {{ 'No entries match these filters.' if selected_action or selected_type else 'No log entries yet.' }}
+      </p>
     </div>
     {% endif %}
   </div>

@@ -22,6 +22,7 @@
 - The web app listens on `ZSAZSA_BIND` and `ZSAZSA_PORT` when its environment
   sets them, so binding it to `127.0.0.1` no longer means editing
   `run_webapp.py`. The service template has the line.
+- Indicator health on the pipeline page counts every enabled MISP server, cached and refreshable.
 
 ### Changed
 
@@ -56,6 +57,8 @@
 - Approving or publishing a product that is already published no longer sends it twice.
 - Publishing from a product's edit form now needs an audience, as Approve does.
 - The PIR filter on All products found no product: it now reads each product's link.
+- Statistics showed no products for the last 7 and 30 days and 0% PIR coverage.
+- Flash intel alerts without their MISP object now show their title and id.
 
 ### Security
 
@@ -74,6 +77,7 @@
 - The `zsazsa-threat-landscape-report` template has a new UUID. Nothing needs
   doing: zsazsa finds the object by name, so existing reports keep working,
   and a report's object takes the new UUID the next time it is saved.
+- The collection cache has an `indicator_stats` table, created when the web app starts.
 
 ## 1.0.8
 

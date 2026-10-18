@@ -24,9 +24,12 @@ class Sweep(unittest.TestCase):
         # Answering None for every Redis command keeps the jobs these tests
         # create in job_store's in-memory fallback. Without this they land in
         # the Redis the app is using and show up in its Background jobs panel.
-        patcher = mock.patch.object(job_store, "_command", return_value=None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # The sweep also reads the indicator statistics of every configured
+        # server, which would reach this install's MISP, its partners and its cache.
+        for patcher in (mock.patch.object(job_store, "_command", return_value=None),
+                        mock.patch.object(collection_cache, "refresh_indicator_stats")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.addCleanup(job_store._memory.clear)
         self.addCleanup(collection_cache._pending_jobs.clear)
 

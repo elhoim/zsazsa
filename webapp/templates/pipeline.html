@@ -507,35 +507,48 @@
     </div>
     {% endif %}
 
-    {% if indicator_stats %}
     <div class="card content-card">
-      <div class="card-header"><i class="fas fa-fingerprint me-2"></i>Indicator health</div>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="fas fa-fingerprint me-2"></i>Indicator health</span>
+        <span class="d-flex align-items-center gap-2">
+          <span class="text-muted small">{{ 'Updated ' ~ indicator_stats.age if indicator_stats.age else 'Not read yet' }}</span>
+          <button type="button" class="btn btn-xs btn-outline-secondary" id="indicator-refresh"
+                  title="Read the counts from the servers again">
+            <i class="fas fa-rotate"></i>
+          </button>
+        </span>
+      </div>
       <div class="card-body">
-        {% if indicator_stats.ok %}
-        <div class="d-flex justify-content-between mb-2">
-          <span class="text-muted small">IoC-type attributes</span>
-          <span class="fw-semibold">{{ indicator_stats.total_ioc }}</span>
-        </div>
-        <div class="d-flex justify-content-between mb-3">
-          <span class="text-muted small">All attributes</span>
-          <span class="fw-semibold">{{ indicator_stats.all_total }}</span>
-        </div>
-        {% if indicator_stats.by_type %}
-        <div style="font-size:.78rem;">
-          {% for itype, n in indicator_stats.by_type.items() %}
-          <div class="d-flex justify-content-between border-bottom py-1">
-            <span class="text-muted font-monospace">{{ itype }}</span>
-            <span class="fw-semibold">{{ n }}</span>
+        {% if indicator_stats.servers %}
+        <div class="small mb-3">
+          {% for s in indicator_stats.servers %}
+          <div class="form-check">
+            <input class="form-check-input indicator-server" type="checkbox" value="{{ s.id }}"
+                   id="indicator-server-{{ loop.index }}" checked>
+            <label class="form-check-label" for="indicator-server-{{ loop.index }}">
+              {{ s.label }}
+              {% if s.error %}<i class="fas fa-triangle-exclamation text-warning ms-1"
+                 title="Last read failed{{ ', showing the counts from before' if s.fetched_at }}: {{ s.error }}"></i>{% endif %}
+            </label>
           </div>
           {% endfor %}
         </div>
-        {% endif %}
+        <div class="d-flex justify-content-between mb-2">
+          <span class="text-muted small">IoC-type attributes</span>
+          <span class="fw-semibold" id="indicator-ioc-total"></span>
+        </div>
+        <div class="d-flex justify-content-between mb-3">
+          <span class="text-muted small">All attributes</span>
+          <span class="fw-semibold" id="indicator-all-total"></span>
+        </div>
+        <div style="font-size:.78rem;" id="indicator-types"></div>
         {% else %}
-        <p class="text-muted small mb-0">Could not retrieve attribute statistics from MISP.</p>
+        <p class="text-muted small mb-0">
+          No counts yet. They are read with each collection refresh, or straight away with the refresh button.
+        </p>
         {% endif %}
       </div>
     </div>
-    {% endif %}
 
   </div>
 
@@ -544,6 +557,70 @@
 
 {% block scripts %}
 <script>
+(function () {
+  // Counts per server, added up here for the servers ticked.
+  var servers = {{ indicator_stats.servers | tojson }};
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.indicator-server'));
+  var list = document.getElementById('indicator-types');
+
+  function render() {
+    var ticked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
+    var byType = {}, all = 0;
+    servers.forEach(function (s) {
+      if (ticked.indexOf(s.id) === -1) return;
+      all += s.all_total;
+      Object.keys(s.by_type).forEach(function (kind) { byType[kind] = (byType[kind] || 0) + s.by_type[kind]; });
+    });
+    var kinds = Object.keys(byType).sort(function (a, b) { return byType[b] - byType[a]; });
+    document.getElementById('indicator-ioc-total').textContent =
+      kinds.reduce(function (n, kind) { return n + byType[kind]; }, 0);
+    document.getElementById('indicator-all-total').textContent = all;
+    list.textContent = '';
+    kinds.forEach(function (kind) {
+      var row = document.createElement('div');
+      row.className = 'd-flex justify-content-between border-bottom py-1';
+      var name = document.createElement('span');
+      name.className = 'text-muted font-monospace';
+      name.textContent = kind;
+      var count = document.createElement('span');
+      count.className = 'fw-semibold';
+      count.textContent = byType[kind];
+      row.append(name, count);
+      list.appendChild(row);
+    });
+  }
+
+  if (list) {
+    boxes.forEach(function (b) { b.addEventListener('change', render); });
+    render();
+  }
+
+  var refresh = document.getElementById('indicator-refresh');
+  refresh.addEventListener('click', function () {
+    refresh.disabled = true;
+    refresh.querySelector('i').classList.add('fa-spin');
+    fetch(SCRIPT_ROOT + '/pipeline/indicator-stats/refresh', {
+      method: 'POST',
+      headers: {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content},
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var timer = setInterval(function () {
+          fetch(SCRIPT_ROOT + '/pipeline/run/' + encodeURIComponent(data.job_id))
+            .then(function (r) { return r.json(); })
+            .then(function (state) {
+              var status = state.job && state.job.status;
+              if (!state.ok || status === 'completed' || status === 'failed') {
+                clearInterval(timer);
+                location.reload();
+              }
+            });
+        }, 2000);
+      })
+      .catch(function () { location.reload(); });
+  });
+})();
+
 (function () {
   var btn = document.getElementById('toggle-sources');
   if (!btn) return;
