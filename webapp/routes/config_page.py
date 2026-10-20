@@ -243,6 +243,7 @@ def _read() -> dict:
         "SMTP_USERNAME": getattr(_config, "SMTP_USERNAME", ""),
         "SMTP_PASSWORD": getattr(_config, "SMTP_PASSWORD", ""),
         "SMTP_FROM": getattr(_config, "SMTP_FROM", ""),
+        "SMTP_SENDER_NAME": getattr(_config, "SMTP_SENDER_NAME", ""),
         "FLOWINTEL_INSTANCES": getattr(_config, "FLOWINTEL_INSTANCES", []),
         "FLOWINTEL_CASE_TEMPLATE_PRODUCTS": FLOWINTEL_CASE_TEMPLATE_PRODUCTS,
         "RULEZET_URL": getattr(_config, "RULEZET_URL", ""),
@@ -575,6 +576,7 @@ SMTP_USE_TLS = {bool(values.get('SMTP_USE_TLS', True))}
 SMTP_USERNAME = {values.get('SMTP_USERNAME', '')!r}
 SMTP_PASSWORD = {values.get('SMTP_PASSWORD', '')!r}
 SMTP_FROM = {values.get('SMTP_FROM', '')!r}
+SMTP_SENDER_NAME = {values.get('SMTP_SENDER_NAME', '')!r}
 
 # Flowintel case management instances
 FLOWINTEL_INSTANCES = {flowintel_instances_repr}
@@ -825,6 +827,7 @@ def index():
             "SMTP_USERNAME": _form_str("SMTP_USERNAME"),
             "SMTP_PASSWORD": _form_secret("SMTP_PASSWORD", "SMTP_HOST"),
             "SMTP_FROM": _form_str("SMTP_FROM"),
+            "SMTP_SENDER_NAME": _form_str("SMTP_SENDER_NAME"),
             "FLOWINTEL_INSTANCES": getattr(_config, "FLOWINTEL_INSTANCES", []),
             "RULEZET_URL": _form_str("RULEZET_URL"),
             "PRODUCT_TYPES": products,

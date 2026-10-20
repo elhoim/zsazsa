@@ -592,7 +592,8 @@ Email channels share one SMTP server, configured in the same tab and stored in t
 | `SMTP_HOST`, `SMTP_PORT` | SMTP server address and port (for example `smtp.gmail.com` and `587`) |
 | `SMTP_USE_TLS` | Use STARTTLS on the connection |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | SMTP credentials (use an app password where the provider requires one) |
-| `SMTP_FROM` | From address shown on outgoing mail |
+| `SMTP_FROM` | Sender email address shown on outgoing mail |
+| `SMTP_SENDER_NAME` | Optional sender display name; when empty or absent, mail uses only `SMTP_FROM` |
 | `FLOWINTEL_INSTANCES` | Flowintel instances: name, URL, API key, TLS verification, enabled flag and the per-product `case_templates` mapping |
 
 Delivery itself runs as a background job.

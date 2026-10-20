@@ -86,6 +86,25 @@ class SendEmail(unittest.TestCase):
         self.assertIn("text/plain", types)
         self.assertIn("text/html", types)
 
+    def test_sender_name_is_used_when_configured(self):
+        with mock.patch.object(config, "SMTP_SENDER_NAME", "Threat Intelligence", create=True), \
+             mock.patch("notifier.email.smtplib.SMTP") as smtp:
+            server = smtp.return_value.__enter__.return_value
+            email.send_email(["a@x.test"], "Subject", "body", "label")
+
+        msg = server.send_message.call_args.args[0]
+        self.assertEqual(msg["From"], "Threat Intelligence <cti@x.test>")
+
+    def test_missing_sender_name_uses_only_sender_address(self):
+        with mock.patch.dict(config.__dict__):
+            config.__dict__.pop("SMTP_SENDER_NAME", None)
+            with mock.patch("notifier.email.smtplib.SMTP") as smtp:
+                server = smtp.return_value.__enter__.return_value
+                email.send_email(["a@x.test"], "Subject", "body", "label")
+
+        msg = server.send_message.call_args.args[0]
+        self.assertEqual(msg["From"], "cti@x.test")
+
     def test_brand_logo_travels_as_a_related_part(self):
         """The header only references the logo when one is configured, so the
         brand has to be stubbed as well as the bytes: reading it from whatever
