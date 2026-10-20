@@ -151,6 +151,7 @@ def _view(name) -> dict:
             "smtp_username": getattr(config, "SMTP_USERNAME", ""),
             "smtp_password_stored": bool(getattr(config, "SMTP_PASSWORD", "")),
             "smtp_from": getattr(config, "SMTP_FROM", ""),
+            "smtp_sender_name": getattr(config, "SMTP_SENDER_NAME", ""),
         }
     return {}
 

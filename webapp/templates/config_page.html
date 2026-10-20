@@ -1141,9 +1141,13 @@
               </div>
               {% if cfg.SMTP_PASSWORD %}{{ remove_secret('SMTP_PASSWORD', 'Remove the stored password') }}{% endif %}
             </div>
-            <div class="col-sm-8">
+            <div class="col-sm-4">
               <label class="form-label">From address</label>
-              <input type="text" name="SMTP_FROM" class="form-control font-monospace" value="{{ cfg.SMTP_FROM }}" placeholder="CTI team <account@gmail.com>">
+              <input type="text" name="SMTP_FROM" class="form-control font-monospace" value="{{ cfg.SMTP_FROM }}" placeholder="account@gmail.com">
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label">Sender name <span class="text-muted">(optional)</span></label>
+              <input type="text" name="SMTP_SENDER_NAME" class="form-control" value="{{ cfg.SMTP_SENDER_NAME }}" placeholder="CTI team">
             </div>
             <div class="col-sm-4">
               <div class="form-check form-switch mt-4">

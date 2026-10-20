@@ -26,6 +26,9 @@ class Example(unittest.TestCase):
             with self.subTest(setting=name):
                 self.assertIs(ast.literal_eval(settings[name]), True)
 
+    def test_sender_name_is_optional(self):
+        self.assertEqual(ast.literal_eval(_settings()["SMTP_SENDER_NAME"]), "")
+
 
 if __name__ == "__main__":
     unittest.main()

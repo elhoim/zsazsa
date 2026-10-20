@@ -3,6 +3,7 @@ import smtplib
 import ssl
 from contextlib import contextmanager
 from email.message import EmailMessage
+from email.utils import formataddr
 
 import config
 from notifier import product_email
@@ -37,6 +38,7 @@ def _settings() -> dict:
         "username": (getattr(config, "SMTP_USERNAME", "") or "").strip(),
         "password": getattr(config, "SMTP_PASSWORD", "") or "",
         "sender": (getattr(config, "SMTP_FROM", "") or "").strip(),
+        "sender_name": (getattr(config, "SMTP_SENDER_NAME", "") or "").strip(),
     }
 
 
@@ -127,7 +129,8 @@ def send_email(recipients: list[str], subject: str, markdown: str, label: str,
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = cfg["sender"]
+    msg["From"] = (formataddr((cfg["sender_name"], cfg["sender"]))
+                   if cfg["sender_name"] else cfg["sender"])
     # With several recipients, keep their addresses private from one another: the
     # visible To is the sender and delivery happens via the explicit list below.
     msg["To"] = recipients[0] if len(recipients) == 1 else cfg["sender"]

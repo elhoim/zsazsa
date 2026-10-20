@@ -194,9 +194,11 @@ class SetupWizard(unittest.TestCase):
         self.assertEqual(_keyvals(self.target), dict(unchanged, BRAND_COMPANY="Example Corp", BRAND_DEPARTMENT="CTI"))
 
     def test_the_last_step_with_a_form_ends_on_done(self):
-        resp = self.post_step("notifications", SMTP_HOST="", SMTP_FROM="cti@example.org")
+        resp = self.post_step("notifications", SMTP_HOST="", SMTP_FROM="cti@example.org",
+                              SMTP_SENDER_NAME="Threat Intelligence")
         self.assertTrue(resp.headers["Location"].endswith("/config/setup/done"))
         self.assertEqual(_keyvals(self.target)["SMTP_FROM"], "cti@example.org")
+        self.assertEqual(_keyvals(self.target)["SMTP_SENDER_NAME"], "Threat Intelligence")
 
     def test_a_save_that_names_no_step_stays_on_the_settings_page(self):
         resp = self.post_step("https://elsewhere.example", FOCUS_POINTS_SECTORS="Energy\nFinance")

@@ -523,8 +523,12 @@
             {% if view.smtp_password_stored %}{{ remove_secret('SMTP_PASSWORD', 'Remove the stored password') }}{% endif %}
           </div>
           <div class="col-md-4">
-            <label class="form-label small mb-1" for="wz-smtp-from">Sender</label>
-            <input type="text" id="wz-smtp-from" name="SMTP_FROM" class="form-control form-control-sm font-monospace" value="{{ view.smtp_from }}" placeholder="CTI team &lt;cti@example.org&gt;">
+            <label class="form-label small mb-1" for="wz-smtp-from">Sender address</label>
+            <input type="text" id="wz-smtp-from" name="SMTP_FROM" class="form-control form-control-sm font-monospace" value="{{ view.smtp_from }}" placeholder="cti@example.org">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1" for="wz-smtp-sender-name">Sender name <span class="text-muted">(optional)</span></label>
+            <input type="text" id="wz-smtp-sender-name" name="SMTP_SENDER_NAME" class="form-control form-control-sm" value="{{ view.smtp_sender_name }}" placeholder="CTI team">
           </div>
         </div>
       </div>
