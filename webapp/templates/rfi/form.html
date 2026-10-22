@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import triage_checklist_card %}
 
 {% set is_edit = rfi is not none %}
 {% set sel_owner = rfi.owner_uuid if is_edit else '' %}
@@ -193,6 +194,8 @@
         </div>
       </div>
     </div>
+
+    {% if is_edit %}{{ triage_checklist_card(triage_checklist, rfi.triage_checklist) }}{% endif %}
 
     <div class="card content-card mb-4">
       <div class="card-header"><i class="fas fa-link me-2"></i>Linked requirements</div>

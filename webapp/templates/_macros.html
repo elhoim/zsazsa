@@ -207,6 +207,24 @@
 </div>
 {% endmacro %}
 
+{# The questions answered at triage, as checkboxes on an edit form. `checklist`
+   is the (value, label) list the route passes, `saved` the stored answers. #}
+{% macro triage_checklist_card(checklist, saved) %}
+<div class="card content-card mb-4">
+  <div class="card-header"><i class="fas fa-clipboard-check me-2"></i>Intake checklist</div>
+  <div class="card-body">
+    <div class="form-text mt-0 mb-2">The answers given at triage. Changing them here leaves the triage decision as it is.</div>
+    {% for value, label in checklist %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="triage_checklist" value="{{ value }}"
+             id="triage_chk_{{ loop.index }}" {{ 'checked' if value in (saved or []) }}>
+      <label class="form-check-label small" for="triage_chk_{{ loop.index }}">{{ label }}</label>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
 {# An icon that ticks every checkbox `target` (a CSS selector) finds, or clears
    them once all are ticked. The script for it is in base.html. #}
 {% macro toggle_all_button(target, select_title, clear_title) %}

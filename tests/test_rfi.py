@@ -38,8 +38,11 @@ def _rfi(**overrides):
         "feedback_usefulness": "", "feedback_suggestions": "",
         "attachments": [], "notes": [], "created_at": None, "creator": "",
         "misp_url": "", "history_url": "",
+        "triaged_at": "", "triaged_by": "", "triage_checklist": [], "rejection_reason": "",
     }
     stored.update(overrides)
+    # As the store reads it: any status but New means the RFI was triaged.
+    stored.setdefault("triaged", stored["status"] != "New")
     return SimpleNamespace(**stored)
 
 
@@ -197,6 +200,54 @@ class RenderedPages(unittest.TestCase):
         page = self.page("/rfis/rfi-uuid", _rfi(output_format_list=[{"format": "Indicator feed", "tlp": "green"}]))
         details = page.find("dt", string="Preferred output formats").find_next_sibling("dd")
         self.assertIsNotNone(details.select_one("i.fa-satellite-dish"))
+
+
+class IntakeAnswers(unittest.TestCase):
+    """The answers given at triage are shown on the RFI, as a PIR shows them,
+    and can be corrected on its edit form without changing the decision."""
+
+    setUp = RenderedPages.setUp
+    page = RenderedPages.page
+
+    def test_a_triaged_rfi_shows_how_each_question_was_answered(self):
+        page = self.page("/rfis/rfi-uuid", _rfi(status="Acknowledged", triaged_at="2026-10-20",
+                                                triaged_by="lead@example.org",
+                                                triage_checklist=["clear_question", "not_duplicate"]))
+        card = page.find("dt", string="Triage checklist").find_next_sibling("dd")
+        answers = card.select("li")
+        self.assertEqual(len(answers), len(rfi_routes.RFI_TRIAGE_CHECKLIST))
+        self.assertEqual(len(card.select("li.text-success")), 2)
+        self.assertIn("lead@example.org", page.get_text())
+
+    def test_an_rfi_not_yet_triaged_has_no_intake_card(self):
+        page = self.page("/rfis/rfi-uuid", _rfi(status="New"))
+        self.assertIsNone(page.find("dt", string="Triage checklist"))
+
+    def test_the_edit_form_ticks_the_stored_answers(self):
+        page = self.page("/rfis/rfi-uuid/edit", _rfi(status="Acknowledged",
+                                                     triage_checklist=["sources_available"]))
+        ticked = [box["value"] for box in page.select("input[name=triage_checklist][checked]")]
+        self.assertEqual(ticked, ["sources_available"])
+        self.assertEqual(len(page.select("input[name=triage_checklist]")),
+                         len(rfi_routes.RFI_TRIAGE_CHECKLIST))
+
+    def test_an_edit_saves_the_ticked_answers_and_keeps_the_status(self):
+        app = Flask(__name__)
+        app.secret_key = "test"
+        app.register_blueprint(rfi_routes.bp)
+        with mock.patch.object(rfi_routes.misp_store, "get_rfi",
+                               return_value=_rfi(status="Acknowledged", triage_checklist=["clear_question"])), \
+             mock.patch.object(rfi_routes.misp_store, "list_stakeholders", return_value=[]), \
+             mock.patch.object(rfi_routes.misp_store, "list_selectable_pirs", return_value=[]), \
+             mock.patch.object(rfi_routes.misp_store, "list_girs", return_value=[]), \
+             mock.patch.object(rfi_routes.misp_store, "update_rfi") as update, \
+             mock.patch.object(rfi_routes.audit, "record"):
+            app.test_client().post("/rfis/rfi-uuid/edit", data={
+                "question": "Is our sector targeted?", "priority": "High",
+                "triage_checklist": ["requester_identified", "priority_realistic", "made_up"]})
+        saved = update.call_args.args[1]
+        self.assertEqual(saved["triage_checklist"], ["requester_identified", "priority_realistic"])
+        self.assertEqual(saved["status"], "Acknowledged")
 
 
 class SlaStatus(unittest.TestCase):

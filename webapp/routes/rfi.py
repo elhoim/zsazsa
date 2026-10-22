@@ -245,6 +245,7 @@ def rfi_detail(id):
     return render_template(
         "rfi/detail.html",
         rfi=rfi,
+        triage_checklist=RFI_TRIAGE_CHECKLIST,
         sla_state=sla_state,
         days_remaining=days_remaining,
         linked_pir=linked_pir,
@@ -313,8 +314,11 @@ def rfi_edit(id):
     girs = misp_store.list_girs()
     if request.method == "POST":
         data = _form_data(request.form, rfi.rfi_id)
-        # The status changes through triage and the status board only.
+        # The status changes through triage and the status board only. The
+        # checklist answers given at triage can be corrected here.
         data["status"] = rfi.status
+        triage_keys = [key for key, _ in RFI_TRIAGE_CHECKLIST]
+        data["triage_checklist"] = [k for k in request.form.getlist("triage_checklist") if k in triage_keys]
         if data["owner_uuid"]:
             owner = next((s for s in stakeholders if s.id == data["owner_uuid"]), None)
             if owner:
@@ -330,6 +334,7 @@ def rfi_edit(id):
     return render_template(
         "rfi/form.html",
         rfi=rfi,
+        triage_checklist=RFI_TRIAGE_CHECKLIST,
         stakeholders=stakeholders,
         pirs=pirs,
         girs=girs,

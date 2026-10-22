@@ -9,6 +9,7 @@
 
 ### Changed
 
+- An RFI shows the answers given at triage in an Intake card, and they can be corrected on its edit form.
 - The intake checklist of a PIR can be corrected on its edit form.
 - With SSO, working in zsazsa keeps the MISP session alive: every five minutes, zsazsa requests MISP to refresh it.
 - The Technology field on the PIR, GIR, threat actor profile and briefing story forms suggests "Firewall, Windows, Web servers" instead of product names.

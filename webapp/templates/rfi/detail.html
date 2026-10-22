@@ -234,6 +234,32 @@
       </div>
     </div>
 
+    {% if rfi.triaged %}
+    <div class="card content-card mb-4">
+      <div class="card-header"><i class="fas fa-clipboard-list me-2"></i>Intake</div>
+      <div class="card-body small">
+        <dl class="detail-list mb-0">
+          {% if rfi.triaged_at %}
+          <dt>Triaged</dt><dd>{{ rfi.triaged_at }}{% if rfi.triaged_by %} <span class="text-muted">by {{ rfi.triaged_by }}</span>{% endif %}</dd>
+          {% endif %}
+          {% if rfi.rejection_reason %}
+          <dt>Rejection reason</dt><dd>{{ rfi.rejection_reason }}</dd>
+          {% endif %}
+          <dt class="mt-2">Triage checklist</dt>
+          <dd>
+            <ul class="list-unstyled mb-0">
+              {% for key, label in triage_checklist %}
+              <li class="{{ 'text-success' if key in rfi.triage_checklist else 'text-muted' }}" style="font-size:.8rem;">
+                <i class="fas {{ 'fa-check-circle' if key in rfi.triage_checklist else 'fa-circle' }} me-1" style="font-size:.7rem;"></i>{{ label }}
+              </li>
+              {% endfor %}
+            </ul>
+          </dd>
+        </dl>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card content-card mb-4">
       <div class="card-header"><i class="fas fa-link me-2"></i>Linked requirements</div>
       <div class="card-body">

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import galaxy_multiselect, tag_input, product_icon, toggle_all_button, collection_source_checklist %}
+{% from "_macros.html" import galaxy_multiselect, tag_input, product_icon, toggle_all_button, collection_source_checklist, triage_checklist_card %}
 
 {% set is_edit = pir is not none %}
 {% set prefill = prefill or {} %}
@@ -444,22 +444,7 @@
       </div>
     </div>
 
-    {% if is_edit %}
-    <!-- Intake checklist -->
-    <div class="card content-card mb-4">
-      <div class="card-header"><i class="fas fa-clipboard-check me-2"></i>Intake checklist</div>
-      <div class="card-body">
-        <div class="form-text mt-0 mb-2">The checklist from triage. Changing it here leaves the intake decision as it is.</div>
-        {% for value, label in triage_checklist %}
-        <div class="form-check mb-2">
-          <input class="form-check-input" type="checkbox" name="triage_checklist" value="{{ value }}"
-                 id="triage_chk_{{ loop.index }}" {{ 'checked' if value in (pir.triage_checklist or []) }}>
-          <label class="form-check-label small" for="triage_chk_{{ loop.index }}">{{ label }}</label>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
+    {% if is_edit %}{{ triage_checklist_card(triage_checklist, pir.triage_checklist) }}{% endif %}
 
     <!-- Ownership -->
     <div class="card content-card mb-4">
