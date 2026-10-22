@@ -10,6 +10,9 @@
 ### Changed
 
 - Webhook errors written to the log or shown by a channel test no longer include the `sig` parameter of a URL.
+- On the PIR and GIR forms, the "Output product format" list is sorted, with each product's icon and an icon to tick them all, and the collection sources are grouped by kind with the icons of the sources page.
+- The PIR and GIR distribution picker names a stakeholder's organisation instead of showing its UUID, and a GIR started from a stakeholder's page has that stakeholder as its owner and in its distribution, as a PIR already had.
+- Scope items of a PIR and a GIR no longer have a note: the add form has no Notes field, notes are no longer shown or exported, and a scope item is stored as `category|value`.
 - zsazsa needs Python 3.11 or later. Python 3.10 reached its end of life on 1 October 2026, and Pillow 13, which fixes the vulnerabilities below, no longer installs on it.
 
 ### Security
@@ -19,6 +22,7 @@
 ### Upgrading
 
 - zsazsa no longer runs on Python 3.10. `venv/bin/python --version` in the installation directory shows which one it uses. On 3.10, install Python 3.11 or later, move the old `venv` aside, create a new one as the web user with `python3.11 -m venv venv` (or the newer version you installed), and run `venv/bin/pip install -r requirements.txt` in it before restarting. The Docker installation runs its own Python 3.12 and needs nothing.
+- Nothing needs doing for the scope item notes. A note already stored stays in MISP, unread, until the requirement's scope is saved again, which writes its items without one.
 - Existing notification channels keep working, and the `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
 
 ## 1.0.9

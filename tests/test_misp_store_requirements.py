@@ -58,7 +58,7 @@ class RequirementScopeItems(unittest.TestCase):
         self.replace.assert_not_called()
 
     def test_a_pir_update_with_scope_items_replaces_them(self):
-        points = [{"category": "Sector", "value": "Transport", "notes": ""}]
+        points = [{"category": "Sector", "value": "Transport"}]
         misp_store.update_pir(UUID, _pir_data(focus_points=points))
         self.replace.assert_called_once_with(UUID, points)
 
@@ -72,7 +72,7 @@ class RequirementScopeItems(unittest.TestCase):
         self.replace.assert_not_called()
 
     def test_a_gir_update_with_scope_items_replaces_them(self):
-        points = [{"category": "Vendor", "value": "Bosch", "notes": ""}]
+        points = [{"category": "Vendor", "value": "Bosch"}]
         misp_store.update_gir(UUID, _gir_data(focus_points=points))
         self.replace.assert_called_once_with(UUID, points)
 

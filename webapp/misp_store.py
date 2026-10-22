@@ -1013,21 +1013,21 @@ def _replace_focus_points(req_uuid, focus_points):
     for fp in focus_points or []:
         category = (fp.get("category") or "").strip()
         value = (fp.get("value") or "").strip()
-        notes = (fp.get("notes") or "").strip()
         if category and value:
-            add_focus_point(req_uuid, category, value, notes)
+            add_focus_point(req_uuid, category, value)
 
 
 # ── Namespace builders ────────────────────────────────────────────────────────
 
 def _fp_ns(attr):
+    # Split off a third part rather than read it: a focus point saved while
+    # they had notes is "category|value|notes", and the note is not used.
     parts = attr.value.split("|", 2)
     return SimpleNamespace(
         id=attr.uuid,
         uuid=attr.uuid,
         category=parts[0] if len(parts) > 0 else "",
         value=parts[1] if len(parts) > 1 else attr.value,
-        notes=parts[2] if len(parts) > 2 else "",
     )
 
 
@@ -1677,13 +1677,12 @@ def sync_scope_tags_from_store(event_uuid: str):
     _apply_scope_tags(misp, event_uuid, data, _event=event)
 
 
-def add_focus_point(req_uuid, category, value, notes=""):
+def add_focus_point(req_uuid, category, value):
     misp = _misp()
-    fp_value = f"{category}|{value}|{notes}" if notes else f"{category}|{value}"
     attr = {
         "type": "text",
         "category": "Other",
-        "value": fp_value,
+        "value": f"{category}|{value}",
         "comment": _FP_COMMENT,
         "to_ids": False,
     }
@@ -1844,7 +1843,7 @@ def sync_focus_points_category(req_uuid, category, values):
     """Replace all focus points of ``category`` for the PIR/GIR with
     ``values`` (deduplicated, trimmed) and align the parent scope list.
     Use for galaxy-backed categories where the user picks from a
-    multi-select. A value that stays keeps the notes typed against it."""
+    multi-select."""
     misp = _misp()
     event = misp.get_event(req_uuid, pythonify=True)
     if isinstance(event, dict) or event is None:
@@ -1860,15 +1859,12 @@ def sync_focus_points_category(req_uuid, category, values):
         seen.add(key)
         cleaned.append(v)
 
-    notes = {}
     for a in _get_fp_attrs(event):
-        ns = _fp_ns(a)
-        if ns.category == category:
-            notes[ns.value.lower()] = ns.notes
+        if _fp_ns(a).category == category:
             _delete_attribute(misp, a.uuid, "delete focus point")
 
     for v in cleaned:
-        add_focus_point(req_uuid, category, v, notes.get(v.lower(), ""))
+        add_focus_point(req_uuid, category, v)
 
     relation = _FP_CATEGORY_TO_RELATION.get(category)
     if relation:
@@ -1878,10 +1874,10 @@ def sync_focus_points_category(req_uuid, category, values):
             _rewrite_parent_scope(misp, event, relation, cleaned)
 
 
-def add_focus_point_with_scope(req_uuid, category, value, notes=""):
+def add_focus_point_with_scope(req_uuid, category, value):
     """Add a single focus point and append its value to the matching
     parent scope list (if applicable)."""
-    add_focus_point(req_uuid, category, value, notes)
+    add_focus_point(req_uuid, category, value)
     relation = _FP_CATEGORY_TO_RELATION.get(category)
     if not relation:
         return
@@ -4171,31 +4167,36 @@ def imap_source_labels() -> list[str]:
     return labels
 
 
-def get_all_collection_source_labels() -> list[str]:
-    """Return a combined list of all collection source labels.
+def collection_source_groups() -> dict[str, list[str]]:
+    """The collection sources a requirement can name, by kind.
 
-    Includes the scraper when one is configured, configured MISP servers
-    (enabled only), MISP-stored manual sources (enabled only), and each enabled
-    IMAP mailbox source listed as "<mailbox>/<source>".
+    In the order of the sources page: "scraper" when one is configured, the
+    enabled MISP servers as "misp", each enabled IMAP mailbox source as
+    "<mailbox>/<source>" under "imap", and the enabled manual sources stored in
+    MISP as "manual". A name already listed under an earlier kind is left out.
     """
-    labels = ["misp-scraper"] if scraper_enabled() else []
-    for s in getattr(config, "MISP_SERVERS", []) or []:
-        if s.get("enabled", True):
-            label = (s.get("label") or "").strip()
-            if label and label not in labels:
-                labels.append(label)
-    for label in imap_source_labels():
-        if label not in labels:
-            labels.append(label)
     try:
-        for src in list_collection_sources():
-            if src.enabled and src.name and src.name not in labels:
-                labels.append(src.name)
+        manual = [src.name for src in list_collection_sources() if src.enabled and src.name]
     except Exception as exc:
         # The picker still works without them, but silently dropping every
         # manual source when MISP is unreachable looks like they were deleted.
         logger.warning("Could not add the manual collection sources to the list: %s", exc)
-    return labels
+        manual = []
+    candidates = {
+        "scraper": ["misp-scraper"] if scraper_enabled() else [],
+        "misp": [(s.get("label") or "").strip()
+                 for s in getattr(config, "MISP_SERVERS", []) or [] if s.get("enabled", True)],
+        "imap": imap_source_labels(),
+        "manual": manual,
+    }
+    groups, seen = {}, set()
+    for kind, names in candidates.items():
+        groups[kind] = []
+        for name in names:
+            if name and name not in seen:
+                seen.add(name)
+                groups[kind].append(name)
+    return groups
 
 
 # Local tag on every manual collection entry, next to the zsazsa:source tag of

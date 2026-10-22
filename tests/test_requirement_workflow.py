@@ -133,7 +133,7 @@ class IntelligenceLevelRequired(unittest.TestCase):
                         mock.patch.object(config, "MISP_SESSION_REDIRECT_TO_LOGIN", False),
                         mock.patch.object(collection_cache, "start_worker"),
                         mock.patch.object(misp_store, "list_stakeholders", return_value=[]),
-                        mock.patch.object(misp_store, "get_all_collection_source_labels", return_value=[]),
+                        mock.patch.object(misp_store, "collection_source_groups", return_value={}),
                         mock.patch.object(misp_store, "get_pir", return_value=_pir()),
                         mock.patch.object(misp_store, "get_gir", return_value=SimpleNamespace(
                             uuid=UUID, gir_id="GIR-001", topic="t", status="Active", focus_points=[],
@@ -165,6 +165,82 @@ class IntelligenceLevelRequired(unittest.TestCase):
                 label = page.find("label", string="Intelligence level")
                 self.assertIn("required-label", label["class"])
                 self.assertIsNotNone(page.select_one("#intel-level-warn"))
+
+
+class StartedFromAStakeholder(unittest.TestCase):
+    """A PIR or GIR started from a stakeholder's page has that stakeholder as
+    its owner and in its distribution."""
+
+    setUp = IntelligenceLevelRequired.setUp
+
+    def form(self, path, stakeholders, from_uuid):
+        with mock.patch.object(misp_store, "list_stakeholders", return_value=stakeholders):
+            return self.client.get(f"{path}?from_stakeholder={from_uuid}").get_data(as_text=True)
+
+    def test_the_stakeholder_is_owner_and_ticked_for_distribution(self):
+        owner = SimpleNamespace(uuid="9d2e4f10-0000-4000-8000-000000000001", name="Acme SOC", role="SOC")
+        other = SimpleNamespace(uuid="9d2e4f10-0000-4000-8000-000000000002", name="Acme IR", role="IR")
+        for path in ("/pirs/new", "/girs/new"):
+            html = self.form(path, [owner, other], owner.uuid)
+            self.assertRegex(html, rf'name="distribution" value="{owner.uuid}"[^>]*checked', path)
+            self.assertNotRegex(html, rf'name="distribution" value="{other.uuid}"[^>]*checked', path)
+            self.assertRegex(html, rf'<option value="{owner.uuid}"\s+selected', path)
+
+    def test_an_unknown_stakeholder_prefills_nothing(self):
+        owner = SimpleNamespace(uuid="9d2e4f10-0000-4000-8000-000000000001", name="Acme SOC", role="SOC")
+        for path in ("/pirs/new", "/girs/new"):
+            html = self.form(path, [owner], "not-a-stakeholder")
+            self.assertNotRegex(html, r'name="distribution"[^>]*checked', path)
+            self.assertNotRegex(html, rf'<option value="{owner.uuid}"\s+selected', path)
+
+
+class CollectionSourcePicker(unittest.TestCase):
+    """The sources a PIR or GIR can name are grouped by kind, each with the icon
+    the sources page gives it, and a stored one is ticked on edit."""
+
+    setUp = IntelligenceLevelRequired.setUp
+    groups = {"scraper": ["misp-scraper"], "misp": ["community"], "imap": ["soc/vendor-feed"], "manual": []}
+
+    def form(self, path):
+        with mock.patch.object(misp_store, "collection_source_groups", return_value=self.groups):
+            return self.client.get(path).get_data(as_text=True)
+
+    def test_each_kind_has_its_heading_and_icon(self):
+        for path in ("/pirs/new", "/girs/new"):
+            html = self.form(path)
+            self.assertRegex(html, r'fw-semibold[^"]*">Other MISP servers<', path)
+            self.assertNotRegex(html, r'fw-semibold[^"]*">Manual sources<', path)
+            self.assertRegex(html, r'fa-server[^>]*></i>community', path)
+            self.assertRegex(html, r'fa-envelope[^>]*></i>soc/vendor-feed', path)
+            self.assertRegex(html, r'misp-logo\.png[^>]*>misp-scraper', path)
+
+    def test_a_stored_source_is_ticked_on_edit(self):
+        with mock.patch.object(misp_store, "get_pir", return_value=_pir(collection_sources=["soc/vendor-feed"])):
+            html = self.form(f"/pirs/{UUID}/edit")
+        self.assertRegex(html, r'value="soc/vendor-feed"\s+id="src_imap_1" checked')
+        self.assertNotRegex(html, r'value="community"\s+id="src_misp_1" checked')
+
+
+class DistributionOrganisationNames(unittest.TestCase):
+    """A stakeholder's organisation is stored as the UUID of a registered
+    organisation. The distribution picker shows its name, and an organisation
+    stored as text the way it was typed."""
+
+    setUp = IntelligenceLevelRequired.setUp
+    org_uuid = "7c1d2e3f-0000-4000-8000-0000000000aa"
+
+    def test_the_picker_names_the_organisation(self):
+        linked = SimpleNamespace(uuid="9d2e4f10-0000-4000-8000-000000000001", name="Acme SOC",
+                                 role="SOC", organization=self.org_uuid)
+        typed = SimpleNamespace(uuid="9d2e4f10-0000-4000-8000-000000000002", name="Partner",
+                                role="IR", organization="Partner Corp")
+        with mock.patch.object(misp_store, "list_stakeholders", return_value=[linked, typed]), \
+             mock.patch.object(requirements.org_store, "org_map", return_value={self.org_uuid: "CIRCL"}):
+            for path in ("/pirs/new", f"/pirs/{UUID}/edit", "/girs/new", f"/girs/{UUID}/edit"):
+                html = self.client.get(path).get_data(as_text=True)
+                self.assertIn("SOC &middot; CIRCL", html, path)
+                self.assertIn("IR &middot; Partner Corp", html, path)
+                self.assertNotIn(self.org_uuid, html, path)
 
 
 class RfiPirChoice(unittest.TestCase):
@@ -335,19 +411,27 @@ class ProductLinks(unittest.TestCase):
 
 
 class GalaxyScopeSync(unittest.TestCase):
-    def test_a_value_that_stays_keeps_its_notes(self):
-        """Every value was deleted and added back without the notes typed against it."""
-        event = MISPEvent()
-        event.uuid = UUID
-        event.add_attribute("text", "Sector|Energy|grid operators", comment=misp_store._FP_COMMENT)
+    """Scope items no longer have notes. One saved while they did is stored as
+    "category|value|notes": it reads back as its value alone, and is written
+    again without the note when its category is rebuilt."""
+
+    def setUp(self):
+        self.event = MISPEvent()
+        self.event.uuid = UUID
+        self.event.add_attribute("text", "Sector|Energy|grid operators", comment=misp_store._FP_COMMENT)
+
+    def test_an_old_note_does_not_end_up_in_the_value(self):
+        [fp] = [misp_store._fp_ns(a) for a in misp_store._get_fp_attrs(self.event)]
+        self.assertEqual((fp.category, fp.value), ("Sector", "Energy"))
+
+    def test_a_rebuilt_category_is_written_without_notes(self):
         misp = mock.create_autospec(PyMISP, instance=True)
-        misp.get_event.return_value = event
+        misp.get_event.return_value = self.event
         with mock.patch.object(misp_store, "_misp", return_value=misp), \
-             mock.patch.object(misp_store, "add_focus_point") as add, \
              mock.patch.object(misp_store, "_rewrite_parent_scope"):
             misp_store.sync_focus_points_category(UUID, "Sector", ["energy", "Transport"])
-        self.assertEqual([c.args[1:] for c in add.call_args_list],
-                         [("Sector", "energy", "grid operators"), ("Sector", "Transport", "")])
+        written = [c.args[1]["value"] for c in misp.add_attribute.call_args_list]
+        self.assertEqual(written, ["Sector|energy", "Sector|Transport"])
 
 
 if __name__ == "__main__":

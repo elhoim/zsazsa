@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import galaxy_multiselect, tag_input %}
+{% from "_macros.html" import galaxy_multiselect, tag_input, product_icon, toggle_all_button, collection_source_checklist %}
 
 {% set is_edit = pir is not none %}
 {% set prefill = prefill or {} %}
@@ -315,15 +315,7 @@
       <div class="card-header"><i class="fas fa-satellite-dish me-2"></i>Collection mapping</div>
       <div class="card-body">
         <label class="form-label">Sources that can address this requirement</label>
-        <div class="source-checklist">
-          {% for src in collection_sources %}
-          <div class="form-check form-check-inline source-check">
-            <input class="form-check-input" type="checkbox" name="collection_sources" value="{{ src }}" id="src_{{ loop.index }}"
-              {{ 'checked' if is_edit and src in pir.collection_sources }}>
-            <label class="form-check-label" for="src_{{ loop.index }}">{{ src }}</label>
-          </div>
-          {% endfor %}
-        </div>
+        {{ collection_source_checklist(collection_source_groups, pir.collection_sources if is_edit else []) }}
         <div class="form-text mt-2">
           <i class="fas fa-circle-info fa-xs me-1"></i>Informational only. Event matching and filtering runs across all configured sources regardless of this mapping.
         </div>
@@ -336,19 +328,17 @@
       <div class="card-body">
         <div class="row g-3">
           <div class="col-sm-6">
-            <label class="form-label d-flex align-items-center justify-content-between">
-              Output formats
-              <label class="form-check-label small text-muted fw-normal d-flex align-items-center gap-1">
-                <input type="checkbox" id="ofmt-select-all" class="form-check-input mt-0">
-                Select all
-              </label>
-            </label>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <label class="form-label mb-0">Output product format</label>
+              {{ toggle_all_button('#output-format-list input[name="output_format"]',
+                                   'Select all products', 'Clear all products') }}
+            </div>
             <div class="source-checklist" id="output-format-list">
-              {% for f in output_formats %}
+              {% for f in output_formats | sort(case_sensitive=False) %}
               <div class="form-check source-check">
-                <input class="form-check-input ofmt-check" type="checkbox" name="output_format" value="{{ f }}" id="ofmt_{{ loop.index }}"
+                <input class="form-check-input" type="checkbox" name="output_format" value="{{ f }}" id="ofmt_{{ loop.index }}"
                   {{ 'checked' if is_edit and f in (pir.output_format or []) }}>
-                <label class="form-check-label" for="ofmt_{{ loop.index }}">{{ f }}</label>
+                <label class="form-check-label" for="ofmt_{{ loop.index }}">{{ product_icon(f) }}{{ f }}</label>
               </div>
               {% endfor %}
             </div>
@@ -367,8 +357,9 @@
                 <div class="dist-pick-avatar">{{ (s.name or '?')[0] | upper }}</div>
                 <div class="dist-pick-body">
                   <div class="dist-pick-name">{{ s.name }}</div>
-                  {% if s.role or s.organization %}
-                  <div class="dist-pick-role">{{ s.role }}{% if s.role and s.organization %} &middot; {% endif %}{{ s.organization }}</div>
+                  {% set org = org_map.get(s.organization, s.organization) %}
+                  {% if s.role or org %}
+                  <div class="dist-pick-role">{{ s.role }}{% if s.role and org %} &middot; {% endif %}{{ org }}</div>
                   {% endif %}
                   <div class="dist-pick-meta">
                     {% if s.email %}<span class="text-muted small"><i class="fas fa-envelope fa-xs me-1"></i>{{ s.email }}</span>{% endif %}
@@ -633,24 +624,6 @@ document.addEventListener('DOMContentLoaded', function() {
   if (prioritySel) {
     prioritySel.addEventListener('change', updateMoscowBadge);
     updateMoscowBadge();
-  }
-
-  // Output formats select-all
-  var selectAll = document.getElementById('ofmt-select-all');
-  var ofmtBoxes = document.querySelectorAll('.ofmt-check');
-  if (selectAll && ofmtBoxes.length) {
-    function syncSelectAll() {
-      var checked = Array.from(ofmtBoxes).filter(function(c) { return c.checked; }).length;
-      selectAll.checked = checked === ofmtBoxes.length;
-      selectAll.indeterminate = checked > 0 && checked < ofmtBoxes.length;
-    }
-    selectAll.addEventListener('change', function() {
-      ofmtBoxes.forEach(function(cb) { cb.checked = selectAll.checked; });
-    });
-    ofmtBoxes.forEach(function(cb) {
-      cb.addEventListener('change', syncSelectAll);
-    });
-    syncSelectAll();
   }
 });
 </script>

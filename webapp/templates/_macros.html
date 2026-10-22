@@ -178,3 +178,41 @@
 } %}
 
 {% macro product_icon(name) %}<i class="fas fa-{{ product_icons.get(name, 'cube') }} fa-fw text-muted me-1"></i>{% endmacro %}
+
+{# The sources from misp_store.collection_source_groups() as checkboxes, under
+   the headings and with the icons the sources page uses, ticked when named in
+   `selected`. #}
+{% macro collection_source_checklist(groups, selected) %}
+{% set headings = {'scraper': 'MISP scraper', 'misp': 'Other MISP servers',
+                   'imap': 'IMAP mailboxes', 'manual': 'Manual sources'} %}
+{% set icons = {'misp': 'server', 'imap': 'envelope', 'manual': 'hand'} %}
+<div class="source-checklist">
+  {% for kind, names in groups.items() if names %}
+  <div class="w-100 small text-muted fw-semibold {{ 'mt-2' if not loop.first }}">{{ headings[kind] }}</div>
+  {% for name in names %}
+  <div class="form-check form-check-inline source-check">
+    <input class="form-check-input" type="checkbox" name="collection_sources" value="{{ name }}"
+           id="src_{{ kind }}_{{ loop.index }}" {{ 'checked' if name in selected }}>
+    <label class="form-check-label" for="src_{{ kind }}_{{ loop.index }}">
+      {%- if kind == 'scraper' -%}
+      <img src="{{ url_for('static', filename='misp-logo.png') }}" alt="" style="height:12px;width:auto;margin-right:5px;opacity:.8;">
+      {%- else -%}
+      <i class="fas fa-{{ icons[kind] }} fa-fw text-muted me-1"></i>
+      {%- endif -%}
+      {{ name }}
+    </label>
+  </div>
+  {% endfor %}
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# An icon that ticks every checkbox `target` (a CSS selector) finds, or clears
+   them once all are ticked. The script for it is in base.html. #}
+{% macro toggle_all_button(target, select_title, clear_title) %}
+<button type="button" class="btn btn-sm btn-link text-muted p-0" data-toggle-all="{{ target }}"
+        data-select-title="{{ select_title }}" data-clear-title="{{ clear_title }}"
+        title="{{ select_title }}" aria-label="{{ select_title }}">
+  <i class="fas fa-check-double"></i>
+</button>
+{% endmacro %}

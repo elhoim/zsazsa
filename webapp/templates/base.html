@@ -821,6 +821,29 @@
     if (message && !confirm(message)) e.preventDefault();
   }, true);
 
+  // A button with data-toggle-all (the toggle_all_button macro) ticks every
+  // checkbox its selector finds, or clears them once all are ticked. Its icon
+  // and title follow the boxes, ticked by hand or not.
+  document.querySelectorAll('[data-toggle-all]').forEach((btn) => {
+    const boxes = document.querySelectorAll(btn.dataset.toggleAll);
+    if (!boxes.length) { btn.hidden = true; return; }
+    const allChecked = () => Array.prototype.every.call(boxes, (cb) => cb.checked);
+    const update = () => {
+      const all = allChecked();
+      const title = all ? btn.dataset.clearTitle : btn.dataset.selectTitle;
+      btn.title = title;
+      btn.setAttribute('aria-label', title);
+      btn.querySelector('i').className = all ? 'fas fa-xmark' : 'fas fa-check-double';
+    };
+    btn.addEventListener('click', () => {
+      const check = !allChecked();
+      boxes.forEach((cb) => { cb.checked = check; });
+      update();
+    });
+    boxes.forEach((cb) => cb.addEventListener('change', update));
+    update();
+  });
+
   // Auto-dismiss flash messages after 4 seconds
   setTimeout(() => {
     try {

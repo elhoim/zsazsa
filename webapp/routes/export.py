@@ -75,8 +75,7 @@ def _pirs_markdown():
         if pir.focus_points:
             lines += ["", "**Focus points:**"]
             for fp in pir.focus_points:
-                note = f" ({fp.notes})" if fp.notes else ""
-                lines.append(f"- [{fp.category}] {fp.value}{note}")
+                lines.append(f"- [{fp.category}] {fp.value}")
         if any([pir.output_format, pir.distribution]):
             lines += ["", "**Deliverable:**"]
             if pir.output_format:
@@ -198,8 +197,7 @@ def _girs_markdown():
         if gir.focus_points:
             lines += ["", "**Focus points:**"]
             for fp in gir.focus_points:
-                note = f" ({fp.notes})" if fp.notes else ""
-                lines.append(f"- [{fp.category}] {fp.value}{note}")
+                lines.append(f"- [{fp.category}] {fp.value}")
         lines += ["", "---", ""]
     return "\n".join(lines)
 

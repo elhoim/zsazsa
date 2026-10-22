@@ -1470,12 +1470,6 @@ a.chart-row:hover { background: var(--surface-hover); }
   flex: 1;
 }
 
-.fp-notes {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  font-style: italic;
-}
-
 .fp-delete {
   margin-left: auto;
 }

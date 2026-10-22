@@ -246,14 +246,25 @@ class SourceLists(unittest.TestCase):
         """This list is what the PIR and GIR edit forms draw their checkboxes
         from; config.COLLECTION_SOURCES is written but never read."""
         with mock.patch.object(misp_store, "imap_source_labels", return_value=[]):
-            self.assertEqual(misp_store.get_all_collection_source_labels(), ["community"])
+            groups = misp_store.collection_source_groups()
+        self.assertEqual(groups["scraper"], [])
+        self.assertEqual(groups["misp"], ["community"])
 
     def test_a_requirement_is_offered_the_scraper_once_it_is_configured(self):
         with mock.patch.object(misp_store.config, "MISP_URL", "https://s.example.org"), \
              mock.patch.object(misp_store.config, "MISP_KEY", "sk"), \
              mock.patch.object(misp_store, "imap_source_labels", return_value=[]):
-            self.assertEqual(misp_store.get_all_collection_source_labels(),
-                             ["misp-scraper", "community"])
+            groups = misp_store.collection_source_groups()
+        self.assertEqual(groups["scraper"], ["misp-scraper"])
+        self.assertEqual(groups["misp"], ["community"])
+
+    def test_each_source_is_listed_once_under_its_first_kind(self):
+        manual = [SimpleNamespace(name="community", enabled=True), SimpleNamespace(name="phone", enabled=True),
+                  SimpleNamespace(name="paused", enabled=False)]
+        with mock.patch.object(misp_store, "imap_source_labels", return_value=["box/news", "community"]), \
+             mock.patch.object(misp_store, "list_collection_sources", return_value=manual):
+            groups = misp_store.collection_source_groups()
+        self.assertEqual(groups, {"scraper": [], "misp": ["community"], "imap": ["box/news"], "manual": ["phone"]})
 
 
 class ScraperCard(unittest.TestCase):
@@ -432,7 +443,7 @@ class GeneratedConfig(unittest.TestCase):
     """COLLECTION_SOURCES is generated source code inside config/__init__.py.
 
     Nothing reads it back, the requirement forms use
-    get_all_collection_source_labels(), but it is a documented setting and the
+    collection_source_groups(), but it is a documented setting and the
     file has to stay honest about what is configured."""
 
     def setUp(self):

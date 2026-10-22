@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import config
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 
-from webapp import audit, matching as _matching, misp_session, misp_store, notify_jobs
+from webapp import audit, matching as _matching, misp_session, misp_store, notify_jobs, org_store
 from webapp.models import (
     FOCUS_CATEGORIES,
     INTEL_LEVELS,
@@ -204,12 +204,10 @@ def _scope_focus_points(form, existing=()):
     """Focus points for a requirement being saved from its form.
 
     Saving replaces every focus point, so each category is rebuilt from the
-    scope list posted for it. What the form cannot carry is taken from
-    `existing` instead: the notes an analyst typed against a scope item, and any
-    focus point in a category the form has no field for, which is how a record
-    written before a category was added survives a save.
+    scope list posted for it. A focus point in a category the form has no field
+    for is taken from `existing` instead, which is how a record written before
+    a category was added survives a save.
     """
-    notes = {(fp.category, (fp.value or "").lower()): fp.notes for fp in existing or []}
     points = []
     seen = set()
     for category, field in _SCOPE_FP_FIELDS.items():
@@ -219,13 +217,13 @@ def _scope_focus_points(form, existing=()):
             if not clean or key in seen:
                 continue
             seen.add(key)
-            points.append({"category": category, "value": clean, "notes": notes.get(key, "")})
+            points.append({"category": category, "value": clean})
     for fp in existing or []:
         key = (fp.category, (fp.value or "").lower())
         if fp.category in _SCOPE_FP_FIELDS or key in seen:
             continue
         seen.add(key)
-        points.append({"category": fp.category, "value": fp.value, "notes": fp.notes})
+        points.append({"category": fp.category, "value": fp.value})
     return points
 
 
@@ -248,7 +246,7 @@ def _sub_questions(form):
 
 def _pir_form_data(form, stakeholders, focus_points=()):
     """The PIR as its form describes it, for a new PIR and an edit alike.
-    ``focus_points`` are the stored ones, whose notes the form does not post."""
+    ``focus_points`` are the stored ones, kept for categories the form has no field for."""
     owner_uuid, owner_name, owner_role = _owner_fields(form, stakeholders)
     return {
         "question": form["question"],
@@ -383,20 +381,19 @@ def pir_list():
     )
 
 
+def _prefill_from_stakeholder(stakeholders) -> dict:
+    """Owner and distribution for a requirement started from a stakeholder's page."""
+    from_uuid = (request.args.get("from_stakeholder") or "").strip()
+    owner = next((s for s in stakeholders if s.uuid == from_uuid), None) if from_uuid else None
+    if owner is None:
+        return {}
+    return {"owner_uuid": owner.uuid, "distribution": [owner.uuid]}
+
+
 @bp.route("/pirs/new", methods=["GET", "POST"])
 def pir_new():
     stakeholders = misp_store.list_stakeholders()
-    prefill = {}
-    from_uuid = (request.args.get("from_stakeholder") or "").strip()
-    if from_uuid:
-        owner = next((s for s in stakeholders if s.uuid == from_uuid), None)
-        if owner:
-            prefill = {
-                "owner_uuid": owner.uuid,
-                "owner_name": owner.name,
-                "owner_role": owner.role,
-                "distribution": [owner.uuid],
-            }
+    prefill = _prefill_from_stakeholder(stakeholders)
     if request.method == "POST":
         data = _pir_form_data(request.form, stakeholders)
         # Placeholder; create_pir allocates the authoritative pir_id atomically.
@@ -421,10 +418,11 @@ def pir_new():
         pir=None,
         prefill=prefill,
         stakeholders=stakeholders,
+        org_map=org_store.org_map(),
         priorities=MOSCOW_PRIORITIES,
         statuses=PIR_STATUSES,
         time_sensitivities=TIME_SENSITIVITIES,
-        collection_sources=misp_store.get_all_collection_source_labels(),
+        collection_source_groups=misp_store.collection_source_groups(),
         output_formats=cti_products(),
         **_galaxy_context(),
     )
@@ -492,10 +490,11 @@ def pir_edit(id):
         "requirements/pir_form.html",
         pir=pir,
         stakeholders=stakeholders,
+        org_map=org_store.org_map(),
         priorities=MOSCOW_PRIORITIES,
         statuses=PIR_STATUSES,
         time_sensitivities=TIME_SENSITIVITIES,
-        collection_sources=misp_store.get_all_collection_source_labels(),
+        collection_source_groups=misp_store.collection_source_groups(),
         output_formats=cti_products(),
 
         **_galaxy_context(),
@@ -584,7 +583,6 @@ def pir_add_focus_point(id):
             id,
             request.form["category"],
             request.form["value"],
-            request.form.get("notes", ""),
         )
         misp_store.sync_scope_tags_from_store(id)
         _matching.invalidate_cache()
@@ -688,6 +686,7 @@ def gir_list():
 @bp.route("/girs/new", methods=["GET", "POST"])
 def gir_new():
     stakeholders = misp_store.list_stakeholders()
+    prefill = _prefill_from_stakeholder(stakeholders)
     if request.method == "POST":
         data = _gir_form_data(request.form, stakeholders)
         # Placeholder; create_gir allocates the authoritative gir_id atomically.
@@ -710,10 +709,12 @@ def gir_new():
     return render_template(
         "requirements/gir_form.html",
         gir=None,
+        prefill=prefill,
         stakeholders=stakeholders,
+        org_map=org_store.org_map(),
         statuses=GIR_STATUSES,
         review_cycles=REVIEW_CYCLES,
-        collection_sources=misp_store.get_all_collection_source_labels(),
+        collection_source_groups=misp_store.collection_source_groups(),
         output_formats=cti_products(),
         **_galaxy_context(),
     )
@@ -771,9 +772,10 @@ def gir_edit(id):
         "requirements/gir_form.html",
         gir=gir,
         stakeholders=stakeholders,
+        org_map=org_store.org_map(),
         statuses=GIR_STATUSES,
         review_cycles=REVIEW_CYCLES,
-        collection_sources=misp_store.get_all_collection_source_labels(),
+        collection_source_groups=misp_store.collection_source_groups(),
         output_formats=cti_products(),
         **_galaxy_context(),
     )
@@ -803,7 +805,6 @@ def gir_add_focus_point(id):
             id,
             request.form["category"],
             request.form["value"],
-            request.form.get("notes", ""),
         )
         misp_store.sync_scope_tags_from_store(id)
         _matching.invalidate_cache()

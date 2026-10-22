@@ -784,7 +784,7 @@ Manual collection entries are also stored in MISP. They have a TLP tag, `zsazsa:
 
 Events that need analyst follow-up are flagged with `zsazsa:collection="follow-up"` as a local tag. Events an analyst dismissed have `zsazsa:event="dismiss"`, also as a local tag, and both tag names are configurable.
 
-Focus points are stored as text attributes with the comment `zsazsa:fp` and the value format `category|value|notes`.
+Focus points are stored as text attributes with the comment `zsazsa:fp` and the value format `category|value`. One saved by an earlier version may still end in `|notes`; that part is ignored.
 
 ## Blog posts and further reading
 

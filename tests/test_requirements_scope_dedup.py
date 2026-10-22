@@ -56,7 +56,7 @@ class CreatingAndEditing(unittest.TestCase):
              mock.patch.object(requirements.misp_store, "get_pir", return_value=existing), \
              mock.patch.object(requirements.misp_store, "get_gir", return_value=existing), \
              mock.patch.object(requirements.misp_store, store_call, side_effect=remember), \
-             mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
+             mock.patch.object(requirements.misp_store, "collection_source_groups", return_value={}), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
             reply = self.client.post(path, data={"question": "Q?", "topic": "T", "intel_level": "Strategic", **fields})
@@ -87,16 +87,15 @@ class CreatingAndEditing(unittest.TestCase):
         self.assertEqual(data["geographic_scope"], ["Poland"])
 
 
-def _fp(category, value, notes=""):
+def _fp(category, value):
     return SimpleNamespace(id=f"{category}-{value}", uuid=f"{category}-{value}",
-                           category=category, value=value, notes=notes)
+                           category=category, value=value)
 
 
 class FocusPointsSurviveAnEdit(unittest.TestCase):
     """Saving the PIR form replaces every focus point on the requirement, so each
-    category is rebuilt from the scope list posted for it. The notes an analyst
-    typed, and any category the form has no field for, have to be carried over or
-    each save quietly deletes them."""
+    category is rebuilt from the scope list posted for it. A category the form has
+    no field for has to be carried over, or each save quietly deletes it."""
 
     def setUp(self):
         self.client = _app().test_client()
@@ -112,7 +111,7 @@ class FocusPointsSurviveAnEdit(unittest.TestCase):
         with mock.patch.object(requirements.misp_store, "list_stakeholders", return_value=[]), \
              mock.patch.object(requirements.misp_store, "get_pir", return_value=pir), \
              mock.patch.object(requirements.misp_store, "update_pir", side_effect=remember), \
-             mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
+             mock.patch.object(requirements.misp_store, "collection_source_groups", return_value={}), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
             self.client.post(f"/pirs/{'u' * 36}/edit", data={"question": "Q?", "intel_level": "Strategic", **fields})
@@ -128,27 +127,15 @@ class FocusPointsSurviveAnEdit(unittest.TestCase):
             [("Technology", "Fortinet VPN"), ("Vendor", "Ivanti"),
              ("Incident", "Storm-0501 intrusion"), ("Campaign", "Spring phishing")])
 
-    def test_a_note_on_a_technology_item_is_kept(self):
-        points = self.edit([_fp("Technology", "Fortinet VPN", "edge devices")],
-                           technology=["Fortinet VPN"])
-        self.assertEqual(points, [{"category": "Technology", "value": "Fortinet VPN",
-                                   "notes": "edge devices"}])
-
     def test_a_technology_item_left_off_the_form_is_dropped(self):
         points = self.edit([_fp("Technology", "Fortinet VPN")], sectors=["Energy"])
-        self.assertEqual(points, [{"category": "Sector", "value": "Energy", "notes": ""}])
+        self.assertEqual(points, [{"category": "Sector", "value": "Energy"}])
 
     def test_a_category_the_form_has_no_field_for_is_kept(self):
         """Nothing offered today lands here, but a record written before a
         category was renamed must not be deleted by a save that cannot see it."""
-        points = self.edit([_fp("Malware", "Emotet", "old category")], sectors=["Energy"])
-        self.assertIn({"category": "Malware", "value": "Emotet", "notes": "old category"}, points)
-
-    def test_the_note_on_a_scope_item_is_kept(self):
-        points = self.edit([_fp("Geography", "Belgium", "EU headquarters")],
-                           geographic_scope=["Belgium"])
-        self.assertEqual(points, [{"category": "Geography", "value": "Belgium",
-                                   "notes": "EU headquarters"}])
+        points = self.edit([_fp("Malware", "Emotet")], sectors=["Energy"])
+        self.assertIn({"category": "Malware", "value": "Emotet"}, points)
 
     def test_a_scope_value_removed_on_the_form_is_dropped(self):
         points = self.edit([_fp("Sector", "Energy"), _fp("Sector", "Transport")],
@@ -158,8 +145,8 @@ class FocusPointsSurviveAnEdit(unittest.TestCase):
     def test_a_requirement_with_no_focus_points_gains_them_from_the_form(self):
         points = self.edit([], sectors=["Energy"], threat_actors=["Lazarus Group"])
         self.assertEqual(points, [
-            {"category": "Sector", "value": "Energy", "notes": ""},
-            {"category": "Threat Actor", "value": "Lazarus Group", "notes": ""},
+            {"category": "Sector", "value": "Energy"},
+            {"category": "Threat Actor", "value": "Lazarus Group"},
         ])
 
     def test_every_category_the_detail_page_offers_can_be_posted(self):
@@ -217,7 +204,7 @@ class GirScopeItems(unittest.TestCase):
         with mock.patch.object(requirements.misp_store, "list_stakeholders", return_value=[]), \
              mock.patch.object(requirements.misp_store, "get_gir", return_value=gir), \
              mock.patch.object(requirements.misp_store, store_call, side_effect=remember), \
-             mock.patch.object(requirements.misp_store, "get_all_collection_source_labels", return_value=[]), \
+             mock.patch.object(requirements.misp_store, "collection_source_groups", return_value={}), \
              mock.patch.object(requirements.audit, "record"), \
              mock.patch.object(requirements._matching, "invalidate_cache"):
             self.client.post(path, data={"topic": "T", "intel_level": "Strategic", **fields})
@@ -225,15 +212,15 @@ class GirScopeItems(unittest.TestCase):
 
     def test_a_new_gir_gets_scope_items_from_its_form(self):
         points = self.save("/girs/new", "create_gir", vendor=["Bosch"])
-        self.assertEqual(points, [{"category": "Vendor", "value": "Bosch", "notes": ""}])
+        self.assertEqual(points, [{"category": "Vendor", "value": "Bosch"}])
 
     def test_editing_a_gir_adds_the_scope_item_for_a_new_vendor(self):
         points = self.save(f"/girs/{'u' * 36}/edit", "update_gir",
-                           existing=[_fp("Vendor", "Moxa", "OT gateways")],
+                           existing=[_fp("Vendor", "Moxa")],
                            vendor=["Moxa", "Bosch"])
         self.assertEqual(points, [
-            {"category": "Vendor", "value": "Moxa", "notes": "OT gateways"},
-            {"category": "Vendor", "value": "Bosch", "notes": ""},
+            {"category": "Vendor", "value": "Moxa"},
+            {"category": "Vendor", "value": "Bosch"},
         ])
 
 
