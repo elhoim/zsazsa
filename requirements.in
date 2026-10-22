@@ -3,9 +3,9 @@
 # requirements.txt pins every package, these and the ones they pull in, to the
 # version that is installed. It is generated from this file, not edited:
 #
-#   uv pip compile requirements.in --universal --python-version 3.10 -o requirements.txt
+#   uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
 #
-# --universal because zsazsa runs on Python 3.10 and later, and some packages
+# --universal because zsazsa runs on Python 3.11 and later, and some packages
 # need another version, or an extra package, on the older ones. The lock marks
 # those pins with the Python versions they are for. Without --upgrade, uv keeps
 # the versions already pinned and only resolves what changed here.

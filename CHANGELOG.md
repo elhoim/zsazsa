@@ -1,6 +1,6 @@
 # Changelog
 
-## ## 1.0.10 - development
+## 1.0.10 - development
 
 ### Added
 
@@ -10,11 +10,16 @@
 ### Changed
 
 - Webhook errors written to the log or shown by a channel test no longer include the `sig` parameter of a URL.
+- zsazsa needs Python 3.11 or later. Python 3.10 reached its end of life on 1 October 2026, and Pillow 13, which fixes the vulnerabilities below, no longer installs on it.
+
+### Security
+
+- Pillow is updated to 13.0.0 and certifi to 2026.10.19, for the advisories published against Pillow 12.3.0 and certifi 2026.7.22.
 
 ### Upgrading
 
-- Nothing needs doing. Existing channels keep working, and the
-  `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
+- zsazsa no longer runs on Python 3.10. `venv/bin/python --version` in the installation directory shows which one it uses. On 3.10, install Python 3.11 or later, move the old `venv` aside, create a new one as the web user with `python3.11 -m venv venv` (or the newer version you installed), and run `venv/bin/pip install -r requirements.txt` in it before restarting. The Docker installation runs its own Python 3.12 and needs nothing.
+- Existing notification channels keep working, and the `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
 
 ## 1.0.9
 

@@ -2,7 +2,7 @@
 # install.sh - set up zsazsa for the first time
 #
 # What this script does:
-#   1. Checks for Python 3.10+ and pip
+#   1. Checks for Python 3.11+ and pip
 #   2. Creates a Python virtual environment in ./venv
 #   3. Installs all dependencies from requirements.txt
 #   4. Creates the data/ directory
@@ -36,7 +36,7 @@ echo ""
 # ── 1. Python version check ────────────────────────────────────────────────────
 
 if ! command -v "$PYTHON" &>/dev/null; then
-    echo "ERROR: Python 3 not found. Install Python 3.10 or later and re-run."
+    echo "ERROR: Python 3 not found. Install Python 3.11 or later and re-run."
     exit 1
 fi
 
@@ -44,8 +44,10 @@ PYTHON_VERSION=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys
 PYTHON_MAJOR=$("$PYTHON" -c "import sys; print(sys.version_info.major)")
 PYTHON_MINOR=$("$PYTHON" -c "import sys; print(sys.version_info.minor)")
 
-if [[ "$PYTHON_MAJOR" -lt 3 ]] || { [[ "$PYTHON_MAJOR" -eq 3 ]] && [[ "$PYTHON_MINOR" -lt 10 ]]; }; then
-    echo "ERROR: Python 3.10 or later is required (found $PYTHON_VERSION)."
+if [[ "$PYTHON_MAJOR" -lt 3 ]] || { [[ "$PYTHON_MAJOR" -eq 3 ]] && [[ "$PYTHON_MINOR" -lt 11 ]]; }; then
+    echo "ERROR: Python 3.11 or later is required (found $PYTHON_VERSION)."
+    echo "If a newer one is installed next to it, name it, for example:"
+    echo "  sudo -u www-data PYTHON=python3.11 bash docs/install.sh"
     exit 1
 fi
 

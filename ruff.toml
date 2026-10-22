@@ -1,7 +1,7 @@
 # F is what pyflakes checked before, and the tree is clean on it. The rest are
 # bug-shaped rules that cost nothing to keep clean. Ruff's own default set
 # flags around 470 things here, nearly all style, hence the explicit list.
-target-version = "py312"
+target-version = "py311"
 
 [lint]
 select = ["F", "B904", "E711", "E712", "E713", "E714", "E721"]

@@ -54,7 +54,7 @@ The script asks its questions first and changes nothing until you answer yes to 
 
 ### System packages
 
-zsazsa needs **Python 3.10** or later, with `venv` and `pip`, plus the native
+zsazsa needs **Python 3.11** or later, with `venv` and `pip`, plus the native
 libraries [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation)
 uses to render PDFs (every CTI product, from flash alerts and advisories to
 briefings and reports, is exported through it). `pip install -r requirements.txt`

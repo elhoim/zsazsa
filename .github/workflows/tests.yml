@@ -20,12 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The oldest Python zsazsa supports and the one it is developed on. Some
-    # pins in requirements.txt differ between the two, and so does the
-    # standard library: on 3.10, concurrent.futures.TimeoutError is not yet
-    # the builtin one.
+    # pins in requirements.txt differ between the two.
     strategy:
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.11", "3.12"]
     steps:
       # Actions are pinned by commit SHA, not by tag: a tag can be moved to
       # point at different code. Dependabot keeps the SHAs current.
