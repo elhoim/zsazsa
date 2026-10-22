@@ -407,4 +407,19 @@
     color: var(--alt4-preview-active-hover-fg);
   }
   .exclusion-actions { display: inline-flex; align-items: center; gap: .35rem; flex-wrap: nowrap; }
+
+  /* Top words in the event titles, in the table header: no taller than a source chip. */
+  .title-words { display: flex; align-items: center; gap: .6rem; min-width: 0; overflow: hidden; }
+  .title-words[hidden] { display: none; }
+  .title-words-caption { font-size: .7rem; font-weight: 400; color: var(--text-muted); white-space: nowrap; }
+  .title-words-bars { display: flex; align-items: flex-end; gap: .2rem; }
+  .title-word {
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px;
+    height: 32px; padding: 0 .35rem 2px; border: 1px solid transparent; border-radius: 6px;
+    background: none; color: var(--text-muted); font-size: .7rem; font-weight: 500; line-height: 1;
+    white-space: nowrap; cursor: pointer;
+  }
+  .title-word:hover { background: var(--surface-muted); border-color: var(--border-light); color: var(--text-primary); }
+  .title-word.selected { border-color: var(--accent-blue); color: var(--text-primary); }
+  .title-word-bar { width: 1.25rem; background: var(--accent-blue); border-radius: 4px 4px 0 0; }
 </style>

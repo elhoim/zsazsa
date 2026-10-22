@@ -20,8 +20,16 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
+          {% if show_rejected %}<input type="hidden" name="rejected" value="1">{% endif %}
           {{ charts.filter_select('intel_level', 'Intelligence level', 'fa-layer-group', 'All levels', intel_levels, intel_filter) }}
           {{ charts.filter_select('priority', 'Priority', 'fa-flag', 'All priorities', priorities, priority_filter) }}
+          {% if rejected_count %}
+          <a href="{{ url_for('requirements.pir_list', **dict(request.args.to_dict(), rejected=None if show_rejected else 1)) }}"
+             class="btn btn-xs btn-outline-secondary w-100 mb-2">
+            <i class="fas {{ 'fa-eye-slash' if show_rejected else 'fa-box-archive' }} me-1"></i>
+            {{ 'Hide rejected PIRs' if show_rejected else 'Show rejected PIRs (' ~ rejected_count ~ ')' }}
+          </a>
+          {% endif %}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ pirs | length }} PIR{{ 's' if pirs|length != 1 }}</span>
             {% if intel_filter or priority_filter %}
@@ -117,9 +125,15 @@
       <div class="kanban-col flex-shrink-0" style="min-width:160px;width:160px;">
         <div class="kanban-col-header text-center fw-semibold small p-1 mb-1 rounded bg-danger-subtle text-danger-emphasis">
           Rejected
-          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">{{ pirs | selectattr('intake_status', 'equalto', 'rejected') | list | length }}</span>
+          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">{{ rejected_count }}</span>
         </div>
         <div class="kanban-cards" style="min-height:60px;">
+          {% if not show_rejected and rejected_count %}
+          <a href="{{ url_for('requirements.pir_list', **dict(request.args.to_dict(), rejected=1)) }}" class="kanban-closed text-decoration-none" title="Show the rejected PIRs">
+            <span class="fw-bold">{{ rejected_count }}</span> rejected
+            <i class="fas fa-eye ms-1"></i>
+          </a>
+          {% endif %}
           {% for pir in pirs %}
           {% if pir.intake_status == 'rejected' %}
           <div class="kanban-card card mb-1 p-1 shadow-sm" draggable="false"

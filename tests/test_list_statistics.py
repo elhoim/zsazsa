@@ -1,10 +1,11 @@
-"""The filter cards of the PIR, GIR, RFI, briefing and product lists, and the closed RFIs.
+"""The filter cards of the PIR, GIR, RFI, briefing and product lists, and what they leave out.
 
 Each list counts what it shows beside its filters, and each field it filters on
 by what the other filters let through, so that a bar still offers every choice;
 a click on one filters the list and sets its dropdown. The RFI list leaves the
-closed ones out until asked for them, or for their status, and the status board
-says how many there are.
+closed ones out until asked for them, or for their status, the PIR list the
+rejected ones and the GIR list the retired ones, and the status board says how
+many there are.
 
 Records come from the store's own builders, so they have every field the
 templates read; the database and log are temporary.
@@ -84,7 +85,7 @@ class Lists(_Page):
                 _pir(2, status="Pending", intake_status="rejected", priority="Should have"),
                 _pir(3, status="Pending", priority="Should have", intel_level=["Operational"])]
         with mock.patch.object(misp_store, "list_pirs", return_value=pirs):
-            page = self.page("/pirs")
+            page = self.page("/pirs?rejected=1")
             strategic = self.page("/pirs?intel_level=Strategic")
         self.assertIn("Status Pending 1 Active 1 Rejected 1", self.stats(page))
         self.assertIn("Priority Must have 1 Should have 2", self.stats(page))
@@ -108,7 +109,7 @@ class Lists(_Page):
         girs = [_gir(1, status="Active", review_cycle="Weekly", intel_level=["Tactical"]),
                 _gir(2, status="Retired", review_cycle="Quarterly")]
         with mock.patch.object(misp_store, "list_girs", return_value=girs):
-            text = self.stats(self.page("/girs"))
+            text = self.stats(self.page("/girs?retired=1"))
         self.assertIn("Status Active 1 Retired 1", text)
         self.assertIn("Intelligence level Tactical 1 Unspecified 1", text)
         self.assertIn("Review cycle Weekly 1 Quarterly 1", text)
@@ -122,6 +123,52 @@ class Lists(_Page):
         self.assertEqual([a.get_text() for a in weekly.select("tbody .req-id-badge")], ["GIR-001"])
         self.assertEqual(weekly.select_one('select[name="review_cycle"] option[selected]')["value"], "Weekly")
         self.assertIn("Review cycle Weekly 1 Quarterly 1", self.stats(weekly))
+
+    def pirs(self, path):
+        pirs = [_pir(1, status="Active"), _pir(2, status="Pending", intake_status="rejected"),
+                _pir(3, status="Pending", intake_status="rejected")]
+        with mock.patch.object(misp_store, "list_pirs", return_value=pirs):
+            return self.page(path)
+
+    def test_the_rejected_pirs_are_left_out_and_counted(self):
+        page = self.pirs("/pirs")
+        self.assertEqual([a.get_text() for a in page.select("tbody .req-id-badge")], ["PIR-001"])
+        show = page.select_one(".list-filters a.btn")
+        self.assertEqual((show.get_text(" ", strip=True), show["href"]), ("Show rejected PIRs (2)", "/pirs?rejected=1"))
+        rejected = page.select(".kanban-col")[-1]
+        self.assertEqual(rejected.select_one(".badge").get_text(strip=True), "2")
+        self.assertEqual(rejected.select_one("a.kanban-closed")["href"], "/pirs?rejected=1")
+        self.assertEqual(rejected.select(".kanban-card"), [])
+
+    def test_the_rejected_pirs_are_shown_when_asked_for(self):
+        page = self.pirs("/pirs?rejected=1")
+        self.assertEqual(len(page.select("tbody .req-id-badge")), 3)
+        self.assertEqual(len(page.select(".kanban-col")[-1].select(".kanban-card")), 2)
+        self.assertEqual(page.select_one('.list-filters input[name="rejected"]')["value"], "1")
+        self.assertIn("Hide rejected PIRs", page.select_one(".list-filters a.btn").get_text(" ", strip=True))
+
+    def girs(self, path):
+        girs = [_gir(1, status="Active"), _gir(2, status="Retired")]
+        with mock.patch.object(misp_store, "list_girs", return_value=girs):
+            return self.page(path)
+
+    def test_the_retired_girs_are_left_out_and_counted(self):
+        page = self.girs("/girs")
+        self.assertEqual([a.get_text() for a in page.select("tbody .req-id-badge")], ["GIR-001"])
+        show = page.select_one(".list-filters a.btn")
+        self.assertEqual((show.get_text(" ", strip=True), show["href"]), ("Show retired GIRs (1)", "/girs?retired=1"))
+        retired = page.select_one('.kanban-col[data-status="Retired"]')
+        self.assertEqual(retired.select_one(".badge").get_text(strip=True), "1")
+        self.assertEqual(retired.select_one("a.kanban-closed")["href"], "/girs?retired=1")
+        self.assertEqual(retired.select(".kanban-card"), [])
+
+    def test_the_retired_girs_are_shown_when_asked_for(self):
+        page = self.girs("/girs?retired=1")
+        self.assertEqual(len(page.select("tbody .req-id-badge")), 2)
+        retired = page.select_one('.kanban-col[data-status="Retired"]')
+        self.assertEqual(len(retired.select(".kanban-card")), 1)
+        self.assertIsNone(retired.select_one("a.kanban-closed"))
+        self.assertIn("Hide retired GIRs", page.select_one(".list-filters a.btn").get_text(" ", strip=True))
 
     def rfis(self, path):
         rfis = [_rfi(1, "Acknowledged"), _rfi(2, "Closed"), _rfi(3, "Closed")]

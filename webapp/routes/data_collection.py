@@ -230,7 +230,25 @@ def _build_list_context() -> dict:
         collection_tag_hide_prefixes=getattr(config, "COLLECTION_TAG_HIDE_PREFIXES", []) or [],
         scope_galaxy=misp_store.scope_galaxy_items(),
         draft_briefings=_draft_briefings(),
+        events_being_summarised=_events_being_summarised(),
     )
+
+
+def _events_being_summarised() -> dict:
+    """{event uuid: job id} for the events an AI summary is still working on.
+
+    The table holds back their actions until the job ends: a reject or a flag
+    set meanwhile would be undone when the summary writes the event back. A
+    job gone quiet for longer than a live one would is left out, so a summary
+    whose process died does not lock its rows for good.
+    """
+    busy = {}
+    for job in job_store.list_jobs():
+        if (job.get("action") in ("summarise", "bulk-summarise")
+                and job.get("status") in job_store.IN_FLIGHT and not job_store.stalled(job)):
+            for uuid in job.get("events") or []:
+                busy.setdefault(uuid, job["id"])
+    return busy
 
 
 def _draft_briefings():
@@ -588,6 +606,7 @@ def summarise(uuid):
                         "error": "Summarisation is only available for scraper and manual events"}), 400
 
     job = job_store.create_job("summarise", label="AI summary")
+    job_store.update_job(job["id"], events=[uuid])
     threading.Thread(
         target=_run_summarise_job,
         args=(job["id"], [{"uuid": uuid, "sourceId": source_id}], misp_session.current_user_email()),
@@ -1617,6 +1636,7 @@ def bulk_summarise():
 
     batch = events[:_BULK_SUMMARISE_LIMIT]
     job = job_store.create_job("bulk-summarise", label="AI summaries")
+    job_store.update_job(job["id"], events=[ev.get("uuid") for ev in batch if ev.get("uuid")])
     threading.Thread(
         target=_run_summarise_job,
         args=(job["id"], batch, misp_session.current_user_email(),

@@ -299,12 +299,6 @@ def pipeline_job_status(job_id: str):
     return jsonify({"ok": True, "job": job})
 
 
-# A job whose worker died with the process keeps its "running" status until it
-# expires, so anything silent for this long is reported as stalled instead of
-# spinning in the top bar for the rest of the day. Well above the slowest step
-# an analyser run takes between two progress messages.
-_JOB_STALE_AFTER_SECONDS = 1800
-
 # Dropping the entry of a job that is only slow would hide work that is still
 # running, so removal asks for far more silence than the stalled marker does.
 # The analyser reports progress once per step, not once per LLM call, so a step
@@ -343,7 +337,6 @@ def pipeline_jobs():
     jobs = []
     for job in job_store.list_jobs():
         status = job.get("status", "")
-        unfinished = status in job_store.IN_FLIGHT
         # Age is measured here rather than in the browser: how long ago a job
         # was touched should not depend on how well a laptop keeps time.
         age = max(0, int(now - job.get("updated_at", 0)))
@@ -353,7 +346,7 @@ def pipeline_jobs():
             "label": job.get("label") or job.get("action", ""),
             "status": status,
             "message": job.get("message", ""),
-            "stale": unfinished and age > _JOB_STALE_AFTER_SECONDS,
+            "stale": job_store.stalled(job),
             "age": age,
         })
     running = [j for j in jobs if j["status"] in job_store.IN_FLIGHT and not j["stale"]]

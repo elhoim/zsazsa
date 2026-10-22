@@ -505,8 +505,76 @@
     } catch(e) {}
   }
 
+  /* ── Top words in the titles ──
+     The ten words most titles share, among the events the other filters let
+     through. The search is left out of that, or a click would narrow the chart
+     down to the word itself. A title counts each word once. A click searches for
+     the word, a second click clears the search again. */
+  var TITLE_STOP_WORDS = new Set((
+    'the and for with from that this are was were has have had its into over after about more new ' +
+    'how what why who your you our their they them will can not but all out than been via now amid ' +
+    'against under may also says said one two his her who which when where while'
+  ).split(' '));
+
+  function topTitleWords(titles, limit) {
+    var counts = new Map();
+    titles.forEach(function(title) {
+      var seen = new Set();
+      title.toLowerCase().split(/[^\p{L}\p{N}-]+/u).forEach(function(part) {
+        var word = part.replace(/^-+|-+$/g, '');
+        if (word.length < 3 || TITLE_STOP_WORDS.has(word) || /^[\d-]+$/.test(word) || seen.has(word)) return;
+        seen.add(word);
+        counts.set(word, (counts.get(word) || 0) + 1);
+      });
+    });
+    return Array.from(counts.entries())
+      .filter(function(entry) { return entry[1] > 1; })
+      .sort(function(a, b) { return b[1] - a[1] || a[0].localeCompare(b[0]); })
+      .slice(0, limit);
+  }
+
+  function renderTitleWords(titles, q) {
+    var chart = document.getElementById('title-words');
+    if (!chart) return;
+    var top = topTitleWords(titles, 10);
+    var bars = chart.querySelector('.title-words-bars');
+    bars.replaceChildren();
+    chart.hidden = !top.length;
+    var most = top.length ? top[0][1] : 1;
+    top.forEach(function(entry) {
+      var word = entry[0], count = entry[1];
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'title-word' + (word === q ? ' selected' : '');
+      btn.dataset.word = word;
+      btn.title = word + ': in ' + count + ' titles. ' +
+                  (word === q ? 'Click to clear the search.' : 'Click to search for it.');
+      var bar = document.createElement('span');
+      bar.className = 'title-word-bar';
+      bar.style.height = Math.max(2, Math.round(14 * count / most)) + 'px';
+      var label = document.createElement('span');
+      label.className = 'title-word-label';
+      label.textContent = word;
+      btn.append(bar, label);
+      bars.appendChild(btn);
+    });
+  }
+
+  var titleWordsChart = document.getElementById('title-words');
+  if (titleWordsChart) {
+    titleWordsChart.addEventListener('click', function(e) {
+      var btn = e.target.closest('.title-word');
+      var input = document.getElementById('search-input');
+      if (!btn || !input) return;
+      input.value = state.q.toLowerCase().trim() === btn.dataset.word ? '' : btn.dataset.word;
+      /* Through the search box's own handler, so it is exactly a typed search. */
+      input.dispatchEvent(new Event('input'));
+    });
+  }
+
   function applyAll() {
     var q = state.q.toLowerCase().trim();
+    var titlesForWords = [];
     var visible = 0;
     var totalMatching = 0;
     // Per source, the events that exist for the user regardless of the
@@ -533,7 +601,6 @@
 
       var ok = true;
       if (!state.activeSources.has(srcId)) ok = false;
-      if (ok && q && title.indexOf(q) === -1) ok = false;
       if (ok && setAsideHidden) ok = false;
       if (ok) state.include.forEach(function(t) { if (!tagSet.has(t)) ok = false; });
       if (ok) state.exclude.forEach(function(t) { if (tagSet.has(t)) ok = false; });
@@ -590,6 +657,9 @@
         }
         else { if (!date || date < cutoffStr) ok = false; }
       }
+      // The search last, so the word chart sees what every other filter lets through.
+      if (ok) titlesForWords.push(row.dataset.title || '');
+      if (ok && q && title.indexOf(q) === -1) ok = false;
       if (ok) totalMatching++;
       // Record whether the row passes the filters before the display cap is
       // applied, so counts (e.g. the exclusion reject count) can be based on
@@ -607,6 +677,8 @@
         if (t && t.startsWith('cti-evaluation:')) { _applyCtiBadgeClass(b, t); }
       });
     });
+
+    renderTitleWords(titlesForWords, q);
 
     // Hiding a row changes what counts as selected, so refresh the count and
     // the bulk-action toolbar on every pass.
@@ -1289,9 +1361,11 @@
            and the badge in the top bar covers leaving the page meanwhile. */
         if (window.zsazsaJobsChanged) zsazsaJobsChanged();
         followedJobs.add(data.job_id);
+        holdRowActions(btn.closest('tr'), data.job_id);
         zsazsaFollowJob(data.job_id, function(job) {
           if ((job.result || {}).summarised) {
             btn.remove();
+            releaseRowActions(data.job_id);
             /* The summary is a new MISP report and the event moved to workflow
                state 'draft', so pull the row back from the source to show both. */
             refreshEventRowTags(uuid, sourceId).catch(function() {
@@ -1299,10 +1373,12 @@
             });
             return;
           }
-          btn.disabled = false; btn.innerHTML = originalHtml;
+          releaseRowActions(data.job_id);
+          btn.innerHTML = originalHtml;
           showFeedback('Could not create summary: ' + jobFailureReason(job), 'warning');
         }, function(reason) {
-          btn.disabled = false; btn.innerHTML = originalHtml; btn.title = reason;
+          releaseRowActions(data.job_id);
+          btn.innerHTML = originalHtml; btn.title = reason;
           showFeedback(reason, 'warning');
         });
       })
@@ -1542,6 +1618,49 @@
     if (TABLE_JOBS.indexOf(job.action) === -1 || followedJobs.has(job.id)) return;
     if (analystIsBusy()) offerTableReload(job.label + ' finished. Reload the table to see the result.');
     else reloadTable('Table updated: ' + job.label + ' finished.');
+  });
+
+  /* ── Rows an AI summary is working on ──
+     Their actions wait for the summary to end: a flag or a reject set in the
+     meantime would be undone when the summary writes the event back. The server
+     marks the rows of summaries already running when the page loads, and a
+     summary started here marks its own. A completed summary reloads the table as
+     any summary does; a failed one frees its rows. */
+  function rowFor(uuid, sourceId) {
+    return rows.find(function(r) { return r.dataset.uuid === uuid && r.dataset.sourceId === sourceId; });
+  }
+
+  function holdRowActions(row, jobId) {
+    var cell = row && row.querySelector('.event-actions');
+    if (!cell) return;
+    cell.dataset.busyJob = jobId;
+    cell.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+  }
+
+  function releaseRowActions(jobId) {
+    document.querySelectorAll('.event-actions[data-busy-job]').forEach(function(cell) {
+      if (cell.dataset.busyJob !== jobId) return;
+      delete cell.dataset.busyJob;
+      cell.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+      var spinner = cell.querySelector('.busy-indicator');
+      if (spinner) spinner.remove();
+    });
+  }
+
+  var heldJobs = new Set();
+  document.querySelectorAll('.event-actions[data-busy-job]').forEach(function(cell) {
+    heldJobs.add(cell.dataset.busyJob);
+  });
+  heldJobs.forEach(function(jobId) { followedJobs.add(jobId); });
+  /* zsazsaFollowJob comes from a script in base.html that runs after this one. */
+  document.addEventListener('DOMContentLoaded', function() {
+    heldJobs.forEach(function(jobId) {
+      zsazsaFollowJob(jobId, function(job) {
+        if (!analystIsBusy()) { reloadTable('Table updated: ' + job.label + ' finished.'); return; }
+        releaseRowActions(jobId);
+        offerTableReload(job.label + ' finished. Reload the table to see the result.');
+      }, function() { releaseRowActions(jobId); });
+    });
   });
 
   function updateRowRejectedState(row, rejected) {
@@ -1809,9 +1928,11 @@
         showFeedback(data.message + ' Progress is shown in the top bar.', 'info');
         if (window.zsazsaJobsChanged) zsazsaJobsChanged();
         followedJobs.add(data.job_id);
+        selected.forEach(function(ev) { holdRowActions(rowFor(ev.uuid, ev.sourceId), data.job_id); });
         zsazsaFollowJob(data.job_id, function(job) {
           reloadTable('Table updated: ' + (job.message || 'summaries created.'));
         }, function(reason) {
+          releaseRowActions(data.job_id);
           showFeedback('Summaries did not finish: ' + reason, 'danger');
         });
       })

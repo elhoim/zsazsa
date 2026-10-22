@@ -354,11 +354,16 @@ def pir_list():
     all_pirs = misp_store.list_pirs()
     intel_filter = (request.args.get("intel_level") or "").strip()
     priority_filter = (request.args.get("priority") or "").strip()
+    # Rejected PIRs are done with, so the list leaves them out until asked for
+    # them, as the RFI list does with closed RFIs.
+    show_rejected = request.args.get("rejected") == "1"
     tests = {}
     if intel_filter:
         tests["intel_level"] = lambda p: intel_filter in (p.intel_level or [])
     if priority_filter:
         tests["priority"] = lambda p: p.priority == priority_filter
+    if not show_rejected:
+        tests["rejected"] = lambda p: p.intake_status != "rejected"
     pirs = _sort_requirements(
         matching(all_pirs, tests), request.args.get("sort"), request.args.get("dir"),
         "pir_id", "question", PIR_STATUS_ORDER,
@@ -376,6 +381,8 @@ def pir_list():
         intel_filter=intel_filter,
         priorities=MOSCOW_PRIORITIES,
         priority_filter=priority_filter,
+        show_rejected=show_rejected,
+        rejected_count=sum(1 for p in matching(all_pirs, tests, skip="rejected") if p.intake_status == "rejected"),
         merge_targets=[p for p in all_pirs if p.intake_status not in _NOT_MERGE_TARGETS],
         triage_checklist=PIR_TRIAGE_CHECKLIST,
     )
@@ -663,11 +670,15 @@ def gir_list():
     all_girs = misp_store.list_girs()
     intel_filter = (request.args.get("intel_level") or "").strip()
     cycle_filter = (request.args.get("review_cycle") or "").strip()
+    # Retired GIRs are done with, so the list leaves them out until asked for them.
+    show_retired = request.args.get("retired") == "1"
     tests = {}
     if intel_filter:
         tests["intel_level"] = lambda g: intel_filter in (g.intel_level or [])
     if cycle_filter:
         tests["review_cycle"] = lambda g: g.review_cycle == cycle_filter
+    if not show_retired:
+        tests["retired"] = lambda g: g.status != "Retired"
     girs = _sort_requirements(
         matching(all_girs, tests), request.args.get("sort"), request.args.get("dir"),
         "gir_id", "topic", GIR_STATUS_ORDER,
@@ -684,6 +695,8 @@ def gir_list():
         intel_filter=intel_filter,
         review_cycles=REVIEW_CYCLES,
         cycle_filter=cycle_filter,
+        show_retired=show_retired,
+        retired_count=sum(1 for g in matching(all_girs, tests, skip="retired") if g.status == "Retired"),
     )
 
 

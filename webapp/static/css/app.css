@@ -1541,6 +1541,11 @@ a.chart-row:hover { background: var(--surface-hover); }
 .tracking-wide { letter-spacing: .05em; }
 .kanban-dragover { background: var(--kanban-dragover-bg); }
 
+/* A status column whose cards a list leaves out by default: a link to show them. */
+.kanban-closed { display: block; text-align: center; padding: .9rem .5rem; border: 1px dashed var(--border-light);
+                 border-radius: 6px; color: var(--text-muted); font-size: .8rem; }
+.kanban-closed:hover { border-color: var(--accent-purple); color: var(--accent-purple); }
+
 /* ─── MISP iconify inline SVG nav icons ─────────────────────────────────── */
 .misp-nav-icon {
   width: 15px;

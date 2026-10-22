@@ -14,11 +14,6 @@
 {% endblock %}
 
 {% block content %}
-<style>
-  .kanban-closed { display: block; text-align: center; padding: .9rem .5rem; border: 1px dashed var(--border-light);
-                   border-radius: 6px; color: var(--text-muted); font-size: .8rem; }
-  .kanban-closed:hover { border-color: var(--accent-purple); color: var(--accent-purple); }
-</style>
 {% set rfi_priority_class = {
   'High': 'must-have',
   'Medium': 'should-have',

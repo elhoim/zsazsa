@@ -162,6 +162,18 @@ def create_job(action: str, label: str = "", steps: list[dict] | None = None) ->
 # The statuses that mean a job is not done with its record yet.
 IN_FLIGHT = ("queued", "running")
 
+# A job whose worker died with the process keeps its "running" status until it
+# expires, so anything silent for this long is reported as stalled instead of
+# spinning in the top bar for the rest of the day. Well above the slowest step
+# an analyser run takes between two progress messages.
+STALE_AFTER_SECONDS = 1800
+
+
+def stalled(job: dict) -> bool:
+    """An unfinished job that has gone quiet for longer than any live one would."""
+    return (job.get("status") in IN_FLIGHT
+            and time.time() - job.get("updated_at", 0) > STALE_AFTER_SECONDS)
+
 
 def in_flight_for(entity_id: str, action: str) -> dict | None:
     """The unfinished `action` job working on this record, if there is one.

@@ -1,21 +1,28 @@
 """AI summaries in data collection run as jobs, and cover manual entries.
 
-Two things are checked here. The manual entry form has no MISP event yet, so it
-summarises the text on the page; that call goes through a job like every other
-LLM run, or the analyst is left watching a request that can outlive its proxy.
-And an event typed in by hand lives on the webapp MISP rather than the scraper
-one, which is what kept it out of the summary path.
+The manual entry form has no MISP event yet, so it summarises the text on the
+page; that call goes through a job like every other LLM run, or the analyst is
+left watching a request that can outlive its proxy. An event typed in by hand
+lives on the webapp MISP rather than the scraper one, which is what kept it out
+of the summary path. And while a summary runs, the table holds back the actions
+of its events: a flag or a reject set meanwhile is undone when it finishes.
 
     python -m unittest tests.test_collection_summary_jobs
 """
 
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import requests
+from bs4 import BeautifulSoup
 from flask import Flask
 
-from webapp import analyser_pipeline, misp_store
+import config as _config
+from webapp import analyser_pipeline, collection_cache, create_app, job_store, misp_store
 from webapp.routes import api, data_collection
 
 
@@ -120,15 +127,16 @@ class SummariseRoute(unittest.TestCase):
         app.register_blueprint(data_collection.bp)
         self.client = app.test_client()
 
-    def post(self, source):
+    def post(self, source, path=None, body=None):
         started = []
         with mock.patch.object(data_collection, "_sources", return_value=_ALL_SOURCES), \
              mock.patch.object(data_collection.job_store, "create_job", return_value={"id": "job-1"}), \
+             mock.patch.object(data_collection.job_store, "update_job") as self.update_job, \
              mock.patch.object(data_collection.misp_session, "current_user_email", return_value="koen@example.org"), \
              mock.patch.object(data_collection.threading, "Thread") as thread:
             thread.side_effect = lambda **kw: started.append(kw["args"]) or mock.MagicMock()
-            reply = self.client.post("/collection/" + "u" * 36 + "/summarise",
-                                     json={"source": source})
+            reply = self.client.post(path or "/collection/" + "u" * 36 + "/summarise",
+                                     json=body or {"source": source})
         return reply, (started[0] if started else None)
 
     def test_a_manual_event_starts_a_summary_job(self):
@@ -138,10 +146,83 @@ class SummariseRoute(unittest.TestCase):
         _job_id, batch, _user = args
         self.assertEqual(batch, [{"uuid": "u" * 36, "sourceId": "manual-slack"}])
 
+    def test_the_job_records_the_event_it_works_on(self):
+        self.post("manual-slack")
+        self.update_job.assert_called_once_with("job-1", events=["u" * 36])
+
+    def test_a_batch_records_every_event_it_works_on(self):
+        events = [{"uuid": "a" * 36, "sourceId": "scraper"}, {"uuid": "b" * 36, "sourceId": "manual-slack"}]
+        self.post(None, path="/collection/bulk-summarise", body={"events": events})
+        self.update_job.assert_called_once_with("job-1", events=["a" * 36, "b" * 36])
+
     def test_an_event_from_a_third_party_misp_is_refused(self):
         reply, args = self.post("partner-misp")
         self.assertEqual(reply.status_code, 400)
         self.assertIsNone(args)
+
+
+class EventsBeingSummarised(unittest.TestCase):
+    def test_only_an_unfinished_live_summary_holds_its_events(self):
+        now = time.time()
+        jobs = [
+            {"id": "running", "action": "summarise", "status": "running", "updated_at": now, "events": ["a"]},
+            {"id": "queued", "action": "bulk-summarise", "status": "queued", "updated_at": now,
+             "events": ["b", "c"]},
+            {"id": "done", "action": "summarise", "status": "completed", "updated_at": now, "events": ["d"]},
+            # A worker that died with its process never moves its job off "running".
+            {"id": "dead", "action": "summarise", "status": "running",
+             "updated_at": now - job_store.STALE_AFTER_SECONDS - 60, "events": ["e"]},
+            {"id": "other", "action": "collection-refresh", "status": "running", "updated_at": now,
+             "events": ["f"]},
+        ]
+        with mock.patch.object(data_collection.job_store, "list_jobs", return_value=jobs):
+            self.assertEqual(data_collection._events_being_summarised(),
+                             {"a": "running", "b": "queued", "c": "queued"})
+
+
+class BusyRowsInTheTable(unittest.TestCase):
+    """What the server sends for a row whose event a summary is working on."""
+
+    def setUp(self):
+        def no_network(*args, **kwargs):
+            raise requests.ConnectionError("tests run offline")
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        rows = [{"uuid": uuid, "source_id": "scraper", "info": "Collected event", "tags": [],
+                 "orgc": "CIRCL", "date": "2026-10-01"} for uuid in ("a" * 36, "b" * 36)]
+        for patcher in (
+            mock.patch("requests.adapters.HTTPAdapter.send", no_network),
+            mock.patch.object(_config, "DB_FILE", str(Path(tmp.name) / "test.db"), create=True),
+            mock.patch.object(_config, "LOG_FILE", str(Path(tmp.name) / "test.log"), create=True),
+            mock.patch.object(_config, "MISP_SESSION_REDIRECT_TO_LOGIN", False),
+            mock.patch.object(collection_cache, "start_worker"),
+            mock.patch.object(job_store, "_command", return_value=None),
+            mock.patch.object(collection_cache, "get_events", return_value=rows),
+            mock.patch.object(collection_cache, "get_source_status", return_value={}),
+            mock.patch.object(collection_cache, "interval_s", return_value=300),
+            mock.patch.object(misp_store, "list_collection_sources", return_value=[]),
+            mock.patch.object(misp_store, "list_briefings", return_value=[]),
+            mock.patch.object(data_collection, "_events_being_summarised", return_value={"a" * 36: "job-7"}),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        page = BeautifulSoup(create_app().test_client().get("/collection/").data, "html.parser")
+        self.cells = {row["data-uuid"]: row.select_one(".event-actions")
+                      for row in page.select("tr.event-row")}
+
+    def test_a_busy_row_names_its_job_and_has_its_actions_disabled(self):
+        cell = self.cells["a" * 36]
+        self.assertEqual(cell["data-busy-job"], "job-7")
+        self.assertIsNotNone(cell.select_one(".busy-indicator"))
+        buttons = cell.select("button")
+        self.assertTrue(buttons)
+        self.assertTrue(all(b.has_attr("disabled") for b in buttons))
+
+    def test_the_other_rows_are_left_alone(self):
+        cell = self.cells["b" * 36]
+        self.assertFalse(cell.has_attr("data-busy-job"))
+        self.assertFalse(any(b.has_attr("disabled") for b in cell.select("button")))
 
 
 class BatchAcrossSources(unittest.TestCase):

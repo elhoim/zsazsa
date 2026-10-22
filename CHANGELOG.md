@@ -9,6 +9,9 @@
 
 ### Changed
 
+- The PIR list hides rejected PIRs and the GIR list hides retired GIRs.
+- The data collection table shows the ten words most titles share. A click on one searches for it.
+- On the data collection page, the actions of an event wait while an AI summary is being written for it, and come back when the summary ends.
 - An RFI shows the answers given at triage in an Intake card, and they can be corrected on its edit form.
 - The intake checklist of a PIR can be corrected on its edit form.
 - With SSO, working in zsazsa keeps the MISP session alive: every five minutes, zsazsa requests MISP to refresh it.

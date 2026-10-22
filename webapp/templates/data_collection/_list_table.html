@@ -90,12 +90,16 @@
 
 {# Events table #}
 <div class="card content-card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>
+  <div class="card-header d-flex justify-content-between align-items-center gap-3">
+    <span class="flex-shrink-0">
       <i class="fas fa-database me-2"></i>
       <span id="table-count">{{ events | length }}</span>
       event<span id="table-count-plural">{{ 's' if events|length != 1 }}</span>
     </span>
+    <div id="title-words" class="title-words" hidden>
+      <span class="title-words-caption">Top words in titles</span>
+      <div class="title-words-bars"></div>
+    </div>
   </div>
   <div class="card-body p-0">
     {% if events %}
@@ -338,40 +342,51 @@
               {% endif %}
             </td>
             <td class="text-end" style="white-space:nowrap;">
-              <div class="d-inline-flex gap-1 justify-content-end align-items-center">
+              {% set _busy_job = events_being_summarised.get(e.uuid) %}
+              <div class="d-inline-flex gap-1 justify-content-end align-items-center event-actions"
+                   {% if _busy_job %}data-busy-job="{{ _busy_job }}"{% endif %}>
+                {% if _busy_job %}
+                <i class="fas fa-spinner fa-spin text-muted busy-indicator me-1"
+                   title="An AI summary is being written for this event. Its actions come back once it is done."></i>
+                {% endif %}
                 {% set _flagged = e.uuid in flagged_uuids %}
                 {% set _workflow_incomplete = 'workflow:state="incomplete"' in e.tags %}
                 <button class="btn btn-xs {{ 'btn-warning' if _flagged else 'btn-outline-warning' }} flag-review-btn"
                         data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
                         data-flagged="{{ 'true' if _flagged else 'false' }}"
-                        title="{{ 'Remove follow-up flag' if _flagged else 'Flag for follow-up review' }}">
+                        title="{{ 'Remove follow-up flag' if _flagged else 'Flag for follow-up review' }}"
+                        {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-flag"></i>
                 </button>
                 {% if e.source_kind != 'misp' %}
                 {% if _workflow_incomplete %}
                 <button class="btn btn-xs btn-outline-danger reject-event-btn"
                         data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
-                        title="Reject this event (workflow:state=rejected). Only shown while the event is still in 'incomplete' state.">
+                        title="Reject this event (workflow:state=rejected). Only shown while the event is still in 'incomplete' state."
+                        {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-ban"></i>
                 </button>
                 {% endif %}
                 {% elif not _dismissed %}
                 <button class="btn btn-xs btn-outline-danger dismiss-event-btn"
                         data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
-                        title="Dismiss this event ({{ dismissed_tag }}). The workflow state of events from another MISP server belongs to that server, so they are set aside with a local tag instead.">
+                        title="Dismiss this event ({{ dismissed_tag }}). The workflow state of events from another MISP server belongs to that server, so they are set aside with a local tag instead."
+                        {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-eye-slash"></i>
                 </button>
                 {% endif %}
                 <button class="btn btn-xs btn-outline-primary cti-eval-btn"
                         data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
                         data-title="{{ e.info or '(untitled)' }}"
-                        title="Apply CTI evaluation tags to MISP">
+                        title="Apply CTI evaluation tags to MISP"
+                        {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-microscope fa-xs"></i>
                 </button>
                 {% if e.source_kind in ('scraper', 'manual') and not e.has_ai_summary %}
                 <button class="btn btn-xs btn-outline-secondary create-summary-btn"
                         data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
-                        title="Generate LLM summary from first MISP report">
+                        title="Generate LLM summary from first MISP report"
+                        {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-wand-magic-sparkles"></i>
                 </button>
                 {% endif %}

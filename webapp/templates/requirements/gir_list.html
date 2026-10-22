@@ -20,8 +20,16 @@
     <div class="row g-3">
       <div class="col-lg-3">
         <form method="get" class="list-filters">
+          {% if show_retired %}<input type="hidden" name="retired" value="1">{% endif %}
           {{ charts.filter_select('intel_level', 'Intelligence level', 'fa-layer-group', 'All levels', intel_levels, intel_filter) }}
           {{ charts.filter_select('review_cycle', 'Review cycle', 'fa-arrows-rotate', 'All review cycles', review_cycles, cycle_filter) }}
+          {% if retired_count %}
+          <a href="{{ url_for('requirements.gir_list', **dict(request.args.to_dict(), retired=None if show_retired else 1)) }}"
+             class="btn btn-xs btn-outline-secondary w-100 mb-2">
+            <i class="fas {{ 'fa-eye-slash' if show_retired else 'fa-box-archive' }} me-1"></i>
+            {{ 'Hide retired GIRs' if show_retired else 'Show retired GIRs (' ~ retired_count ~ ')' }}
+          </a>
+          {% endif %}
           <div class="d-flex align-items-center justify-content-between small text-muted">
             <span>{{ girs | length }} GIR{{ 's' if girs|length != 1 }}</span>
             {% if intel_filter or cycle_filter %}
@@ -56,9 +64,17 @@
           {% elif col_status == 'Pending' %}bg-secondary-subtle text-secondary-emphasis
           {% else %}bg-light text-muted{% endif %}">
           {{ col_status }}
-          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">{{ girs | selectattr('status', 'equalto', col_status) | list | length }}</span>
+          <span class="badge bg-white text-dark ms-1" style="font-size:.65rem">
+            {{- retired_count if col_status == 'Retired' else girs | selectattr('status', 'equalto', col_status) | list | length -}}
+          </span>
         </div>
         <div class="kanban-cards" style="min-height:60px;">
+          {% if col_status == 'Retired' and not show_retired and retired_count %}
+          <a href="{{ url_for('requirements.gir_list', **dict(request.args.to_dict(), retired=1)) }}" class="kanban-closed text-decoration-none" title="Show the retired GIRs">
+            <span class="fw-bold">{{ retired_count }}</span> retired
+            <i class="fas fa-eye ms-1"></i>
+          </a>
+          {% endif %}
           {% for gir in girs %}
           {% if gir.status == col_status %}
           <div class="kanban-card card mb-1 p-1 shadow-sm" draggable="true"
