@@ -54,6 +54,11 @@ class ChannelIds(unittest.TestCase):
         self.assertEqual(renamed["new_id"], "soc")
         self.assertEqual([(c["id"], c["name"]) for c in self.channels()], [("soc", "SOC team")])
 
+    def test_a_channel_of_an_unknown_type_is_refused(self):
+        reply = self.save(name="SOC", type="slack", url="https://hooks.example/x")
+        self.assertFalse(reply["ok"])
+        self.assertEqual(self.channels(), [])
+
     def test_two_channels_named_alike_get_distinct_ids(self):
         first = self.save(name="SOC", type="email", recipient="a@x.test", enabled=True)
         second = self.save(name="SOC", type="email", recipient="b@x.test", enabled=True)
@@ -88,6 +93,24 @@ class Ping(unittest.TestCase):
                                            json={"channel_id": "soc"}).get_json()
         self.assertFalse(reply["ok"])
         self.assertNotIn("abcdefghijklmnopqrstuvwxyz", reply["error"])
+
+    def test_a_teams_ping_sends_a_card_and_keeps_the_signature_back(self):
+        """The Workflows template posts the attached card, and the URL is
+        signed in its query string rather than its path."""
+        app = Flask(__name__)
+        app.register_blueprint(config_page.bp)
+        url = "https://x.powerplatform.com/workflows/abc/triggers/manual/paths/invoke?api-version=1&sig=SIGNATURE123"
+        failure = config_page.requests.HTTPError(f"400 Client Error: Bad Request for url: {url}")
+        with mock.patch.object(config_page.misp_session, "refuse_unless_site_admin", return_value=None), \
+             mock.patch.object(config_page, "_read_notification_channels",
+                               return_value=[{"id": "soc", "type": "teams", "url": url}]), \
+             mock.patch.object(config_page.requests, "post", side_effect=failure) as post:
+            reply = app.test_client().post("/config/ping-notification-channel",
+                                           json={"channel_id": "soc"}).get_json()
+        self.assertFalse(reply["ok"])
+        self.assertNotIn("SIGNATURE123", reply["error"])
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["attachments"][0]["contentType"], "application/vnd.microsoft.card.adaptive")
 
 
 class Subscriptions(unittest.TestCase):

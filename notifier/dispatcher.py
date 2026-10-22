@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import config
 
-from notifier import mattermost, email
+from notifier import mattermost, email, teams
 from webapp.utils import normalize_notification_channels
 
 logger = logging.getLogger(__name__)
@@ -127,10 +127,17 @@ def delivery_outcome(summary: dict) -> tuple[bool, str]:
 
 
 def _send_preview(entity, preview_url: str, markdown: str, stakeholders: list,
-                  mattermost_fn, email_fn, entity_label: str, entity_id_attr: str) -> dict:
+                  mattermost_fn, teams_fn, email_fn, entity_label: str, entity_id_attr: str) -> dict:
     names = [getattr(s, "name", "") for s in stakeholders or [] if getattr(s, "name", "")]
     senders = {
         "mattermost": lambda channel_ids: bool(mattermost_fn(
+            entity,
+            markdown,
+            preview_url=preview_url,
+            channel_ids=channel_ids,
+            stakeholder_names=names,
+        )),
+        "teams": lambda channel_ids: bool(teams_fn(
             entity,
             markdown,
             preview_url=preview_url,
@@ -153,6 +160,7 @@ def send_pir_preview(pir, preview_url: str, markdown: str, stakeholders: list) -
         markdown,
         stakeholders,
         mattermost.send_pir_notification,
+        teams.send_pir_notification,
         email.send_pir_notification,
         "PIR",
         "pir_id",
@@ -160,9 +168,11 @@ def send_pir_preview(pir, preview_url: str, markdown: str, stakeholders: list) -
 
 
 def send_pir_intake(pir, decision: str, reason: str | None, stakeholders: list) -> dict:
-    """Tell the stakeholders of a PIR what its triage decided, in their Mattermost channels."""
+    """Tell the stakeholders of a PIR what its triage decided, in their chat channels."""
     senders = {
         "mattermost": lambda channel_ids: mattermost.send_pir_intake_notification(
+            pir, decision, reason, channel_ids=channel_ids),
+        "teams": lambda channel_ids: teams.send_pir_intake_notification(
             pir, decision, reason, channel_ids=channel_ids),
     }
     return _dispatch(stakeholders, senders, "PIR intake", getattr(pir, "pir_id", ""))
@@ -176,6 +186,7 @@ def send_rfi_preview(rfi, preview_url: str, markdown: str, stakeholders: list) -
         markdown,
         stakeholders,
         mattermost.send_rfi_notification,
+        teams.send_rfi_notification,
         email.send_rfi_notification,
         "RFI",
         "rfi_id",
@@ -190,6 +201,7 @@ def send_gir_preview(gir, preview_url: str, markdown: str, stakeholders: list) -
         markdown,
         stakeholders,
         mattermost.send_gir_notification,
+        teams.send_gir_notification,
         email.send_gir_notification,
         "GIR",
         "gir_id",
@@ -206,6 +218,9 @@ def send_daily_briefing(briefing, markdown: str, stakeholders: list, preview_url
         "mattermost": lambda channel_ids: bool(
             mattermost.send_daily_briefing_notification(briefing, markdown, channel_ids=channel_ids)
         ),
+        "teams": lambda channel_ids: bool(
+            teams.send_daily_briefing_notification(briefing, markdown, channel_ids=channel_ids)
+        ),
         "email": lambda channel_ids: bool(
             email.send_daily_briefing_notification(briefing, markdown, channel_ids=channel_ids,
                                                    preview_url=preview_url)
@@ -220,6 +235,9 @@ def send_vea(vea, markdown: str, stakeholders: list) -> dict:
         "mattermost": lambda channel_ids: bool(
             mattermost.send_vea_notification(vea, markdown, channel_ids=channel_ids)
         ),
+        "teams": lambda channel_ids: bool(
+            teams.send_vea_notification(vea, markdown, channel_ids=channel_ids)
+        ),
         "email": lambda channel_ids: bool(
             email.send_vea_notification(vea, markdown, channel_ids=channel_ids)
         ),
@@ -232,6 +250,9 @@ def send_detection_eng_request(der, markdown: str, stakeholders: list) -> dict:
     senders = {
         "mattermost": lambda channel_ids: bool(
             mattermost.send_detection_eng_request_notification(der, markdown, channel_ids=channel_ids)
+        ),
+        "teams": lambda channel_ids: bool(
+            teams.send_detection_eng_request_notification(der, markdown, channel_ids=channel_ids)
         ),
         "email": lambda channel_ids: bool(
             email.send_detection_eng_request_notification(der, markdown, channel_ids=channel_ids)
@@ -246,6 +267,9 @@ def send_threat_landscape_report(tlr, markdown: str, stakeholders: list) -> dict
         "mattermost": lambda channel_ids: bool(
             mattermost.send_threat_landscape_report_notification(tlr, markdown, channel_ids=channel_ids)
         ),
+        "teams": lambda channel_ids: bool(
+            teams.send_threat_landscape_report_notification(tlr, markdown, channel_ids=channel_ids)
+        ),
         "email": lambda channel_ids: bool(
             email.send_threat_landscape_report_notification(tlr, markdown, channel_ids=channel_ids)
         ),
@@ -258,11 +282,15 @@ def send_threat_actor_profile(tap, markdown: str, stakeholders: list,
     """Deliver a threat actor profile to stakeholder channels across all channel types.
 
     The Diamond Model travels as an inline image in the email body (`diamond_png`)
-    and a Mattermost image attachment (`diamond_url`)."""
+    and as an image by URL in Mattermost and Teams (`diamond_url`)."""
     senders = {
         "mattermost": lambda channel_ids: bool(
             mattermost.send_threat_actor_profile_notification(tap, markdown, channel_ids=channel_ids,
                                                               diamond_url=diamond_url)
+        ),
+        "teams": lambda channel_ids: bool(
+            teams.send_threat_actor_profile_notification(tap, markdown, channel_ids=channel_ids,
+                                                         diamond_url=diamond_url)
         ),
         "email": lambda channel_ids: bool(
             email.send_threat_actor_profile_notification(tap, markdown, channel_ids=channel_ids,
@@ -277,6 +305,9 @@ def send_indicator_feed(feed, markdown: str, csv_bytes: bytes, stakeholders: lis
     senders = {
         "mattermost": lambda channel_ids: bool(
             mattermost.send_indicator_feed_notification(feed, markdown, channel_ids=channel_ids)
+        ),
+        "teams": lambda channel_ids: bool(
+            teams.send_indicator_feed_notification(feed, markdown, channel_ids=channel_ids)
         ),
         "email": lambda channel_ids: bool(
             email.send_indicator_feed_notification(feed, markdown, channel_ids=channel_ids, csv_bytes=csv_bytes)
@@ -303,6 +334,9 @@ def send_flash_intel(fia, content: str, stakeholders: list, attachments: list | 
                 content,
                 channel_ids=channel_ids,
             )
+        ),
+        "teams": lambda channel_ids: bool(
+            teams.send_flash_intel_alert(fia, content, channel_ids=channel_ids)
         ),
         "email": lambda channel_ids: bool(
             email.send_flash_intel_alert(fia, content, channel_ids=channel_ids,

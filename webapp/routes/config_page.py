@@ -562,7 +562,8 @@ LOCAL_LLM_URL = {values.get('LOCAL_LLM_URL', '')!r}
 LOCAL_LLM_API_KEY = {values.get('LOCAL_LLM_API_KEY', '')!r}
 LOCAL_LLM_MODEL = {values.get('LOCAL_LLM_MODEL', '')!r}
 
-# Notification channels
+# Notification channels. 'type' is 'mattermost', 'teams' (a Teams Workflows
+# webhook URL) or 'email' (with 'recipient' instead of 'url').
 NOTIFICATION_CHANNELS = {channels_repr}
 
 # Legacy aliases: first active Mattermost channel (used by notifier for fallback)
@@ -1487,6 +1488,8 @@ def save_notification_channel():
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     channel_type = (data.get("type") or "mattermost").strip().lower()
+    if channel_type not in ("mattermost", "teams", "email"):
+        return jsonify({"ok": False, "error": "Unknown channel type"}), 400
     recipient = (data.get("recipient") or "").strip()
     if channel_type == "email" and not recipient:
         return jsonify({"ok": False, "error": "Recipient email address required"}), 400
@@ -1588,8 +1591,14 @@ def ping_notification_channel():
     if not url:
         return jsonify({"ok": False, "error": "Channel has no webhook URL configured"}), 400
     verify_tls = bool(ch.get("verify_tls", True))
+    if (ch.get("type") or "").strip().lower() == "teams":
+        # The Workflows template posts the attached card and fails on a bare text message.
+        from notifier import teams
+        payload = teams.ping_message()
+    else:
+        payload = {"text": "zsazsa test notification: channel is reachable."}
     try:
-        r = requests.post(url, json={"text": "zsazsa test notification: channel is reachable."}, timeout=10, verify=verify_tls)
+        r = requests.post(url, json=payload, timeout=10, verify=verify_tls)
         r.raise_for_status()
         return jsonify({"ok": True})
     except requests.RequestException as exc:

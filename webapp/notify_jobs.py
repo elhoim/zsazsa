@@ -1,7 +1,7 @@
 """Deliver product notifications on a background thread.
 
-Publishing a product fans out to e-mail, Mattermost and Flowintel, and every hop
-carries its own timeout. One unreachable recipient used to hold the analyst's
+Publishing a product fans out to e-mail, Mattermost, Teams and Flowintel, and
+every hop has its own timeout. One unreachable recipient used to hold the analyst's
 browser until that connection gave up, which on a dead SMTP host is twenty
 seconds before anything appears on screen.
 

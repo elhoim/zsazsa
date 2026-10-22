@@ -4,6 +4,116 @@
 {% block title %}Configuration · zsazsa CTI{% endblock %}
 {% block page_title %}Configuration{% endblock %}
 
+{# One chat channel that posts to a webhook URL (Mattermost or Teams). Called
+   with an empty dict for the <template> the script clones when a channel is added. #}
+{% macro chat_channel_row(ch, label, icon, color, url_placeholder) %}
+<div class="notification-channel-row card content-card mb-3" data-original-id="{{ ch.id or '' }}">
+  <div class="card-header d-flex align-items-center gap-2 px-3 py-2">
+    <i class="{{ icon }}" style="color:{{ color }};"></i>
+    <span class="fw-semibold channel-display-name">{{ ch.name }}</span>
+    <span class="badge {{ 'bg-success' if ch.enabled else 'bg-secondary' }} ms-1 channel-display-enabled">
+      {{ 'Enabled' if ch.enabled else 'Disabled' }}
+    </span>
+    <div class="ms-auto d-flex gap-2 align-items-center">
+      <button type="button" class="btn btn-sm btn-outline-secondary toggle-channel-form">Edit</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary ping-channel-btn" title="Send a test message to this channel">
+        <i class="fas fa-bell"></i>
+      </button>
+      <span class="ping-channel-result small"></span>
+      <button type="button" class="btn btn-sm btn-outline-danger delete-channel-btn">Delete</button>
+    </div>
+  </div>
+  <div class="card-body channel-form" style="display:none;">
+    <div class="row g-3">
+      <div class="col-sm-5">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-control ch-name" value="{{ ch.name or '' }}" placeholder="e.g. SOC {{ label }}">
+      </div>
+      <div class="col-sm-7">
+        <label class="form-label">Webhook URL</label>
+        <div class="input-group">
+          <input type="password" class="form-control font-monospace api-key-input ch-url" autocomplete="new-password"
+                 placeholder="{{ 'Configured, leave blank to keep' if ch.url else url_placeholder }}">
+          <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide">
+            <i class="fas fa-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div class="col-sm-5">
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input ch-enabled" type="checkbox" {{ 'checked' if ch.enabled }}>
+          <label class="form-check-label">Enabled</label>
+        </div>
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input ch-verify-tls" type="checkbox" {{ 'checked' if ch.verify_tls is not defined or ch.verify_tls }}>
+          <label class="form-check-label">Verify TLS certificate</label>
+        </div>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-3">
+      <button type="button" class="btn btn-sm btn-primary save-channel-btn">Save</button>
+      <span class="save-channel-result small align-self-center"></span>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# The channels of one chat type with the card to add one. The text under the
+   add form comes from the call block. #}
+{% macro chat_channel_section(type, label, icon, color, url_placeholder, channels) %}
+<div class="chat-channel-section" data-channel-type="{{ type }}">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <i class="{{ icon }}" style="color:{{ color }};"></i>
+    <span class="fw-semibold">{{ label }}</span>
+  </div>
+
+  <div class="channel-list">
+    {% for ch in channels %}
+    {{ chat_channel_row(ch, label, icon, color, url_placeholder) }}
+    {% endfor %}
+    <p class="text-muted small no-channels-msg {{ 'd-none' if channels }}">No {{ label }} channels configured yet.</p>
+  </div>
+  <template class="channel-row-template">{{ chat_channel_row({}, label, icon, color, url_placeholder) }}</template>
+
+  <div class="card content-card mb-4 border-dashed">
+    <div class="card-header"><i class="fas fa-plus me-2"></i>Add {{ label }} channel</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-sm-5">
+          <label class="form-label" for="new-{{ type }}-name">Name</label>
+          <input type="text" class="form-control new-ch-name" id="new-{{ type }}-name" placeholder="e.g. SOC {{ label }}">
+        </div>
+        <div class="col-sm-7">
+          <label class="form-label" for="new-{{ type }}-url">Webhook URL</label>
+          <div class="input-group">
+            <input type="password" class="form-control font-monospace api-key-input new-ch-url" id="new-{{ type }}-url"
+                   autocomplete="new-password" placeholder="{{ url_placeholder }}">
+            <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="col-sm-5">
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input new-ch-enabled" type="checkbox" id="new-{{ type }}-enabled" checked>
+            <label class="form-check-label" for="new-{{ type }}-enabled">Enabled</label>
+          </div>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input new-ch-verify-tls" type="checkbox" id="new-{{ type }}-verify-tls" checked>
+            <label class="form-check-label" for="new-{{ type }}-verify-tls">Verify TLS certificate</label>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex gap-2 mt-3">
+        <button type="button" class="btn btn-sm btn-primary add-channel-btn">Add channel</button>
+        <span class="small align-self-center add-channel-result"></span>
+      </div>
+      <div class="form-text mt-2">{{ caller() }}</div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
 {% macro token_usage(u) %}
   <div class="border-top pt-3 mb-3">
     <div class="mb-2">
@@ -1003,107 +1113,21 @@
         </button>
       </div>
 
-      <div class="d-flex align-items-center gap-2 mb-2">
-        <i class="fas fa-comment-dots" style="color:#1c58d9;"></i>
-        <span class="fw-semibold">Mattermost</span>
-      </div>
+      {% set mm_channels = cfg.NOTIFICATION_CHANNELS | rejectattr('type', 'in', ['email', 'teams']) | list %}
+      {% call chat_channel_section('mattermost', 'Mattermost', 'fas fa-comment-dots', '#1c58d9',
+                                   'https://mattermost.example.com/hooks/…', mm_channels) %}
+        <strong>Triggers:</strong> product published (flash intel, VEA, briefing), PIR/GIR shared, PIR intake status change.
+      {% endcall %}
 
-      <!-- Channel list -->
-      {% set mm_channels = cfg.NOTIFICATION_CHANNELS | rejectattr('type', 'equalto', 'email') | list %}
-      <div id="notification-channel-list">
-        {% for ch in mm_channels %}
-        <div class="notification-channel-row card content-card mb-3" data-original-id="{{ ch.id }}">
-          <div class="card-header d-flex align-items-center gap-2 px-3 py-2">
-            <i class="fas fa-comment-dots" style="color:#1c58d9;"></i>
-            <span class="fw-semibold channel-display-name">{{ ch.name }}</span>
-            <span class="badge {{ 'bg-success' if ch.enabled else 'bg-secondary' }} ms-1 channel-display-enabled">
-              {{ 'Enabled' if ch.enabled else 'Disabled' }}
-            </span>
-            <div class="ms-auto d-flex gap-2 align-items-center">
-              <button type="button" class="btn btn-sm btn-outline-secondary toggle-channel-form">Edit</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary ping-channel-btn" title="Send a test message to this channel">
-                <i class="fas fa-bell"></i>
-              </button>
-              <span class="ping-channel-result small"></span>
-              <button type="button" class="btn btn-sm btn-outline-danger delete-channel-btn">Delete</button>
-            </div>
-          </div>
-          <div class="card-body channel-form" style="display:none;">
-            <div class="row g-3">
-              <div class="col-sm-5">
-                <label class="form-label">Name</label>
-                <input type="text" class="form-control ch-name" value="{{ ch.name }}" placeholder="e.g. SOC Mattermost">
-              </div>
-              <div class="col-sm-7">
-                <label class="form-label">Webhook URL</label>
-                <div class="input-group">
-                  <input type="password" class="form-control font-monospace api-key-input ch-url" autocomplete="new-password"
-                         placeholder="{{ 'Configured, leave blank to keep' if ch.url else 'https://mattermost.example.com/hooks/…' }}">
-                  <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide">
-                    <i class="fas fa-eye"></i>
-                  </button>
-                </div>
-              </div>
-              <div class="col-sm-5">
-                <div class="form-check form-switch mt-2">
-                  <input class="form-check-input ch-enabled" type="checkbox" {{ 'checked' if ch.enabled }}>
-                  <label class="form-check-label">Enabled</label>
-                </div>
-                <div class="form-check form-switch mt-2">
-                  <input class="form-check-input ch-verify-tls" type="checkbox" {{ 'checked' if ch.verify_tls is not defined or ch.verify_tls }}>
-                  <label class="form-check-label">Verify TLS certificate</label>
-                </div>
-              </div>
-            </div>
-            <div class="d-flex gap-2 mt-3">
-              <button type="button" class="btn btn-sm btn-primary save-channel-btn">Save</button>
-              <span class="save-channel-result small align-self-center"></span>
-            </div>
-          </div>
-        </div>
-        {% else %}
-        <p class="text-muted small" id="no-channels-msg">No Mattermost channels configured yet.</p>
-        {% endfor %}
-        {% if mm_channels %}<p class="text-muted small d-none" id="no-channels-msg">No Mattermost channels configured yet.</p>{% endif %}
-      </div>
+      <hr class="my-4">
 
-      <!-- Add new channel -->
-      <div class="card content-card mb-4 border-dashed">
-        <div class="card-header"><i class="fas fa-plus me-2"></i>Add Mattermost channel</div>
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-sm-5">
-              <label class="form-label">Name</label>
-              <input type="text" class="form-control" id="new-ch-name" placeholder="e.g. SOC Mattermost">
-            </div>
-            <div class="col-sm-7">
-              <label class="form-label">Webhook URL</label>
-              <div class="input-group">
-                <input type="password" class="form-control font-monospace api-key-input" id="new-ch-url"
-                       placeholder="https://mattermost.example.com/hooks/…">
-                <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide">
-                  <i class="fas fa-eye"></i>
-                </button>
-              </div>
-            </div>
-            <div class="col-sm-5">
-              <div class="form-check form-switch mt-2">
-                <input class="form-check-input" type="checkbox" id="new-ch-enabled" checked>
-                <label class="form-check-label" for="new-ch-enabled">Enabled</label>
-              </div>
-              <div class="form-check form-switch mt-2">
-                <input class="form-check-input" type="checkbox" id="new-ch-verify-tls" checked>
-                <label class="form-check-label" for="new-ch-verify-tls">Verify TLS certificate</label>
-              </div>
-            </div>
-          </div>
-          <div class="d-flex gap-2 mt-3">
-            <button type="button" class="btn btn-sm btn-primary" id="add-channel-btn">Add channel</button>
-            <span class="small align-self-center" id="add-channel-result"></span>
-          </div>
-          <div class="form-text mt-2"><strong>Triggers:</strong> product published (flash intel, VEA, briefing), PIR/GIR shared, PIR intake status change.</div>
-        </div>
-      </div>
+      {% set teams_channels = cfg.NOTIFICATION_CHANNELS | selectattr('type', 'equalto', 'teams') | list %}
+      {% call chat_channel_section('teams', 'Teams', 'fa-brands fa-microsoft', '#5b5fc7',
+                                   'https://….powerplatform.com/…/invoke?…&sig=…', teams_channels) %}
+        The webhook URL comes from a Teams workflow: on the channel, open <strong>Workflows</strong>,
+        pick <strong>Send webhook alerts to a channel</strong> and copy the link it gives you. Products
+        are posted as cards by the Workflows bot, with the same triggers as Mattermost.
+      {% endcall %}
 
       <hr class="my-4">
 
@@ -1534,10 +1558,11 @@
     });
   });
 
-  // API key toggles for non-server fields (scraper, webapp, openai, mattermost)
+  // API key toggles for non-server fields (scraper, webapp, openai, new chat channels)
   document.querySelectorAll('.api-key-toggle').forEach((btn) => {
     if (btn.closest('.misp-server-row')) return; // handled per-row above
     if (btn.closest('.flowintel-instance-row')) return; // handled per-row above
+    if (btn.closest('.notification-channel-row')) return; // handled per-row below
     btn.addEventListener('click', () => {
       const input = btn.closest('.input-group').querySelector('.api-key-input');
       const icon = btn.querySelector('i');
@@ -1778,89 +1803,86 @@
 })();
 
 // ── Notification channels ──────────────────────────────────────────────────
+// Each chat type (Mattermost, Teams) has its own .chat-channel-section, bound
+// here by the channel type it saves under.
 (function () {
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-  const list = document.getElementById('notification-channel-list');
-  if (!list) return;
 
-  function bindRow(row) {
-    const toggleBtn = row.querySelector('.toggle-channel-form');
-    const form = row.querySelector('.channel-form');
-    const deleteBtn = row.querySelector('.delete-channel-btn');
-    const pingBtn = row.querySelector('.ping-channel-btn');
-    const pingResult = row.querySelector('.ping-channel-result');
-    const saveBtn = row.querySelector('.save-channel-btn');
-    const saveResult = row.querySelector('.save-channel-result');
+  function post(path, body) {
+    return fetch(SCRIPT_ROOT + path, {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify(body),
+    }).then(resp => resp.json());
+  }
 
-    if (toggleBtn && form) {
+  function setBadge(row, enabled) {
+    const badge = row.querySelector('.channel-display-enabled');
+    badge.textContent = enabled ? 'Enabled' : 'Disabled';
+    badge.className = 'badge ms-1 channel-display-enabled ' + (enabled ? 'bg-success' : 'bg-secondary');
+  }
+
+  function bindSection(section) {
+    const channelType = section.dataset.channelType;
+    const list = section.querySelector('.channel-list');
+    const noMsg = section.querySelector('.no-channels-msg');
+
+    function bindRow(row) {
+      const form = row.querySelector('.channel-form');
+      const toggleBtn = row.querySelector('.toggle-channel-form');
+      const pingBtn = row.querySelector('.ping-channel-btn');
+      const pingResult = row.querySelector('.ping-channel-result');
+      const saveResult = row.querySelector('.save-channel-result');
+
       toggleBtn.addEventListener('click', () => {
         const open = form.style.display !== 'none';
         form.style.display = open ? 'none' : '';
         toggleBtn.textContent = open ? 'Edit' : 'Close';
       });
-    }
 
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
-        const originalId = row.dataset.originalId;
+      const urlToggle = row.querySelector('.api-key-toggle');
+      urlToggle.addEventListener('click', () => {
+        const input = row.querySelector('.ch-url');
+        const icon = urlToggle.querySelector('i');
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        icon.classList.replace(show ? 'fa-eye' : 'fa-eye-slash', show ? 'fa-eye-slash' : 'fa-eye');
+      });
+
+      row.querySelector('.delete-channel-btn').addEventListener('click', async () => {
         if (!confirm('Delete this notification channel?')) return;
-        const resp = await fetch(SCRIPT_ROOT + '/config/delete-notification-channel', {
-          method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-          body: JSON.stringify({channel_id: originalId}),
-        });
-        const data = await resp.json();
+        const data = await post('/config/delete-notification-channel', {channel_id: row.dataset.originalId});
         if (data.ok) {
           row.remove();
-          const noMsg = document.getElementById('no-channels-msg');
-          if (noMsg && !list.querySelector('.notification-channel-row')) noMsg.classList.remove('d-none');
+          if (!list.querySelector('.notification-channel-row')) noMsg.classList.remove('d-none');
         } else {
           alert('Delete failed: ' + (data.error || 'unknown'));
         }
       });
-    }
 
-    if (pingBtn && pingResult) {
       pingBtn.addEventListener('click', async () => {
-        const channelId = row.dataset.originalId;
         pingBtn.disabled = true;
         pingResult.textContent = 'Sending…';
         pingResult.className = 'ping-channel-result small text-muted';
-        const resp = await fetch(SCRIPT_ROOT + '/config/ping-notification-channel', {
-          method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-          body: JSON.stringify({channel_id: channelId}),
-        });
-        const data = await resp.json();
+        const data = await post('/config/ping-notification-channel', {channel_id: row.dataset.originalId});
         pingBtn.disabled = false;
-        if (data.ok) {
-          pingResult.textContent = 'Sent';
-          pingResult.className = 'ping-channel-result small text-success';
-        } else {
-          pingResult.textContent = data.error || 'Failed';
-          pingResult.className = 'ping-channel-result small text-danger';
-        }
+        pingResult.textContent = data.ok ? 'Sent' : (data.error || 'Failed');
+        pingResult.className = 'ping-channel-result small ' + (data.ok ? 'text-success' : 'text-danger');
         setTimeout(() => { pingResult.textContent = ''; }, 4000);
       });
-    }
 
-    if (saveBtn) {
-      saveBtn.addEventListener('click', async () => {
-        const originalId = row.dataset.originalId;
+      row.querySelector('.save-channel-btn').addEventListener('click', async () => {
         const name = row.querySelector('.ch-name').value.trim();
-        const url = row.querySelector('.ch-url').value.trim();
         const enabled = row.querySelector('.ch-enabled').checked;
-        const verifyTls = row.querySelector('.ch-verify-tls').checked;
         if (!name) { saveResult.textContent = 'Name required'; saveResult.className = 'save-channel-result small text-danger'; return; }
-        const resp = await fetch(SCRIPT_ROOT + '/config/save-notification-channel', {
-          method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-          body: JSON.stringify({original_id: originalId, name, url, enabled, verify_tls: verifyTls, type: 'mattermost'}),
+        const data = await post('/config/save-notification-channel', {
+          original_id: row.dataset.originalId, name, enabled, type: channelType,
+          url: row.querySelector('.ch-url').value.trim(),
+          verify_tls: row.querySelector('.ch-verify-tls').checked,
         });
-        const data = await resp.json();
         if (data.ok) {
           row.dataset.originalId = data.new_id;
           row.querySelector('.channel-display-name').textContent = name;
-          const badge = row.querySelector('.channel-display-enabled');
-          badge.textContent = enabled ? 'Enabled' : 'Disabled';
-          badge.className = 'badge ms-1 channel-display-enabled ' + (enabled ? 'bg-success' : 'bg-secondary');
+          setBadge(row, enabled);
           saveResult.textContent = 'Saved';
           saveResult.className = 'save-channel-result small text-success';
           setTimeout(() => { saveResult.textContent = ''; }, 3000);
@@ -1870,71 +1892,46 @@
         }
       });
     }
-  }
 
-  list.querySelectorAll('.notification-channel-row').forEach(bindRow);
+    list.querySelectorAll('.notification-channel-row').forEach(bindRow);
 
-  const addBtn = document.getElementById('add-channel-btn');
-  if (addBtn) {
+    const addBtn = section.querySelector('.add-channel-btn');
     addBtn.addEventListener('click', async () => {
-      const nameEl = document.getElementById('new-ch-name');
-      const urlEl = document.getElementById('new-ch-url');
-      const enabledEl = document.getElementById('new-ch-enabled');
-      const resultEl = document.getElementById('add-channel-result');
+      const nameEl = section.querySelector('.new-ch-name');
+      const urlEl = section.querySelector('.new-ch-url');
+      const enabledEl = section.querySelector('.new-ch-enabled');
+      const verifyTlsEl = section.querySelector('.new-ch-verify-tls');
+      const resultEl = section.querySelector('.add-channel-result');
       const name = nameEl.value.trim();
       const url = urlEl.value.trim();
       const enabled = enabledEl.checked;
-      const verifyTlsEl = document.getElementById('new-ch-verify-tls');
-      const verifyTls = verifyTlsEl ? verifyTlsEl.checked : true;
-      if (!name) { resultEl.textContent = 'Name required'; resultEl.className = 'small text-danger'; return; }
-      const resp = await fetch(SCRIPT_ROOT + '/config/save-notification-channel', {
-        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-        body: JSON.stringify({name, url, enabled, verify_tls: verifyTls, type: 'mattermost'}),
-      });
-      const data = await resp.json();
+      const verifyTls = verifyTlsEl.checked;
+      if (!name) { resultEl.textContent = 'Name required'; resultEl.className = 'small align-self-center add-channel-result text-danger'; return; }
+      const data = await post('/config/save-notification-channel', {name, url, enabled, verify_tls: verifyTls, type: channelType});
       if (data.ok) {
-        const noMsg = document.getElementById('no-channels-msg');
-        if (noMsg) noMsg.classList.add('d-none');
-        const tpl = document.createElement('div');
-        tpl.className = 'notification-channel-row card content-card mb-3';
-        tpl.dataset.originalId = data.new_id;
-        tpl.innerHTML = `
-          <div class="card-header d-flex align-items-center gap-2 px-3 py-2">
-            <i class="fas fa-comment-dots" style="color:#1c58d9;"></i>
-            <span class="fw-semibold channel-display-name">${name}</span>
-            <span class="badge ${enabled ? 'bg-success' : 'bg-secondary'} ms-1 channel-display-enabled">${enabled ? 'Enabled' : 'Disabled'}</span>
-            <div class="ms-auto d-flex gap-2 align-items-center">
-              <button type="button" class="btn btn-sm btn-outline-secondary toggle-channel-form">Edit</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary ping-channel-btn" title="Send a test message to this channel"><i class="fas fa-bell"></i></button>
-              <span class="ping-channel-result small"></span>
-              <button type="button" class="btn btn-sm btn-outline-danger delete-channel-btn">Delete</button>
-            </div>
-          </div>
-          <div class="card-body channel-form" style="display:none;">
-            <div class="row g-3">
-              <div class="col-sm-5"><label class="form-label">Name</label><input type="text" class="form-control ch-name" value="${name}"></div>
-              <div class="col-sm-7"><label class="form-label">Webhook URL</label>
-                <div class="input-group"><input type="password" class="form-control font-monospace api-key-input ch-url" placeholder="${url ? 'Configured, leave blank to keep' : ''}" autocomplete="new-password">
-                <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button></div>
-              </div>
-              <div class="col-sm-5"><div class="form-check form-switch mt-2"><input class="form-check-input ch-enabled" type="checkbox" ${enabled ? 'checked' : ''}><label class="form-check-label">Enabled</label></div></div>
-              <div class="col-sm-5"><div class="form-check form-switch mt-2"><input class="form-check-input ch-verify-tls" type="checkbox" ${verifyTls ? 'checked' : ''}><label class="form-check-label">Verify TLS certificate</label></div></div>
-            </div>
-            <div class="d-flex gap-2 mt-3"><button type="button" class="btn btn-sm btn-primary save-channel-btn">Save</button><span class="save-channel-result small align-self-center"></span></div>
-          </div>`;
-        list.insertBefore(tpl, list.firstChild);
-        bindRow(tpl);
-        nameEl.value = ''; urlEl.value = ''; enabledEl.checked = true;
-        if (verifyTlsEl) verifyTlsEl.checked = true;
+        noMsg.classList.add('d-none');
+        const row = section.querySelector('.channel-row-template').content.firstElementChild.cloneNode(true);
+        row.dataset.originalId = data.new_id;
+        row.querySelector('.channel-display-name').textContent = name;
+        row.querySelector('.ch-name').value = name;
+        if (url) row.querySelector('.ch-url').placeholder = 'Configured, leave blank to keep';
+        row.querySelector('.ch-enabled').checked = enabled;
+        row.querySelector('.ch-verify-tls').checked = verifyTls;
+        setBadge(row, enabled);
+        list.insertBefore(row, list.firstChild);
+        bindRow(row);
+        nameEl.value = ''; urlEl.value = ''; enabledEl.checked = true; verifyTlsEl.checked = true;
         resultEl.textContent = 'Channel added';
-        resultEl.className = 'small text-success';
+        resultEl.className = 'small align-self-center add-channel-result text-success';
         setTimeout(() => { resultEl.textContent = ''; }, 3000);
       } else {
         resultEl.textContent = data.error || 'Failed';
-        resultEl.className = 'small text-danger';
+        resultEl.className = 'small align-self-center add-channel-result text-danger';
       }
     });
   }
+
+  document.querySelectorAll('.chat-channel-section').forEach(bindSection);
 })();
 
 // ── SMTP test connection ──────────────────────────────────────────────────────

@@ -188,7 +188,7 @@ ProxyPass        /zsazsa  http://127.0.0.1:5000/ timeout=300
 ProxyPassReverse /zsazsa  http://127.0.0.1:5000/
 ```
 
-The value in `RequestHeader set X-Forwarded-Prefix` must match the path used in `ProxyPass` and `ProxyPassReverse`. To use a different subpath, change all three occurrences. No application restart is needed for subpath changes, only an Apache reload (`systemctl reload apache2`). The application reads `X-Forwarded-Prefix` at runtime to construct links and AJAX call paths, and reads `X-Forwarded-Proto` to build correct `https://` URLs in Mattermost notifications and product preview links. When run directly without a proxy, both headers are absent and the application behaves exactly as before.
+The value in `RequestHeader set X-Forwarded-Prefix` must match the path used in `ProxyPass` and `ProxyPassReverse`. To use a different subpath, change all three occurrences. No application restart is needed for subpath changes, only an Apache reload (`systemctl reload apache2`). The application reads `X-Forwarded-Prefix` at runtime to construct links and AJAX call paths, and reads `X-Forwarded-Proto` to build correct `https://` URLs in Mattermost and Teams notifications and product preview links. When run directly without a proxy, both headers are absent and the application behaves exactly as before.
 
 A MISP behind nginx needs the same three things: the prefix stripped from the path, `X-Forwarded-Prefix` and `X-Forwarded-Proto`. [docker/misp-docker/zsazsa-nginx.sh](docker/misp-docker/zsazsa-nginx.sh) has the `location` block the Docker setup adds to misp-core.
 

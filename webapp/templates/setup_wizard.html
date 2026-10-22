@@ -429,8 +429,8 @@
     {% elif current == 'notifications' %}
     <div class="card-body pb-2">
       <p class="wizard-lead">
-        Where zsazsa tells people about new products and findings: Mattermost channels, and mail
-        addresses through your mail server. Stakeholders subscribe to these channels.
+        Where zsazsa tells people about new products and findings: Mattermost and Teams channels,
+        and mail addresses through your mail server. Stakeholders subscribe to these channels.
       </p>
 
       <div class="wizard-section">
@@ -447,8 +447,8 @@
         <ul class="wizard-list">
           {% for c in view.channels %}
           <li>
-            <i class="fas {{ 'fa-envelope' if c.type == 'email' else 'fa-comments' }}"></i><span class="fw-semibold">{{ c.name }}</span>
-            <span class="small text-muted">{{ c.recipient if c.type == 'email' else 'Mattermost' }}</span>
+            <i class="{{ 'fas fa-envelope' if c.type == 'email' else 'fa-brands fa-microsoft' if c.type == 'teams' else 'fas fa-comments' }}"></i><span class="fw-semibold">{{ c.name }}</span>
+            <span class="small text-muted">{{ c.recipient if c.type == 'email' else 'Teams' if c.type == 'teams' else 'Mattermost' }}</span>
             {% if not c.enabled %}<span class="badge source-disabled ms-auto">Disabled</span>{% endif %}
           </li>
           {% endfor %}
@@ -460,6 +460,7 @@
               <label class="form-label small mb-1" for="wz-channel-type">Type</label>
               <select id="wz-channel-type" class="form-select form-select-sm">
                 <option value="mattermost">Mattermost</option>
+                <option value="teams">Teams</option>
                 <option value="email">E-mail</option>
               </select>
             </div>
@@ -467,9 +468,9 @@
               <label class="form-label small mb-1" for="wz-channel-name">Name</label>
               <input type="text" id="wz-channel-name" class="form-control form-control-sm" placeholder="CTI alerts">
             </div>
-            <div class="col-md-6" data-channel-type="mattermost">
+            <div class="col-md-6" data-channel-type="mattermost teams">
               <label class="form-label small mb-1" for="wz-channel-url">Incoming webhook URL</label>
-              <input type="url" id="wz-channel-url" class="form-control form-control-sm font-monospace" placeholder="https://mattermost.example.org/hooks/...">
+              <input type="url" id="wz-channel-url" class="form-control form-control-sm font-monospace" placeholder="https://...">
             </div>
             <div class="col-md-6" data-channel-type="email" hidden>
               <label class="form-label small mb-1" for="wz-channel-recipient">Send to</label>
@@ -717,7 +718,7 @@
   const channelType = document.getElementById('wz-channel-type');
   channelType?.addEventListener('change', () => {
     document.querySelectorAll('[data-channel-type]').forEach(el => {
-      el.hidden = el.dataset.channelType !== channelType.value;
+      el.hidden = !el.dataset.channelType.split(' ').includes(channelType.value);
     });
   });
   const channelSave = document.getElementById('wz-channel-save');
