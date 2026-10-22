@@ -1,8 +1,10 @@
-"""Tests for how the MISP session cookie name is resolved.
+"""Tests for reading the logged-in user out of MISP's session.
 
-The name is looked up from MISP when it is not in the config, and that lookup
-sits in front of every request. An unreachable MISP must therefore be asked
-again only now and then, not once per request.
+The cookie name is looked up from MISP when it is not in the config, and that
+lookup sits in front of every request. An unreachable MISP must therefore be
+asked again only now and then, not once per request. A session MISP's own
+timeout has run out on is no session, and while someone uses zsazsa MISP is
+asked to keep their session alive.
 
     python -m unittest tests.test_misp_session
 """
@@ -10,13 +12,112 @@ again only now and then, not once per request.
 import contextlib
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import requests
 from flask import Flask, g
 
 from webapp import misp_session
+
+
+def _php_string(text):
+    data = text.encode()
+    return b's:%d:"%s";' % (len(data), data)
+
+
+def _php_session(expires_in=600, email="analyst@misp.test"):
+    """A MISP session as PHP's redis handler stores it, with the expiry CakePHP
+    keeps in Config.time `expires_in` seconds from now."""
+    config_entry = (b"Config|a:3:{" + _php_string("userAgent") + _php_string("abc")
+                    + _php_string("time") + b"i:%d;" % int(time.time() + expires_in)
+                    + _php_string("countdown") + b"i:10;}")
+    auth = (b"Auth|a:1:{" + _php_string("User") + b"a:2:{" + _php_string("email")
+            + _php_string(email) + _php_string("id") + b"i:7;}}")
+    return config_entry + auth
+
+
+class SessionExpiry(unittest.TestCase):
+    """The Redis key can outlive MISP's own timeout (MISP gives it
+    Session.cookieTimeout), so the key existing is not enough."""
+
+    def user(self, blob):
+        with mock.patch.object(misp_session, "_redis_get", return_value=blob):
+            return misp_session.get_misp_user("sid")
+
+    def test_a_session_within_misps_timeout_is_accepted(self):
+        self.assertEqual(self.user(_php_session(expires_in=600))["email"], "analyst@misp.test")
+
+    def test_a_session_past_misps_timeout_is_refused(self):
+        self.assertIsNone(self.user(_php_session(expires_in=-60)))
+
+    def test_a_session_without_an_expiry_is_read_as_before(self):
+        auth = _php_session().split(b"Auth|", 1)[1]
+        self.assertEqual(self.user(b"Auth|" + auth)["email"], "analyst@misp.test")
+
+
+class KeepAlive(unittest.TestCase):
+    """MISP moves a session's expiry forward on each request it serves; zsazsa
+    has it do so every few minutes of use rather than writing the session."""
+
+    def setUp(self):
+        misp_session._last_keepalive.clear()
+        self.addCleanup(misp_session._last_keepalive.clear)
+        for patcher in (mock.patch.object(misp_session.config, "MISP_WEBAPP_URL", "https://misp.test/"),
+                        mock.patch.object(misp_session.config, "MISP_WEBAPP_VERIFYCERT", False)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.app = Flask(__name__)
+
+    def keep_alive(self, get, session_id="sid"):
+        with self.app.test_request_context("/", headers={"User-Agent": "Firefox/140"}), \
+             mock.patch.object(misp_session.requests, "get", get):
+            misp_session.keep_misp_session_alive("MISP-abc", session_id)
+
+    def test_misp_is_asked_for_the_users_own_record_with_their_cookie_and_agent(self):
+        get = mock.Mock(return_value=mock.Mock(status_code=200))
+        self.keep_alive(get)
+        get.assert_called_once_with(
+            "https://misp.test/users/view/me.json", cookies={"MISP-abc": "sid"},
+            headers={"Accept": "application/json", "User-Agent": "Firefox/140"},
+            timeout=misp_session._KEEPALIVE_TIMEOUT_S, verify=False, allow_redirects=False)
+
+    def test_a_session_is_refreshed_at_most_once_every_few_minutes(self):
+        get = mock.Mock(return_value=mock.Mock(status_code=200))
+        self.keep_alive(get)
+        self.keep_alive(get)
+        self.assertEqual(get.call_count, 1)
+        misp_session._last_keepalive["sid"] -= misp_session._KEEPALIVE_EVERY_S
+        self.keep_alive(get)
+        self.assertEqual(get.call_count, 2)
+
+    def test_each_session_has_its_own_turn(self):
+        get = mock.Mock(return_value=mock.Mock(status_code=200))
+        self.keep_alive(get, "one")
+        self.keep_alive(get, "two")
+        self.assertEqual(get.call_count, 2)
+
+    def test_a_refusal_or_an_unreachable_misp_is_logged_without_the_session_id(self):
+        for get in (mock.Mock(return_value=mock.Mock(status_code=403)),
+                    mock.Mock(side_effect=requests.ConnectionError("connection refused"))):
+            misp_session._last_keepalive.clear()
+            with self.assertLogs("webapp.misp_session", level="WARNING") as logs:
+                self.keep_alive(get, "s3cr3t-session-id")
+            self.assertNotIn("s3cr3t-session-id", "".join(logs.output))
+
+    def test_only_a_recognised_user_has_the_session_refreshed(self):
+        for user, calls in ((None, 0), ({"email": "analyst@misp.test"}, 1)):
+            with self.app.test_request_context("/", headers={"Cookie": "MISP-abc=sid"}), \
+                 mock.patch.object(misp_session.config, "MISP_SESSION_REDIRECT_TO_LOGIN", False), \
+                 mock.patch.object(misp_session, "_session_cookie_name", return_value="MISP-abc"), \
+                 mock.patch.object(misp_session, "get_misp_user", return_value=user), \
+                 mock.patch.object(misp_session, "keep_misp_session_alive") as keep:
+                misp_session.load_request_user()
+            self.assertEqual(keep.call_count, calls)
+            if calls:
+                keep.assert_called_once_with("MISP-abc", "sid")
 
 
 class CookieName(unittest.TestCase):
@@ -259,6 +360,17 @@ class Diagnosis(unittest.TestCase):
         self.assertIn("does hold PHP sessions", self.detail(result, "MISP session"))
         self.assertIn("Log in to MISP again", result["hint"])
         self.assertNotIn("session.save_handler", result["hint"])
+
+    def test_an_expired_session_is_named_and_needs_a_new_login(self):
+        """Not "not found": the session is there, MISP's timeout ended it."""
+        finder = mock.Mock(return_value=13)
+        with mock.patch.object(misp_session, "_database_with_sessions", finder):
+            result = self.diagnose({"MISP-abc": "sid"},
+                                   redis=mock.Mock(return_value=_php_session(expires_in=-60)))
+        self.assertEqual(self.failed(result), ["MISP session"])
+        self.assertIn("expired", self.detail(result, "MISP session"))
+        self.assertIn("timeout", result["hint"])
+        finder.assert_not_called()
 
     def test_unreachable_redis_is_reported_as_such(self):
         # Redis being down fails the connection, which is what the check opens.

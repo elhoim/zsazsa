@@ -9,6 +9,9 @@
 
 ### Changed
 
+- The intake checklist of a PIR can be corrected on its edit form.
+- With SSO, working in zsazsa keeps the MISP session alive: every five minutes, zsazsa requests MISP to refresh it.
+- The Technology field on the PIR, GIR, threat actor profile and briefing story forms suggests "Firewall, Windows, Web servers" instead of product names.
 - Webhook errors written to the log or shown by a channel test no longer include the `sig` parameter of a URL.
 - On the PIR and GIR forms, the "Output product format" list is sorted, with each product's icon and an icon to tick them all, and the collection sources are grouped by kind with the icons of the sources page.
 - The PIR and GIR distribution picker names a stakeholder's organisation instead of showing its UUID, and a GIR started from a stakeholder's page has that stakeholder as its owner and in its distribution, as a PIR already had.

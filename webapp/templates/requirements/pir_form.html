@@ -260,7 +260,7 @@
                     <label class="form-label small mb-1">Technology</label>
                     {{ tag_input("technology",
                         values=(pir.technology if is_edit else []),
-                        placeholder="Fortinet, Windows, Apache…") }}
+                        placeholder="Firewall, Windows, Web servers…") }}
                   </div>
                   <div class="col-sm-6">
                     <label class="form-label small mb-1">Vendor</label>
@@ -443,6 +443,23 @@
         </div>
       </div>
     </div>
+
+    {% if is_edit %}
+    <!-- Intake checklist -->
+    <div class="card content-card mb-4">
+      <div class="card-header"><i class="fas fa-clipboard-check me-2"></i>Intake checklist</div>
+      <div class="card-body">
+        <div class="form-text mt-0 mb-2">The checklist from triage. Changing it here leaves the intake decision as it is.</div>
+        {% for value, label in triage_checklist %}
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" name="triage_checklist" value="{{ value }}"
+                 id="triage_chk_{{ loop.index }}" {{ 'checked' if value in (pir.triage_checklist or []) }}>
+          <label class="form-check-label small" for="triage_chk_{{ loop.index }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
 
     <!-- Ownership -->
     <div class="card content-card mb-4">

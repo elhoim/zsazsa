@@ -10,6 +10,11 @@ record under the ``Auth`` key as ``Auth.User``.
 This module talks to that Redis instance directly over a plain socket
 (no redis-py dependency) and parses just enough of the PHP serialize
 format to pull out ``Auth.User``.
+
+zsazsa only reads the session. Keeping it alive is left to MISP: while
+someone uses zsazsa, MISP is asked every few minutes for that user's own
+record with their session cookie, and refreshes the session as it does for
+any page of its own.
 """
 
 import logging
@@ -19,6 +24,8 @@ import time
 from contextlib import contextmanager
 
 from flask import g, jsonify, request
+
+import requests
 
 import config
 from webapp import sso_users
@@ -181,16 +188,8 @@ def _parse_php_session(data):
     return result
 
 
-def get_misp_user(session_id):
-    """Return the MISP Auth.User dict for a session ID, or None.
-
-    This reflects whatever CakePHP wrote to the session at login time, not
-    necessarily the live database state (e.g. a user disabled after login
-    keeps a session until MISP itself re-checks and rewrites it).
-    """
-    if not session_id:
-        return None
-
+def _read_session(session_id):
+    """The parsed PHP session behind a session ID, or None."""
     try:
         raw = _redis_get(f"{_SESSION_KEY_PREFIX}{session_id}")
     except (OSError, RedisError) as e:
@@ -201,9 +200,39 @@ def get_misp_user(session_id):
         return None
 
     try:
-        session = _parse_php_session(raw)
+        return _parse_php_session(raw)
     except (ValueError, IndexError) as e:
         logger.warning("could not parse MISP session data: %s", e)
+        return None
+
+
+def _expired(session):
+    """Whether MISP's own timeout has run out on this session.
+
+    CakePHP keeps the moment a session expires in Config.time and moves it
+    forward on every request MISP serves. Past it, MISP destroys the session
+    on its next request. The Redis key can live on well after that (MISP
+    gives it Session.cookieTimeout when that is set), so the key existing
+    does not mean MISP still accepts the session.
+    """
+    config_entry = session.get("Config")
+    expires = config_entry.get("time") if isinstance(config_entry, dict) else None
+    return isinstance(expires, (int, float)) and expires < time.time()
+
+
+def get_misp_user(session_id):
+    """Return the MISP Auth.User dict for a session ID, or None.
+
+    This reflects whatever CakePHP wrote to the session at login time, not
+    necessarily the live database state (e.g. a user disabled after login
+    keeps a session until MISP itself re-checks and rewrites it). A session
+    MISP's timeout has run out on counts as no session.
+    """
+    if not session_id:
+        return None
+
+    session = _read_session(session_id)
+    if session is None or _expired(session):
         return None
 
     user = session.get("Auth", {}).get("User")
@@ -310,11 +339,58 @@ def _explain_miss(cause, cookie_name):
             f"MISP_SESSION_REDIS_* names the same instance and database")
 
 
+# How often use of zsazsa has MISP refresh a session, at most. Far inside any
+# timeout MISP is set to, and one request to MISP per user every few minutes.
+_KEEPALIVE_EVERY_S = 300
+_KEEPALIVE_TIMEOUT_S = 5
+
+# Session ID -> time.monotonic() of the last refresh asked for it.
+_last_keepalive = {}
+
+
+def keep_misp_session_alive(cookie_name, session_id):
+    """Have MISP refresh this session, as a page of MISP's own would.
+
+    Each request MISP serves moves the session's expiry forward, both the
+    Config.time CakePHP keeps in it and the lifetime of its Redis key. Asking
+    MISP for the user's own record with their session cookie takes it through
+    that same path. /users/view/me does, where the version check and the
+    searches close the session without saving it. The browser's user agent
+    goes along, since with Session.checkAgent on MISP destroys a session that
+    is used from another one.
+    """
+    now = time.monotonic()
+    last = _last_keepalive.get(session_id)
+    if last is not None and now - last < _KEEPALIVE_EVERY_S:
+        return
+    # Forget the sessions not seen for a while, so this stays the size of the
+    # sessions in use.
+    for sid, at in list(_last_keepalive.items()):
+        if now - at >= _KEEPALIVE_EVERY_S:
+            del _last_keepalive[sid]
+    _last_keepalive[session_id] = now
+
+    url = f"{config.MISP_WEBAPP_URL.rstrip('/')}/users/view/me.json"
+    try:
+        r = requests.get(url, cookies={cookie_name: session_id},
+                         headers={"Accept": "application/json",
+                                  "User-Agent": request.headers.get("User-Agent", "")},
+                         timeout=_KEEPALIVE_TIMEOUT_S, verify=config.MISP_WEBAPP_VERIFYCERT,
+                         allow_redirects=False)
+    except requests.RequestException as e:
+        logger.warning("could not have MISP refresh a session: %s", e)
+        return
+    if r.status_code != 200:
+        logger.warning("MISP did not refresh a session: HTTP %s from %s", r.status_code, url)
+
+
 def load_request_user():
     """Look up the MISP user for the current request and cache it on flask.g."""
     cookie_name = _session_cookie_name()
     session_id = request.cookies.get(cookie_name) if cookie_name else None
     g.misp_user = get_misp_user(session_id)
+    if g.misp_user is not None:
+        keep_misp_session_alive(cookie_name, session_id)
 
     # Only worth reporting when single sign-on is meant to be working, and only
     # once per cause: this runs in front of every request, and the cause does not
@@ -481,9 +557,14 @@ def diagnose(cookies) -> dict:
 
     user = get_misp_user(session_id) if session_id and redis_ok else None
     holding = None
+    expired = False
     if session_id and redis_ok:
+        session = None if user else _read_session(session_id)
+        expired = session is not None and _expired(session)
         if user:
             detail = f"identified {user.get('email', '?')}"
+        elif expired:
+            detail = "expired: MISP's session timeout passed since the last request MISP served"
         else:
             # Where the sessions are separates the three setups that all look
             # like "no user" from here and want different fixes: PHP writing
@@ -508,6 +589,9 @@ def diagnose(cookies) -> dict:
                     "above is MISP's session cookie, set MISP_SESSION_COOKIE_NAME to that name.")
         elif label == "Session Redis":
             hint = "Check the Redis settings below against the instance MISP writes its sessions to."
+        elif label == "MISP session" and expired:
+            hint = ("MISP's own timeout ended this session. Log in to MISP again in this browser "
+                    "and retry.")
         elif label == "MISP session" and holding == _configured_db():
             hint = ("MISP's sessions are in this Redis, so the plumbing is right and this one "
                     "cookie has no session behind it. Log in to MISP again in this browser and "

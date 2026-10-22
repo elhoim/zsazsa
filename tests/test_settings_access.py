@@ -39,6 +39,8 @@ class SettingsAccess(unittest.TestCase):
             mock.patch.object(_config, "MISP_SESSION_COOKIE_NAME", "MISP-test", create=True),
             mock.patch.object(_config, "MISP_SESSION_REDIRECT_TO_LOGIN", False, create=True),
             mock.patch.object(collection_cache, "start_worker"),
+            # The session is a stand-in; asking MISP to refresh it would reach the real one.
+            mock.patch.object(misp_session, "keep_misp_session_alive"),
             # The sources page lists the manual sources from MISP; nothing here reaches one.
             mock.patch.object(misp_store, "list_collection_sources", return_value=[]),
         ]

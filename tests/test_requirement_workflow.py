@@ -100,6 +100,17 @@ class StatusStaysOutOfTheEditForm(unittest.TestCase):
         self.assertEqual(data["acknowledged_by"], "lead@example.org")
         self.assertEqual(data["question"], "Who targets the grid now?")
 
+    def test_a_pir_edit_corrects_the_triage_checklist_but_not_the_decision(self):
+        pir = _pir(intake_status="approved", status="Active",
+                   triage_checklist=["clear_question", "not_duplicate"])
+        data = self.capture(f"/pirs/{UUID}/edit", "update_pir",
+                            {"question": "q", "intel_level": "Strategic",
+                             "triage_checklist": ["clear_question", "sources_available", "made_up"]},
+                            getter="get_pir", stored=pir)
+        self.assertEqual(data["triage_checklist"], ["clear_question", "sources_available"])
+        self.assertEqual(data["intake_status"], "approved")
+        self.assertEqual(data["status"], "Active")
+
     def test_a_gir_edit_ignores_a_status_it_does_not_know(self):
         gir = SimpleNamespace(uuid=UUID, gir_id="GIR-001", status="Active", focus_points=[])
         data = self.capture(f"/girs/{UUID}/edit", "update_gir", {"topic": "t", "status": "Hacked", "intel_level": "Tactical"},
@@ -241,6 +252,25 @@ class DistributionOrganisationNames(unittest.TestCase):
                 self.assertIn("SOC &middot; CIRCL", html, path)
                 self.assertIn("IR &middot; Partner Corp", html, path)
                 self.assertNotIn(self.org_uuid, html, path)
+
+
+class IntakeChecklistOnTheEditForm(unittest.TestCase):
+    """The answers given at triage can be corrected on the edit form. A new PIR
+    has not been triaged, so its form has no checklist."""
+
+    setUp = IntelligenceLevelRequired.setUp
+
+    def test_the_edit_form_ticks_the_stored_answers(self):
+        with mock.patch.object(misp_store, "get_pir",
+                               return_value=_pir(triage_checklist=["not_duplicate"])):
+            html = self.client.get(f"/pirs/{UUID}/edit").get_data(as_text=True)
+        self.assertIn("Intake checklist", html)
+        self.assertRegex(html, r'value="not_duplicate"\s+id="triage_chk_\d+" checked')
+        self.assertNotRegex(html, r'value="clear_question"\s+id="triage_chk_\d+" checked')
+
+    def test_a_new_pir_has_no_checklist(self):
+        html = self.client.get("/pirs/new").get_data(as_text=True)
+        self.assertNotIn("Intake checklist", html)
 
 
 class RfiPirChoice(unittest.TestCase):

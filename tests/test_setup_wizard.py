@@ -68,6 +68,8 @@ class SetupWizard(unittest.TestCase):
             mock.patch.object(_config, "MISP_SESSION_COOKIE_NAME", "MISP-test", create=True),
             mock.patch.object(_config, "MISP_SESSION_REDIRECT_TO_LOGIN", False, create=True),
             mock.patch.object(collection_cache, "start_worker"),
+            # The session is a stand-in; asking MISP to refresh it would reach the real one.
+            mock.patch.object(misp_session, "keep_misp_session_alive"),
             mock.patch.object(misp_store, "list_collection_sources", return_value=[]),
             mock.patch.object(misp_session, "get_misp_user", return_value=SITE_ADMIN),
             mock.patch.object(misp_store, "user_role", return_value=SITE_ADMIN["Role"]),

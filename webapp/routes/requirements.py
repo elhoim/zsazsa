@@ -469,10 +469,13 @@ def pir_edit(id):
         return redirect(url_for("requirements.pir_detail", id=id))
     stakeholders = misp_store.list_stakeholders()
     if request.method == "POST":
-        # The status and the intake record are kept as stored: they change
-        # through triage and the status board, not this form.
+        # The status and the intake decision are kept as stored: they change
+        # through triage and the status board, not this form. The checklist
+        # answers given at triage can be corrected here.
         data = {**misp_store.pir_to_data(pir),
                 **_pir_form_data(request.form, stakeholders, pir.focus_points)}
+        triage_keys = [key for key, _ in PIR_TRIAGE_CHECKLIST]
+        data["triage_checklist"] = [k for k in request.form.getlist("triage_checklist") if k in triage_keys]
         if not data["intel_level"]:
             flash(INTEL_LEVEL_REQUIRED, "warning")
         else:
@@ -489,6 +492,7 @@ def pir_edit(id):
     return render_template(
         "requirements/pir_form.html",
         pir=pir,
+        triage_checklist=PIR_TRIAGE_CHECKLIST,
         stakeholders=stakeholders,
         org_map=org_store.org_map(),
         priorities=MOSCOW_PRIORITIES,
