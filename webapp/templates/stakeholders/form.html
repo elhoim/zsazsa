@@ -223,7 +223,7 @@
                      value="{{ ch.id }}" id="nch_{{ loop.index }}"
                      {{ 'checked' if ch.id in current_channels }}>
               <label class="form-check-label" for="nch_{{ loop.index }}">
-                {% if ch.type == 'flowintel' %}<img src="{{ url_for('static', filename='flowintel-icon.png') }}" alt="Flowintel" style="height:14px;width:auto;" class="me-1">{% elif ch.type == 'email' %}<i class="fas fa-envelope me-1" style="color:#0078f1;"></i>{% endif %}
+                {% if ch.type == 'flowintel' %}<img src="{{ url_for('static', filename='flowintel-icon.png') }}" alt="Flowintel" style="height:14px;width:auto;" class="me-1">{% elif ch.type == 'email' %}<i class="fas fa-envelope me-1" style="color:#0078f1;"></i>{% elif ch.type == 'teams' %}<i class="fa-brands fa-microsoft me-1" style="color:#5b5fc7;"></i>{% endif %}
                 {{ ch.name }}
               </label>
             </div>
@@ -233,7 +233,15 @@
         </div>
         {% endif %}
 
-        <label class="form-label">Products subscribed</label>
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label class="form-label mb-0">Products subscribed</label>
+          {% if products %}
+          <button type="button" class="btn btn-sm btn-link text-muted p-0" id="toggle-all-products"
+                  title="Subscribe to all products" aria-label="Subscribe to all products">
+            <i class="fas fa-check-double"></i>
+          </button>
+          {% endif %}
+        </div>
         <div class="product-checklist">
           {% for p in products | sort(case_sensitive=False) %}
           {% set current_mode = stakeholder.product_modes.get(p, default_subscription_mode) if is_edit else default_subscription_mode %}
@@ -309,6 +317,31 @@
     renumberRadios();
     node.querySelector('input[name="contact_value"]').focus();
   });
+})();
+
+(function() {
+  var btn = document.getElementById('toggle-all-products');
+  if (!btn) return;
+  var boxes = document.querySelectorAll('.product-checklist input[name="products"]');
+
+  function allChecked() {
+    return Array.prototype.every.call(boxes, function(cb) { return cb.checked; });
+  }
+  function update() {
+    var all = allChecked();
+    var label = all ? 'Unsubscribe from all products' : 'Subscribe to all products';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.querySelector('i').className = all ? 'fas fa-xmark' : 'fas fa-check-double';
+  }
+
+  btn.addEventListener('click', function() {
+    var check = !allChecked();
+    boxes.forEach(function(cb) { cb.checked = check; });
+    update();
+  });
+  boxes.forEach(function(cb) { cb.addEventListener('change', update); });
+  update();
 })();
 </script>
 {% endblock %}

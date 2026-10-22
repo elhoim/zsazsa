@@ -1,5 +1,21 @@
 # Changelog
 
+## ## 1.0.10 - development
+
+### Added
+
+- Support for Microsoft Teams as a notification channel.
+- The stakeholder form has an icon next to "Products subscribed" that subscribes the stakeholder to every product, or clears the list.
+
+### Changed
+
+- Webhook errors written to the log or shown by a channel test no longer include the `sig` parameter of a URL.
+
+### Upgrading
+
+- Nothing needs doing. Existing channels keep working, and the
+  `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
+
 ## 1.0.9
 
 ### Added

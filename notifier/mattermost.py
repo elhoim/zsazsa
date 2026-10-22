@@ -1,4 +1,5 @@
 import logging
+import re
 from urllib.parse import urlsplit
 
 import requests
@@ -38,23 +39,26 @@ def _active_webhooks(channel_ids: list | None = None) -> list[dict]:
     return targets
 
 
-def _webhook_host(url: str) -> str:
-    """Name a webhook by its host: the path is the shared secret."""
+def webhook_host(url: str) -> str:
+    """Name a webhook by its host: the rest of the URL holds its secret."""
     parts = urlsplit(url or "")
     return f"{parts.scheme}://{parts.netloc}" if parts.netloc else "webhook"
 
 
 def without_secret(message: str, url: str) -> str:
-    """Strip a webhook's secret path out of a message.
+    """Strip a webhook's secret out of a message.
 
     requests puts the failing URL in its exception text, which for a Mattermost
-    webhook is the token itself, and that text goes to the log file.
+    webhook is the token itself, and that text goes to the log file. A Teams
+    Workflows URL is signed in its `sig` query parameter instead, which
+    requests may quote differently from the configured URL, so any `sig` value
+    is masked whatever it looks like.
     """
     path = urlsplit(url or "").path
     for secret in (url, path):
         if secret and len(secret) > 1:
             message = message.replace(secret, "/...")
-    return message
+    return re.sub(r"\bsig=[^&\s'\"]+", "sig=...", message)
 
 
 def _post(targets: list[dict], payload: dict, label: str) -> bool:
@@ -65,11 +69,11 @@ def _post(targets: list[dict], payload: dict, label: str) -> bool:
         try:
             r = requests.post(url, json=payload, timeout=10, verify=verify_tls)
             r.raise_for_status()
-            logger.info("Mattermost notification sent (%s) to %s", label, _webhook_host(url))
+            logger.info("Mattermost notification sent (%s) to %s", label, webhook_host(url))
             sent_any = True
         except requests.RequestException as e:
             logger.error("Mattermost notification failed (%s) to %s: %s",
-                         label, _webhook_host(url), without_secret(str(e), url))
+                         label, webhook_host(url), without_secret(str(e), url))
     return sent_any
 
 

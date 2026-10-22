@@ -35,7 +35,8 @@ LOCAL_LLM_URL = ''
 LOCAL_LLM_API_KEY = ''
 LOCAL_LLM_MODEL = ''
 
-# Notification channels
+# Notification channels. 'type' is 'mattermost', 'teams' (a Teams Workflows
+# webhook URL) or 'email' (with 'recipient' instead of 'url').
 NOTIFICATION_CHANNELS = [
     {
         'id': 'mattermost-main',
