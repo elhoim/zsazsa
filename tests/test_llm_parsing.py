@@ -120,7 +120,8 @@ class ModelParameters(unittest.TestCase):
 
     def call(self, create, provider="openai", model="gpt-6-luna", temperature=0.2):
         client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        with mock.patch.object(llm, "_get_client", return_value=client):
+        with mock.patch.object(llm, "_get_client", return_value=client), \
+             mock.patch.object(llm.config, "LOCAL_LLM_ENABLED", True, create=True):
             return llm._call("system", "user", 1024, feature="summarise_report",
                              cfg={"provider": provider, "model": model, "temperature": temperature})
 
