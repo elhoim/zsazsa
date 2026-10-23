@@ -126,37 +126,38 @@ class SummariseRoute(unittest.TestCase):
         app.config["TESTING"] = True
         app.register_blueprint(data_collection.bp)
         self.client = app.test_client()
+        patcher = mock.patch.object(data_collection.job_store, "update_job")
+        self.update_job = patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def post(self, source, path=None, body=None):
+    def post(self, body, path="/collection/" + "u" * 36 + "/summarise"):
         started = []
         with mock.patch.object(data_collection, "_sources", return_value=_ALL_SOURCES), \
              mock.patch.object(data_collection.job_store, "create_job", return_value={"id": "job-1"}), \
-             mock.patch.object(data_collection.job_store, "update_job") as self.update_job, \
              mock.patch.object(data_collection.misp_session, "current_user_email", return_value="koen@example.org"), \
              mock.patch.object(data_collection.threading, "Thread") as thread:
             thread.side_effect = lambda **kw: started.append(kw["args"]) or mock.MagicMock()
-            reply = self.client.post(path or "/collection/" + "u" * 36 + "/summarise",
-                                     json=body or {"source": source})
+            reply = self.client.post(path, json=body)
         return reply, (started[0] if started else None)
 
     def test_a_manual_event_starts_a_summary_job(self):
-        reply, args = self.post("manual-slack")
+        reply, args = self.post({"source": "manual-slack"})
         self.assertEqual(reply.status_code, 200)
         self.assertTrue(reply.get_json()["ok"])
         _job_id, batch, _user = args
         self.assertEqual(batch, [{"uuid": "u" * 36, "sourceId": "manual-slack"}])
 
     def test_the_job_records_the_event_it_works_on(self):
-        self.post("manual-slack")
+        self.post({"source": "manual-slack"})
         self.update_job.assert_called_once_with("job-1", events=["u" * 36])
 
     def test_a_batch_records_every_event_it_works_on(self):
         events = [{"uuid": "a" * 36, "sourceId": "scraper"}, {"uuid": "b" * 36, "sourceId": "manual-slack"}]
-        self.post(None, path="/collection/bulk-summarise", body={"events": events})
+        self.post({"events": events}, path="/collection/bulk-summarise")
         self.update_job.assert_called_once_with("job-1", events=["a" * 36, "b" * 36])
 
     def test_an_event_from_a_third_party_misp_is_refused(self):
-        reply, args = self.post("partner-misp")
+        reply, args = self.post({"source": "partner-misp"})
         self.assertEqual(reply.status_code, 400)
         self.assertIsNone(args)
 

@@ -391,10 +391,8 @@ def pir_list():
 def _prefill_from_stakeholder(stakeholders) -> dict:
     """Owner and distribution for a requirement started from a stakeholder's page."""
     from_uuid = (request.args.get("from_stakeholder") or "").strip()
-    owner = next((s for s in stakeholders if s.uuid == from_uuid), None) if from_uuid else None
-    if owner is None:
-        return {}
-    return {"owner_uuid": owner.uuid, "distribution": [owner.uuid]}
+    owner = next((s for s in stakeholders if s.uuid == from_uuid), None)
+    return {"owner_uuid": owner.uuid, "distribution": [owner.uuid]} if owner else {}
 
 
 @bp.route("/pirs/new", methods=["GET", "POST"])

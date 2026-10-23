@@ -107,6 +107,25 @@ class KeepAlive(unittest.TestCase):
                 self.keep_alive(get, "s3cr3t-session-id")
             self.assertNotIn("s3cr3t-session-id", "".join(logs.output))
 
+    def refreshed(self, method="GET", headers=None):
+        with self.app.test_request_context("/", method=method,
+                                           headers={"Cookie": "MISP-abc=sid", **(headers or {})}), \
+             mock.patch.object(misp_session.config, "MISP_SESSION_REDIRECT_TO_LOGIN", False), \
+             mock.patch.object(misp_session, "_session_cookie_name", return_value="MISP-abc"), \
+             mock.patch.object(misp_session, "get_misp_user", return_value={"email": "analyst@misp.test"}), \
+             mock.patch.object(misp_session, "keep_misp_session_alive") as keep:
+            misp_session.load_request_user()
+        return keep.called
+
+    def test_a_background_poll_does_not_keep_an_unattended_session_alive(self):
+        """The top bar asks for the job list every few seconds on a visible tab."""
+        self.assertFalse(self.refreshed(headers={"Sec-Fetch-Mode": "cors"}))
+
+    def test_a_page_load_or_an_action_does(self):
+        self.assertTrue(self.refreshed(headers={"Sec-Fetch-Mode": "navigate"}))
+        self.assertTrue(self.refreshed(method="POST", headers={"Sec-Fetch-Mode": "cors"}))
+        self.assertTrue(self.refreshed())  # a client that sends no fetch metadata
+
     def test_only_a_recognised_user_has_the_session_refreshed(self):
         for user, calls in ((None, 0), ({"email": "analyst@misp.test"}, 1)):
             with self.app.test_request_context("/", headers={"Cookie": "MISP-abc=sid"}), \

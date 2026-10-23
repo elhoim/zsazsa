@@ -95,7 +95,7 @@ def _fp(category, value):
 class FocusPointsSurviveAnEdit(unittest.TestCase):
     """Saving the PIR form replaces every focus point on the requirement, so each
     category is rebuilt from the scope list posted for it. A category the form has
-    no field for has to be carried over, or each save quietly deletes it."""
+    no field for has to be kept, or each save quietly deletes it."""
 
     def setUp(self):
         self.client = _app().test_client()

@@ -14,7 +14,8 @@ format to pull out ``Auth.User``.
 zsazsa only reads the session. Keeping it alive is left to MISP: while
 someone uses zsazsa, MISP is asked every few minutes for that user's own
 record with their session cookie, and refreshes the session as it does for
-any page of its own.
+any page of its own. Only page loads and actions count as use, not the
+requests a page makes in the background.
 """
 
 import logging
@@ -23,9 +24,8 @@ import socket
 import time
 from contextlib import contextmanager
 
-from flask import g, jsonify, request
-
 import requests
+from flask import g, jsonify, request
 
 import config
 from webapp import sso_users
@@ -339,8 +339,9 @@ def _explain_miss(cause, cookie_name):
             f"MISP_SESSION_REDIS_* names the same instance and database")
 
 
-# How often use of zsazsa has MISP refresh a session, at most. Far inside any
-# timeout MISP is set to, and one request to MISP per user every few minutes.
+# How often use of zsazsa has MISP refresh a session, at most. Well inside
+# MISP's own timeout (an hour by default), and one request to MISP per user
+# every few minutes.
 _KEEPALIVE_EVERY_S = 300
 _KEEPALIVE_TIMEOUT_S = 5
 
@@ -389,7 +390,12 @@ def load_request_user():
     cookie_name = _session_cookie_name()
     session_id = request.cookies.get(cookie_name) if cookie_name else None
     g.misp_user = get_misp_user(session_id)
-    if g.misp_user is not None:
+    # The top bar polls for jobs every few seconds while a tab is visible. That
+    # is not someone at work, and counting it would keep the session of an
+    # unattended screen alive for good, so a background fetch (Sec-Fetch-Mode
+    # cors) is left out. Page loads and actions, which post, count.
+    background = request.method == "GET" and request.headers.get("Sec-Fetch-Mode", "navigate") != "navigate"
+    if g.misp_user is not None and not background:
         keep_misp_session_alive(cookie_name, session_id)
 
     # Only worth reporting when single sign-on is meant to be working, and only

@@ -217,7 +217,7 @@
     {% for value, label in checklist %}
     <div class="form-check mb-2">
       <input class="form-check-input" type="checkbox" name="triage_checklist" value="{{ value }}"
-             id="triage_chk_{{ loop.index }}" {{ 'checked' if value in (saved or []) }}>
+             id="triage_chk_{{ loop.index }}" {{ 'checked' if value in saved }}>
       <label class="form-check-label small" for="triage_chk_{{ loop.index }}">{{ label }}</label>
     </div>
     {% endfor %}

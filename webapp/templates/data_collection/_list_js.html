@@ -513,7 +513,7 @@
   var TITLE_STOP_WORDS = new Set((
     'the and for with from that this are was were has have had its into over after about more new ' +
     'how what why who your you our their they them will can not but all out than been via now amid ' +
-    'against under may also says said one two his her who which when where while'
+    'against under may also says said one two his her which when where while'
   ).split(' '));
 
   function topTitleWords(titles, limit) {
@@ -533,13 +533,14 @@
       .slice(0, limit);
   }
 
+  var titleWordsChart = document.getElementById('title-words');
+
   function renderTitleWords(titles, q) {
-    var chart = document.getElementById('title-words');
-    if (!chart) return;
+    if (!titleWordsChart) return;
     var top = topTitleWords(titles, 10);
-    var bars = chart.querySelector('.title-words-bars');
+    var bars = titleWordsChart.querySelector('.title-words-bars');
     bars.replaceChildren();
-    chart.hidden = !top.length;
+    titleWordsChart.hidden = !top.length;
     var most = top.length ? top[0][1] : 1;
     top.forEach(function(entry) {
       var word = entry[0], count = entry[1];
@@ -560,7 +561,6 @@
     });
   }
 
-  var titleWordsChart = document.getElementById('title-words');
   if (titleWordsChart) {
     titleWordsChart.addEventListener('click', function(e) {
       var btn = e.target.closest('.title-word');

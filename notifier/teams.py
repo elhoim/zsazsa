@@ -378,7 +378,7 @@ def send_rfi_notification(rfi, markdown: str, preview_url: str = "",
     ] + _recipients(stakeholder_names)
     return send_card(f"{rfi.rfi_id} received", "", f"RFI {rfi.rfi_id}", channel_ids,
                      subtitle=(getattr(rfi, "question", "") or "")[:120],
-                     tlp=getattr(rfi, "deliverable_tlp", "") or "", facts=facts,
+                     tlp=getattr(rfi, "deliverable_tlp", ""), facts=facts,
                      links=[("Open RFI preview", preview_url)])
 
 
@@ -445,4 +445,4 @@ def send_flash_intel_alert(fia, content: str, channel_ids: list[str] | None = No
     event_ref = getattr(fia, "uuid", "") or getattr(fia, "id", "")
     misp_url = f"{config.MISP_WEBAPP_URL}/events/view/{event_ref}"
     return send_card(f"{fia_id}: Flash Intel Alert", content, fia_id, channel_ids,
-                     tlp=getattr(fia, "tlp", "") or "", links=[("Open in MISP", misp_url)])
+                     tlp=getattr(fia, "tlp", ""), links=[("Open in MISP", misp_url)])
