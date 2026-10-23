@@ -16,7 +16,7 @@ from core.net_safety import resolve_public_url
 from core.rulezet_lookup import (get_rule, search_rules_by_attack, search_rules_by_cve,
                                  validate_rule)
 from core.vuln_lookup import CVE_RE, fetch_cve_info
-from webapp import audit, job_store, misp_session, misp_store
+from webapp import audit, collection_cache, job_store, misp_session, misp_store
 from webapp.collection_cache import AI_SUMMARY_PREFIX
 from webapp.rate_limit import rate_limited
 from webapp.utils import json_body as _json_object, scraper_enabled
@@ -1200,8 +1200,43 @@ def collection_used_in(uuid):
     return jsonify({"ok": True, "products": products})
 
 
+def _add_summary_to_event(event: dict, summary: str) -> None:
+    """Write a summary into the manual entry that was saved without it."""
+    misp = misp_store._misp()
+    saved = misp.get_event(event["uuid"], pythonify=True)
+    misp_store.add_ai_summary_report(misp, saved.id, event["title"] or "Manual entry", summary)
+    collection_cache.mark_ai_summary(event["uuid"], collection_cache.manual_source_id(event["source"]))
+
+
+def hand_summary_to_event(job_id: str, uuid: str, source: str, title: str) -> bool:
+    """Have a summary the manual entry form was still waiting for go into the
+    event it saved without one. Returns whether there is a summary to come.
+
+    One that finished meanwhile is written here. One still running is told
+    where to write: the job looks for that before it reports itself done, so
+    it never writes a summary this has written too.
+    """
+    job = job_store.get_job(job_id)
+    if not job or job.get("action") != "summarise-content":
+        return False
+    event = {"uuid": uuid, "source": source, "title": title}
+    if job.get("status") in job_store.IN_FLIGHT:
+        job_store.update_job(job_id, event=event)
+        # It may have finished between the two reads, before it saw the event.
+        job = job_store.get_job(job_id) or {}
+        if job.get("status") != "completed":
+            return True
+    if job.get("status") == "completed" and not job["result"].get("added_to"):
+        _add_summary_to_event(event, job["result"]["summary"])
+        return True
+    return False
+
+
 def _run_summarise_content_job(job_id: str, content: str, title: str, user: str) -> None:
-    """Summarise pasted content on a worker thread, for a form that has no event yet."""
+    """Summarise pasted content on a worker thread, for a form that has no event yet.
+
+    If the form was saved while this ran, the event it created is on the job by
+    now, and the summary goes into it (see hand_summary_to_event)."""
     from analyser import llm
 
     job_store.update_job(job_id, status="running", message="Generating summary...")
@@ -1215,8 +1250,13 @@ def _run_summarise_content_job(job_id: str, content: str, title: str, user: str)
             return
         audit.record("generate", "ai_summary", details=title or f"{len(content)} chars",
                      user=user)
-        job_store.update_job(job_id, status="completed", result={"summary": summary},
-                             message="Summary generated")
+        result = {"summary": summary}
+        event = (job_store.get_job(job_id) or {}).get("event")
+        if event:
+            _add_summary_to_event(event, summary)
+            result["added_to"] = event["uuid"]
+        job_store.update_job(job_id, status="completed", result=result,
+                             message="Summary added to the saved event" if event else "Summary generated")
     except Exception as exc:
         job_store.update_job(job_id, status="failed", error=str(exc),
                              message=f"Failed: {exc}")

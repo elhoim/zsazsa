@@ -20,6 +20,7 @@ from unittest import mock
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask
+from pymisp import PyMISP
 
 import config as _config
 from webapp import analyser_pipeline, collection_cache, create_app, job_store, misp_store
@@ -64,10 +65,13 @@ class SummariseContentEndpoint(unittest.TestCase):
 
 class SummariseContentJob(unittest.TestCase):
     """The form applies whatever a completed job carries, so an answer the model
-    declined to give has to fail the job rather than complete it empty."""
+    declined to give has to fail the job rather than complete it empty. A form
+    saved while the job ran has handed it the event to write into."""
 
-    def _run(self, summarised):
+    def _run(self, summarised, event=None):
         with mock.patch.object(api.job_store, "update_job") as update, \
+             mock.patch.object(api.job_store, "get_job", return_value={"event": event} if event else {}), \
+             mock.patch.object(api, "_add_summary_to_event") as self.added, \
              mock.patch.object(api.audit, "record"), \
              mock.patch("analyser.llm.summarise_report", return_value=summarised):
             api._run_summarise_content_job("job-1", "An article.", "An article", "koen@example.org")
@@ -77,6 +81,13 @@ class SummariseContentJob(unittest.TestCase):
         final = self._run("Two hauliers were hit.")
         self.assertEqual(final["status"], "completed")
         self.assertEqual(final["result"], {"summary": "Two hauliers were hit."})
+        self.added.assert_not_called()
+
+    def test_the_summary_goes_into_an_event_saved_meanwhile(self):
+        event = {"uuid": "e" * 36, "source": "Newsletter", "title": "An article"}
+        final = self._run("Two hauliers were hit.", event=event)
+        self.added.assert_called_once_with(event, "Two hauliers were hit.")
+        self.assertEqual(final["result"], {"summary": "Two hauliers were hit.", "added_to": "e" * 36})
 
     def test_an_empty_answer_fails_the_job(self):
         final = self._run("  ")
@@ -90,6 +101,115 @@ class SummariseContentJob(unittest.TestCase):
         final = dict(update.call_args.kwargs)
         self.assertEqual(final["status"], "failed")
         self.assertIn("no API key", final["error"])
+
+
+class HandSummaryToEvent(unittest.TestCase):
+    """The event the form saved without its summary, handed to the job writing it.
+    Whichever of the two sees the finished summary first writes it, never both."""
+
+    def hand(self, *states, action="summarise-content"):
+        jobs = [dict(job, action=action) if job else None for job in states]
+        with mock.patch.object(api.job_store, "get_job", side_effect=jobs), \
+             mock.patch.object(api.job_store, "update_job") as self.update, \
+             mock.patch.object(api, "_add_summary_to_event") as self.added:
+            return api.hand_summary_to_event("job-1", "e" * 36, "Newsletter", "An article")
+
+    def test_a_running_job_is_told_where_to_write(self):
+        self.assertTrue(self.hand({"status": "running"}, {"status": "running"}))
+        self.update.assert_called_once_with(
+            "job-1", event={"uuid": "e" * 36, "source": "Newsletter", "title": "An article"})
+        self.added.assert_not_called()
+
+    def test_a_job_that_finishes_during_the_hand_over_is_written_here(self):
+        done = {"status": "completed", "result": {"summary": "Two hauliers were hit."}}
+        self.assertTrue(self.hand({"status": "running"}, done))
+        self.added.assert_called_once()
+
+    def test_a_summary_finished_before_the_save_is_written_here(self):
+        done = {"status": "completed", "result": {"summary": "Two hauliers were hit."}}
+        self.assertTrue(self.hand(done))
+        self.added.assert_called_once_with(
+            {"uuid": "e" * 36, "source": "Newsletter", "title": "An article"}, "Two hauliers were hit.")
+        self.update.assert_not_called()
+
+    def test_nothing_comes_of_a_failed_unknown_or_other_job(self):
+        for states, action in ((({"status": "failed"},), "summarise-content"), ((None,), "summarise-content"),
+                               (({"status": "running"},), "bulk-summarise")):
+            self.assertFalse(self.hand(*states, action=action))
+            self.update.assert_not_called()
+            self.added.assert_not_called()
+
+
+class AddSummaryToEvent(unittest.TestCase):
+    def test_the_report_goes_into_the_saved_event_and_its_row_shows_it(self):
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.get_event.return_value = SimpleNamespace(id=7)
+        with mock.patch.object(api.misp_store, "_misp", return_value=misp), \
+             mock.patch.object(api.misp_store, "add_ai_summary_report") as add, \
+             mock.patch.object(api.collection_cache, "mark_ai_summary") as mark:
+            api._add_summary_to_event({"uuid": "e" * 36, "source": "Newsletter", "title": "An article"},
+                                      "Two hauliers were hit.")
+        add.assert_called_once_with(misp, 7, "An article", "Two hauliers were hit.")
+        mark.assert_called_once_with("e" * 36, api.collection_cache.manual_source_id("Newsletter"))
+
+
+class ManualEntrySavedDuringASummary(unittest.TestCase):
+    def setUp(self):
+        app = Flask(__name__)
+        app.secret_key = "test"
+        app.config["TESTING"] = True
+        app.register_blueprint(data_collection.bp)
+        self.client = app.test_client()
+        for patcher in (
+            mock.patch.object(data_collection.misp_store, "list_collection_sources",
+                              return_value=[SimpleNamespace(name="Newsletter", enabled=True)]),
+            mock.patch.object(data_collection.misp_store, "create_manual_collection_event", return_value="e" * 36),
+            mock.patch.object(data_collection, "_cache_manual_event"),
+            mock.patch.object(data_collection.audit, "record"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def save(self, hand_over=None, **form):
+        with mock.patch.object(api, "hand_summary_to_event", hand_over or mock.Mock(return_value=True)) as hand:
+            reply = self.client.post("/collection/manual/new",
+                                     data={"source": "Newsletter", "title": "An article", **form})
+            with self.client.session_transaction() as session:
+                flashes = [message for _, message in session.get("_flashes", [])]
+        return reply, hand, flashes
+
+    def test_the_event_is_handed_to_the_job_still_writing_its_summary(self):
+        reply, hand, flashes = self.save(summary_job="job-1")
+        hand.assert_called_once_with("job-1", "e" * 36, "Newsletter", "An article")
+        self.assertTrue(reply.headers["Location"].endswith("/collection/manual/" + "e" * 36))
+        self.assertIn("The AI summary goes into the event when it is done.", flashes)
+
+    def test_a_form_with_its_own_summary_hands_nothing_over(self):
+        _reply, hand, _flashes = self.save(summary_job="job-1", summary="Written by hand.")
+        hand.assert_not_called()
+
+    def test_a_failed_hand_over_leaves_the_event_saved(self):
+        reply, _hand, flashes = self.save(hand_over=mock.Mock(side_effect=RuntimeError("MISP down")),
+                                          summary_job="job-1")
+        self.assertTrue(reply.headers["Location"].endswith("/collection/manual/" + "e" * 36))
+        self.assertIn("The event was saved, but its AI summary could not be added.", flashes)
+
+
+class AiSummaryReport(unittest.TestCase):
+    def test_it_is_named_the_way_the_pages_recognise_one(self):
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.add_event_report.return_value = {}
+        misp_store.add_ai_summary_report(misp, 7, "An article", "Two hauliers were hit.")
+        event_id, report = misp.add_event_report.call_args.args
+        self.assertEqual(event_id, 7)
+        self.assertEqual(report.name, f"{misp_store.AI_SUMMARY_PREFIX} An article")
+        self.assertEqual(report.content, "Two hauliers were hit.")
+
+    def test_a_refusal_from_misp_is_raised(self):
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.add_event_report.return_value = {"errors": "Invalid event"}
+        with self.assertRaises(RuntimeError):
+            misp_store.add_ai_summary_report(misp, 7, "An article", "Two hauliers were hit.")
 
 
 _SCRAPER_SOURCE = {"id": "scraper", "kind": "scraper", "label": "MISP scraper"}

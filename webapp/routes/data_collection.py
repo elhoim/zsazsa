@@ -16,13 +16,12 @@ from collections import Counter
 import urllib3
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
-from pymisp import PyMISP, MISPEventReport
+from pymisp import PyMISP
 
 import config
 from core.db import log_pipeline_run_start, log_pipeline_run_end
 from webapp import (analyser_pipeline, audit, collection_cache, job_store, matching as _matching,
                     misp_session, misp_store, newsletter_ingest, newsletter_parsers, scraper_queue)
-from webapp.collection_cache import AI_SUMMARY_PREFIX
 from webapp.rate_limit import rate_limited
 from webapp.utils import json_body as _json_object, scraper_enabled
 
@@ -541,15 +540,9 @@ def _generate_ai_summary(misp, event, source_id, user=""):
         return False, summary, 400
 
     try:
-        er = MISPEventReport()
-        er.name = f"{AI_SUMMARY_PREFIX} {(event.info or uuid)[:80]}"
-        er.content = summary
-        er.distribution = 5
-        refused = _misp_response_errors(misp.add_event_report(event.id, er))
+        misp_store.add_ai_summary_report(misp, event.id, event.info or uuid, summary)
     except Exception as exc:
-        refused = str(exc)
-    if refused:
-        logger.warning("Could not add summary report to %s: %s", uuid, refused)
+        logger.warning("Could not add summary report to %s: %s", uuid, exc)
         return False, "Could not save summary to MISP.", 502
 
     collection_cache.mark_ai_summary(uuid, source_id)
@@ -647,7 +640,7 @@ def manual_new():
         logger.warning("Could not load manual collection sources: %s", exc)
 
     if not manual_sources:
-        flash("No enabled manual sources configured. Add them under Configuration > Collection sources > Manual sources.", "warning")
+        flash("No enabled manual sources configured. Add them under Settings > Collection sources > Manual sources.", "warning")
         return redirect(url_for("data_collection.index"))
 
     if request.method == "POST":
@@ -677,6 +670,18 @@ def manual_new():
                 _cache_manual_event(uuid, selected_source)
                 audit.record("create", "manual-collection-event", entity_id=uuid, entity_label=data["title"])
                 flash(f"Event '{data['title']}' created. You can add attachments below.", "success")
+                # Saved while the AI summary was still being written: it goes
+                # into the event when it is done. The event is saved by now, so
+                # this must not make the save look failed.
+                summary_job = request.form.get("summary_job", "").strip()
+                if summary_job and not data["summary"]:
+                    from webapp.routes.api import hand_summary_to_event
+                    try:
+                        if hand_summary_to_event(summary_job, uuid, selected_source, data["title"]):
+                            flash("The AI summary goes into the event when it is done.", "info")
+                    except Exception as exc:
+                        logger.warning("Could not add the AI summary to manual event %s: %s", uuid, exc)
+                        flash("The event was saved, but its AI summary could not be added.", "warning")
                 return redirect(url_for("data_collection.manual_detail", uuid=uuid))
             except Exception:
                 logger.exception("manual_new failed")

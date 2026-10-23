@@ -105,9 +105,23 @@ def _strip_list_markers(text: str) -> str:
     return _LIST_MARKER_RE.sub("", text or "")
 
 
-def _is_reasoning_model(model: str) -> bool:
-    """OpenAI reasoning models (o1, o3, o4-mini, ...) use a different token parameter."""
-    return bool(re.match(r"^o\d", model.strip()))
+# Parameters a model has refused, per provider and model, so it is not asked
+# with them again.
+_refused_parameters: dict[tuple, set] = {}
+
+
+def _refused_parameter(exc: openai.BadRequestError, optional: dict) -> str | None:
+    """The optional parameter a 400 answer objects to, when it names one.
+
+    OpenAI names it in `param` ("temperature does not support 0.2"), or in the
+    message for one it does not know at all ("Unrecognized request argument
+    supplied: reasoning_effort"), as do most OpenAI-compatible servers.
+    """
+    body = exc.body if isinstance(exc.body, dict) else {}
+    if body.get("param") in optional:
+        return body["param"]
+    message = str(body.get("message") or exc)
+    return next((name for name in optional if name in message), None)
 
 
 def _call(system: str, user: str, max_tokens: int, feature: str = "unknown", cfg: dict = None) -> str:
@@ -122,29 +136,34 @@ def _call(system: str, user: str, max_tokens: int, feature: str = "unknown", cfg
             {"role": "user", "content": user},
         ],
     }
-    reasoning_model = effective_provider == "openai" and _is_reasoning_model(effective_model)
-    # OpenAI reasoning models reject max_tokens and require max_completion_tokens.
-    if reasoning_model:
-        kwargs["max_completion_tokens"] = max_tokens
-    else:
-        kwargs["max_tokens"] = max_tokens
-    # Reasoning models only accept the default temperature, so leave theirs alone.
-    if cfg.get("temperature") is not None and not reasoning_model:
-        kwargs["temperature"] = cfg["temperature"]
-    # Thinking models otherwise spend the whole token budget on reasoning and
-    # return an empty answer. Ollama understands 'think'; a server that does not
-    # know the field rejects the request, so try again without it.
-    if effective_provider == "local":
-        kwargs["extra_body"] = {"think": False}
+    # OpenAI's reasoning models refuse max_tokens, and every OpenAI model takes
+    # max_completion_tokens. Local servers know max_tokens.
+    kwargs["max_completion_tokens" if effective_provider == "openai" else "max_tokens"] = max_tokens
+
+    # Not every model takes these. Reasoning models only accept the default
+    # temperature. reasoning_effort "none" keeps a thinking model from spending
+    # the whole token budget on reasoning and answering nothing (Ollama reads
+    # it too, and ignores its own 'think' on this endpoint), and older models
+    # do not know it. A model that refuses one is asked again without it.
+    optional = {"reasoning_effort": "none"}
+    if cfg.get("temperature") is not None:
+        optional["temperature"] = cfg["temperature"]
+    refused = _refused_parameters.setdefault((effective_provider, effective_model), set())
+    optional = {name: value for name, value in optional.items() if name not in refused}
+
     client = _get_client(effective_provider)
-    try:
-        response = client.chat.completions.create(**kwargs)
-    except openai.BadRequestError:
-        if "extra_body" not in kwargs:
-            raise
-        logger.info("local endpoint rejected the 'think' option, calling it again without")
-        del kwargs["extra_body"]
-        response = client.chat.completions.create(**kwargs)
+    while True:
+        try:
+            response = client.chat.completions.create(**kwargs, **optional)
+            break
+        except openai.BadRequestError as exc:
+            name = _refused_parameter(exc, optional)
+            if name is None:
+                raise
+            logger.info("%s model %s does not take %s, calling it again without",
+                        effective_provider, effective_model, name)
+            refused.add(name)
+            del optional[name]
     usage = response.usage
     if usage:
         try:

@@ -108,6 +108,73 @@ class CutOffAnswers(unittest.TestCase):
             self.assertEqual(self.answer("stop"), "Summary text")
 
 
+class ModelParameters(unittest.TestCase):
+    """Not every model takes every parameter. gpt-6-luna refuses max_tokens and
+    any temperature but the default; gpt-4o-mini does not know reasoning_effort;
+    a local thinking model needs reasoning_effort "none" or spends its whole
+    budget reasoning and answers nothing, and Ollama ignores 'think'."""
+
+    def setUp(self):
+        llm._refused_parameters.clear()
+        self.addCleanup(llm._refused_parameters.clear)
+
+    def call(self, create, provider="openai", model="gpt-6-luna", temperature=0.2):
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        with mock.patch.object(llm, "_get_client", return_value=client):
+            return llm._call("system", "user", 1024, feature="summarise_report",
+                             cfg={"provider": provider, "model": model, "temperature": temperature})
+
+    def answer(self, **kwargs):
+        choice = SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="Summary text"))
+        return SimpleNamespace(choices=[choice], usage=None)
+
+    def refusal(self, param, message):
+        return llm.openai.BadRequestError(message, response=mock.Mock(status_code=400),
+                                          body={"param": param, "message": message})
+
+    def test_openai_gets_max_completion_tokens_and_a_local_server_max_tokens(self):
+        create = mock.Mock(side_effect=self.answer)
+        self.call(create)
+        self.assertEqual(create.call_args.kwargs["max_completion_tokens"], 1024)
+        self.assertNotIn("max_tokens", create.call_args.kwargs)
+        self.call(create, provider="local", model="zsazsa-local")
+        self.assertEqual(create.call_args.kwargs["max_tokens"], 1024)
+
+    def test_a_local_model_is_asked_not_to_think(self):
+        create = mock.Mock(side_effect=self.answer)
+        self.assertEqual(self.call(create, provider="local", model="zsazsa-local"), "Summary text")
+        self.assertEqual(create.call_args.kwargs["reasoning_effort"], "none")
+
+    def test_a_refused_temperature_is_left_out_from_then_on(self):
+        create = mock.Mock(side_effect=[self.refusal("temperature", "Unsupported value: 'temperature' "
+                                                     "does not support 0.2 with this model."),
+                                        self.answer(), self.answer()])
+        self.assertEqual(self.call(create), "Summary text")
+        self.assertNotIn("temperature", create.call_args.kwargs)
+        self.call(create)
+        self.assertEqual(create.call_count, 3, "asked with the temperature it refused again")
+        self.assertEqual(create.call_args.kwargs["reasoning_effort"], "none")
+
+    def test_a_model_that_does_not_know_reasoning_effort_is_asked_without_it(self):
+        create = mock.Mock(side_effect=[self.refusal(None, "Unrecognized request argument supplied: reasoning_effort"),
+                                        self.answer()])
+        self.assertEqual(self.call(create, model="gpt-4o-mini"), "Summary text")
+        self.assertNotIn("reasoning_effort", create.call_args.kwargs)
+        self.assertEqual(create.call_args.kwargs["temperature"], 0.2)
+
+    def test_another_model_keeps_its_parameters(self):
+        create = mock.Mock(side_effect=[self.refusal("temperature", "temperature not supported"),
+                                        self.answer(), self.answer()])
+        self.call(create)
+        self.call(create, model="gpt-4o-mini")
+        self.assertEqual(create.call_args.kwargs["temperature"], 0.2)
+
+    def test_any_other_bad_request_is_raised(self):
+        create = mock.Mock(side_effect=self.refusal("messages", "This model's maximum context length is exceeded."))
+        with self.assertRaises(llm.openai.BadRequestError):
+            self.call(create)
+
+
 class BriefingStoryFormatting(unittest.TestCase):
     """A story the model numbered renders as an <ol>, which loses the label styling.
 

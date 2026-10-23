@@ -63,7 +63,7 @@ docker compose logs -f webapp                        # follow the web app
 tail -f volumes/data/analyser.log                    # zsazsa's own log
 docker compose restart                               # after editing the configuration
 docker compose exec webapp python run_analyser.py    # run the analyser now
-git pull && docker compose up -d --build             # upgrade
+git pull && docker compose build --pull && docker compose up -d   # upgrade
 docker compose down                                  # stop; docker/volumes is kept
 ```
 

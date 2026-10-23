@@ -4292,13 +4292,20 @@ def create_manual_collection_event(data: dict) -> str:
 
     summary = (data.get("summary") or "").strip()
     if summary:
-        ai_report = MISPEventReport()
-        ai_report.name = f"{AI_SUMMARY_PREFIX} {(info or 'Manual entry')[:80]}"
-        ai_report.content = summary
-        ai_report.distribution = 5
-        _check(misp.add_event_report(created.id, ai_report), "add AI summary report")
+        add_ai_summary_report(misp, created.id, info or "Manual entry", summary)
 
     return uuid
+
+
+def add_ai_summary_report(misp, event_id, title: str, summary: str) -> None:
+    """Add an AI summary to an event, as the report the collection page and the
+    briefing recognise one by."""
+    from pymisp import MISPEventReport
+    report = MISPEventReport()
+    report.name = f"{AI_SUMMARY_PREFIX} {title[:80]}"
+    report.content = summary
+    report.distribution = 5
+    _check(misp.add_event_report(event_id, report), "add AI summary report")
 
 
 NEWSLETTER_PENDING_TAG = 'zsazsa:newsletter-status="pending-review"'

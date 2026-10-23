@@ -9,6 +9,9 @@
 
 ### Changed
 
+- Newer OpenAI models such as gpt-6-luna work: OpenAI calls use `max_completion_tokens`, and a temperature or `reasoning_effort` a model refuses is left out, instead of the request failing.
+- A local model (on Ollama) no longer spends its token budget reasoning and returning an empty summary: zsazsa now turns thinking off with `reasoning_effort`, which Ollama's OpenAI endpoint reads, instead of `think`, which it ignores.
+- The manual collection entry locks its summary while an AI summary is being written, and an event created before the summary is done gets it when it is, shows the Markdown preview as high as the editor in split view, and links to the Collection sources for a missing source.
 - The PIR list hides rejected PIRs and the GIR list hides retired GIRs.
 - The data collection table shows the ten words most titles share. A click on one searches for it.
 - On the data collection page, the actions of an event wait while an AI summary is being written for it, and come back when the summary ends.

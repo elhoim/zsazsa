@@ -206,11 +206,16 @@ Everything the wizard does not cover is on Settings > Configuration and Settings
 
 Read [CHANGELOG.md](CHANGELOG.md) first: a release can come with a migration you need to run.
 
-With Docker, from the `docker` folder:
+With Docker, from the zsazsa folder:
 
 ```bash
-git pull && docker compose up -d --build
+git pull
+cd docker
+docker compose build --pull
+docker compose up -d
 ```
+
+`--pull` fetches the latest Python base image, with its security updates.
 
 For a standard installation, go to the installation directory and pull as the web user:
 

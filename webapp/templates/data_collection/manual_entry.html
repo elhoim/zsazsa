@@ -33,7 +33,11 @@
               <option value="{{ s | e }}">{{ s }}</option>
               {% endfor %}
             </select>
-            <div class="form-text">Which manual source category did this intelligence come from?</div>
+            <div class="form-text">
+              <i class="fas fa-circle-info me-1"></i>Where this came from, such as a newsletter, a partner or a phone call.
+              Not in the list? A site admin adds manual sources under Settings,
+              <a href="{{ url_for('collection_sources.index') }}">Collection sources</a>.
+            </div>
           </div>
 
           <div class="mb-3">
@@ -171,9 +175,14 @@
           <p class="text-muted small mb-3">
             Creates a MISP event on the webapp server. After saving you can add file attachments.
           </p>
-          <button type="submit" class="btn btn-primary w-100">
+          <input type="hidden" name="summary_job" id="summary-job" autocomplete="off">
+          <button type="submit" class="btn btn-primary w-100" id="create-event-btn">
             <i class="fas fa-floppy-disk me-1"></i> Create event
           </button>
+          <div class="form-text text-center" id="create-event-wait" hidden>
+            <i class="fas fa-spinner fa-spin me-1"></i>The AI summary is still being written.
+            It goes into the event when it is done.
+          </div>
           <a href="{{ url_for('data_collection.index') }}" class="btn btn-outline-secondary w-100 mt-2">
             Cancel
           </a>
@@ -270,7 +279,14 @@ document.addEventListener('DOMContentLoaded', function() {
       previewPane.style.display = '';
       renderPreview();
     }
+    previewPane.style.height = mode === 'split' ? descTA.offsetHeight + 'px' : '';
   }
+
+  // Side by side, the preview keeps the editor's height, also when the editor
+  // is resized, and scrolls; on its own it is as long as its content.
+  new ResizeObserver(function() {
+    if (currentMode === 'split') previewPane.style.height = descTA.offsetHeight + 'px';
+  }).observe(descTA);
 
   editTab.addEventListener('click', function() { setTab('edit'); });
   previewTab.addEventListener('click', function() { setTab('preview'); });
@@ -356,15 +372,38 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     var titleInput = document.querySelector('input[name="title"]');
     var title = titleInput ? titleInput.value.trim() : '';
+    var summary = document.getElementById('summary');
+    var createBtn = document.getElementById('create-event-btn');
+    var createWait = document.getElementById('create-event-wait');
+    var summaryJob = document.getElementById('summary-job');
+    var originalHtml = btn.innerHTML;
     status.textContent = 'Queueing summary…';
     status.className = 'form-text';
     status.style.display = '';
-    btn.disabled = true;
+
+    /* The summary is written into the box below when the job is done, so the
+       box is locked meanwhile. The event can still be created: the form then
+       names the job, and the server has it write the summary into the event.
+       Creating it asks first, since the summary is not in the box yet. */
+    function busy(on) {
+      btn.disabled = on;
+      btn.innerHTML = on ? '<i class="fas fa-spinner fa-spin me-1"></i>Generating summary' : originalHtml;
+      summary.readOnly = on;
+      createWait.hidden = !on;
+      if (on) {
+        createBtn.dataset.submitConfirm = 'The AI summary is still being written. Create the event now? '
+                                        + 'The summary goes into it when it is done.';
+      } else {
+        delete createBtn.dataset.submitConfirm;
+        summaryJob.value = '';
+      }
+    }
+    busy(true);
 
     function fail(message) {
       status.textContent = message;
       status.className = 'form-text text-danger';
-      btn.disabled = false;
+      busy(false);
     }
 
     fetch(SCRIPT_ROOT + '/api/summarise-content', {
@@ -382,11 +421,12 @@ document.addEventListener('DOMContentLoaded', function() {
       // keeps reporting even if this page is left before the model answers.
       if (window.zsazsaJobsChanged) zsazsaJobsChanged();
       status.textContent = 'Generating summary… (job ' + data.job_id.slice(0, 8) + ')';
+      summaryJob.value = data.job_id;
       zsazsaFollowJob(data.job_id, function(job) {
-        document.getElementById('summary').value = (job.result || {}).summary || '';
+        summary.value = (job.result || {}).summary || '';
         status.textContent = 'Summary generated.';
         status.className = 'form-text text-success';
-        btn.disabled = false;
+        busy(false);
       }, fail);
     })
     .catch(function(err) {
