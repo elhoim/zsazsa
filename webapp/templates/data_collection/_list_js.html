@@ -506,10 +506,10 @@
   }
 
   /* ── Top words in the titles ──
-     The ten words most titles share, among the events the other filters let
-     through. The search is left out of that, or a click would narrow the chart
-     down to the word itself. A title counts each word once. A click searches for
-     the word, a second click clears the search again. */
+     The ten words most titles share, among the events the filters and the
+     search let through. A title counts each word once. A click searches for the
+     word, which keeps every title that has it, so the word stays in the chart and
+     a second click clears the search again. */
   var TITLE_STOP_WORDS = new Set((
     'the and for with from that this are was were has have had its into over after about more new ' +
     'how what why who your you our their they them will can not but all out than been via now amid ' +
@@ -657,10 +657,11 @@
         }
         else { if (!date || date < cutoffStr) ok = false; }
       }
-      // The search last, so the word chart sees what every other filter lets through.
-      if (ok) titlesForWords.push(row.dataset.title || '');
       if (ok && q && title.indexOf(q) === -1) ok = false;
-      if (ok) totalMatching++;
+      if (ok) {
+        totalMatching++;
+        titlesForWords.push(row.dataset.title || '');
+      }
       // Record whether the row passes the filters before the display cap is
       // applied, so counts (e.g. the exclusion reject count) can be based on
       // the full matching set rather than just the rendered page.

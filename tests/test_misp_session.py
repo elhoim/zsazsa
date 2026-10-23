@@ -28,12 +28,12 @@ def _php_string(text):
     return b's:%d:"%s";' % (len(data), data)
 
 
-def _php_session(expires_in=600, email="analyst@misp.test"):
+def _php_session(expires_in=600, email="analyst@misp.test", countdown=10):
     """A MISP session as PHP's redis handler stores it, with the expiry CakePHP
     keeps in Config.time `expires_in` seconds from now."""
     config_entry = (b"Config|a:3:{" + _php_string("userAgent") + _php_string("abc")
                     + _php_string("time") + b"i:%d;" % int(time.time() + expires_in)
-                    + _php_string("countdown") + b"i:10;}")
+                    + _php_string("countdown") + b"i:%d;}" % countdown)
     auth = (b"Auth|a:1:{" + _php_string("User") + b"a:2:{" + _php_string("email")
             + _php_string(email) + _php_string("id") + b"i:7;}}")
     return config_entry + auth
@@ -71,8 +71,10 @@ class KeepAlive(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.app = Flask(__name__)
 
-    def keep_alive(self, get, session_id="sid"):
+    def keep_alive(self, get, session_id="sid", session=None):
+        """``session`` is what Redis holds for it, an hour left by default."""
         with self.app.test_request_context("/", headers={"User-Agent": "Firefox/140"}), \
+             mock.patch.object(misp_session, "_redis_get", return_value=session or _php_session(3600)), \
              mock.patch.object(misp_session.requests, "get", get):
             misp_session.keep_misp_session_alive("MISP-abc", session_id)
 
@@ -82,7 +84,7 @@ class KeepAlive(unittest.TestCase):
         get.assert_called_once_with(
             "https://misp.test/users/view/me.json", cookies={"MISP-abc": "sid"},
             headers={"Accept": "application/json", "User-Agent": "Firefox/140"},
-            timeout=misp_session._KEEPALIVE_TIMEOUT_S, verify=False, allow_redirects=False)
+            timeout=misp_session._VIEW_ME_TIMEOUT_S, verify=False, allow_redirects=False)
 
     def test_a_session_is_refreshed_at_most_once_every_few_minutes(self):
         get = mock.Mock(return_value=mock.Mock(status_code=200))
@@ -92,6 +94,23 @@ class KeepAlive(unittest.TestCase):
         misp_session._last_keepalive["sid"] -= misp_session._KEEPALIVE_EVERY_S
         self.keep_alive(get)
         self.assertEqual(get.call_count, 2)
+
+    def test_a_session_about_to_run_out_is_refreshed_without_waiting_its_turn(self):
+        """With a Session.timeout of five minutes, waiting five minutes between
+        refreshes signed out a user who kept clicking."""
+        get = mock.Mock(return_value=mock.Mock(status_code=200))
+        self.keep_alive(get, session=_php_session(240))
+        self.keep_alive(get, session=_php_session(240))
+        self.assertEqual(get.call_count, 2)
+
+    def test_the_request_that_would_renew_the_session_id_is_not_sent(self):
+        """With Session.autoRegenerate on, the request that takes Config.countdown
+        to zero gets the new session ID, and the browser's one is deleted."""
+        get = mock.Mock(return_value=mock.Mock(status_code=200))
+        self.keep_alive(get, session=_php_session(3600, countdown=1))
+        get.assert_not_called()
+        self.keep_alive(get, session=_php_session(3600, countdown=2))
+        get.assert_called_once()
 
     def test_each_session_has_its_own_turn(self):
         get = mock.Mock(return_value=mock.Mock(status_code=200))

@@ -5,7 +5,8 @@ has and decide where identities are read from. Any MISP user could open them,
 copy the keys and point the session Redis elsewhere to become anyone. These
 pin the gate on both blueprints, with the user identified the way a real
 request is, through the MISP session. The role itself is asked of MISP, since
-the session keeps the one the user had when they logged in.
+the session keeps the one the user had when they logged in, and it is asked
+with the user's own session: MISP_WEBAPP_KEY may not look up other users.
 
     python -m unittest tests.test_settings_access
 """
@@ -15,7 +16,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import requests
 from flask import Flask, g
+from pymisp import PyMISP
 
 import config as _config
 from webapp import collection_cache, create_app, misp_session, misp_store
@@ -56,9 +59,13 @@ class SettingsAccess(unittest.TestCase):
     def as_user(self, user, role_in_misp=None):
         """Sign in with ``user`` in the MISP session. ``role_in_misp`` is the role
         MISP has for them now, the one from the session when not given."""
-        self.user_role = mock.Mock(return_value=role_in_misp or (user or {}).get("Role"))
+        record = {"User": user, "Role": role_in_misp or (user or {}).get("Role")}
+        self.view_own_record = mock.Mock(return_value=mock.Mock(
+            status_code=200, url="https://misp.test/users/view/me.json", json=mock.Mock(return_value=record)))
+        self.session = {"Config": {"countdown": 10}, "Auth": {"User": user}}
         for patcher in (mock.patch.object(misp_session, "get_misp_user", return_value=user),
-                        mock.patch.object(misp_store, "user_role", self.user_role)):
+                        mock.patch.object(misp_session, "_read_session", return_value=self.session),
+                        mock.patch.object(misp_session, "_view_own_record", self.view_own_record)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -115,10 +122,35 @@ class SettingsAccess(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers["Cache-Control"], "no-store")
 
-    def test_the_role_is_asked_of_misp_for_the_user_in_the_session(self):
+    def test_the_role_is_asked_of_misp_with_the_users_own_session(self):
         self.as_user(SITE_ADMIN)
         self.client.get("/config/sources/")
-        self.user_role.assert_called_once_with("1")
+        self.view_own_record.assert_called_once_with("MISP-test", "session-id")
+
+    def test_a_site_admin_gets_in_when_the_zsazsa_key_cannot_look_up_users(self):
+        """Issue #71: MISP shows another user's record only to a site admin, and
+        MISP_WEBAPP_KEY need not be one. The check must not depend on it."""
+        self.as_user(SITE_ADMIN)
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.get_user.return_value = {"errors": (404, {"message": "Invalid user or not authorised."})}
+        with mock.patch.object(misp_store, "_misp", return_value=misp):
+            self.assertEqual(self.client.get("/config/sources/").status_code, 200)
+
+    def test_the_request_that_would_renew_the_session_id_is_not_sent(self):
+        """With Session.autoRegenerate on, asking MISP could be the request that
+        gives the session a new ID, which zsazsa would get instead of the browser."""
+        self.as_user(SITE_ADMIN)
+        self.session["Config"]["countdown"] = 1
+        resp = self.client.get("/config/sources/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Open any page in MISP first", resp.get_data(as_text=True))
+        self.view_own_record.assert_not_called()
+
+    def test_a_session_misp_has_ended_keeps_the_settings_closed(self):
+        """MISP sends an ended session to its login page."""
+        self.as_user(SITE_ADMIN)
+        self.view_own_record.return_value.status_code = 302
+        self.assertEqual(self.client.get("/config/sources/").status_code, 403)
 
     def test_a_user_made_site_admin_since_logging_in_gets_in(self):
         self.as_user(ANALYST, role_in_misp=ADMIN_ROLE)
@@ -130,7 +162,7 @@ class SettingsAccess(unittest.TestCase):
 
     def test_the_settings_stay_closed_when_misp_cannot_be_asked(self):
         self.as_user(SITE_ADMIN)
-        self.user_role.side_effect = RuntimeError("get user: 403")
+        self.view_own_record.side_effect = requests.ConnectionError("MISP is down")
         resp = self.client.get("/config/sources/")
         self.assertEqual(resp.status_code, 403)
         self.assertIn("Could not check your role in MISP", resp.get_data(as_text=True))
@@ -163,27 +195,6 @@ class SiteAdminFlag(unittest.TestCase):
                                 (False, False), (0, False), ("0", False), (None, False)):
             with self.subTest(value=value):
                 self.assertIs(self.is_admin(value), expected)
-
-
-class RoleInMisp(unittest.TestCase):
-    def role(self, response, user_id="7"):
-        misp = mock.Mock()
-        misp.get_user.return_value = response
-        with mock.patch.object(misp_store, "_misp", return_value=misp):
-            role = misp_store.user_role(user_id)
-        misp.get_user.assert_called_once_with(user_id)
-        return role
-
-    def test_the_role_comes_with_its_permissions(self):
-        self.assertEqual(self.role({"User": {"id": "7"}, "Role": ADMIN_ROLE}), ADMIN_ROLE)
-
-    def test_a_refusal_from_misp_is_an_error_not_a_role(self):
-        with self.assertRaises(RuntimeError):
-            self.role({"errors": (403, "Not allowed")})
-
-    def test_a_session_without_a_user_id_is_not_looked_up(self):
-        with self.assertRaises(ValueError):
-            misp_store.user_role("")
 
 
 if __name__ == "__main__":

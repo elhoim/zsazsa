@@ -23,6 +23,12 @@
     "temperature": 0.2,
     "prompt": "daily_briefing_story.md"
   },
+  "draft_briefing_summary": {
+    "provider": "openai",
+    "model": "",
+    "temperature": null,
+    "prompt": "daily_briefing_summary.md"
+  },
   "review_briefing_relevance": {
     "provider": "local",
     "model": "",

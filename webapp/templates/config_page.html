@@ -769,6 +769,112 @@
               </div>
             </div>
 
+            <div class="accordion-item">
+              <h2 class="accordion-header d-flex align-items-center">
+                <button class="accordion-button collapsed flex-grow-1 w-auto" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#llm-provider-ai-connector">
+                  <i class="fas fa-plug me-2"></i>AI-connector MISP module
+                </button>
+                <div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 fs-6 fw-normal">
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="aic-enabled"
+                           {{ 'checked' if cfg.AI_CONNECTOR_ENABLED }}>
+                    <label class="form-check-label small" for="aic-enabled">Enabled</label>
+                  </div>
+                  {# Where the other providers have their default button, so the switches line up. #}
+                  <span class="btn btn-sm invisible" aria-hidden="true"><i class="fas fa-star me-1"></i>Default provider</span>
+                </div>
+              </h2>
+              <div id="llm-provider-ai-connector" class="accordion-collapse collapse">
+                <div class="accordion-body">
+                  <p class="text-muted small">
+                    The <a href="https://github.com/cudeso/ai-connector" target="_blank" rel="noopener">ai-connector</a>
+                    misp-modules server, with the settings MISP has for it under <code>Plugin.AI_*</code>. The module runs its
+                    own prompts, so it cannot be the default provider or be chosen for a feature.
+                  </p>
+                  <div class="row g-3 mb-3">
+                    <div class="col-md-8">
+                      <label class="form-label" for="aic-url">Network location</label>
+                      <input type="url" id="aic-url" class="form-control font-monospace"
+                             value="{{ cfg.AI_CONNECTOR_URL }}" placeholder="http://ai-connector">
+                      <div class="form-text">The URL of the module server, without its port. <code>AI_services_url</code></div>
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label" for="aic-port">Port</label>
+                      <input type="number" id="aic-port" class="form-control" min="1" max="65535"
+                             value="{{ cfg.AI_CONNECTOR_PORT }}">
+                      <div class="form-text"><code>AI_services_port</code></div>
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label" for="aic-timeout">Timeout (s)</label>
+                      <input type="number" id="aic-timeout" class="form-control" min="1"
+                             value="{{ cfg.AI_CONNECTOR_TIMEOUT }}">
+                      <div class="form-text"><code>AI_timeout</code></div>
+                    </div>
+                  </div>
+                  <div class="mb-3">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="aic-ssl-verify-peer"
+                             {{ 'checked' if cfg.AI_CONNECTOR_SSL_VERIFY_PEER }}>
+                      <label class="form-check-label" for="aic-ssl-verify-peer">Verify the certificate</label>
+                      <span class="form-text ms-1"><code>AI_ssl_verify_peer</code></span>
+                    </div>
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="aic-ssl-verify-host"
+                             {{ 'checked' if cfg.AI_CONNECTOR_SSL_VERIFY_HOST }}>
+                      <label class="form-check-label" for="aic-ssl-verify-host">Check that the certificate matches the host name</label>
+                      <span class="form-text ms-1"><code>AI_ssl_verify_host</code></span>
+                    </div>
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="aic-ssl-allow-self-signed"
+                             {{ 'checked' if cfg.AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED }}>
+                      <label class="form-check-label" for="aic-ssl-allow-self-signed">Accept a self-signed certificate</label>
+                      <span class="form-text ms-1"><code>AI_ssl_allow_self_signed</code></span>
+                    </div>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label" for="aic-ssl-cafile">CA file</label>
+                    <input type="text" id="aic-ssl-cafile" class="form-control font-monospace"
+                           value="{{ cfg.AI_CONNECTOR_SSL_CAFILE }}" placeholder="/etc/ssl/certs/ai-connector-ca.pem">
+                    <div class="form-text">Absolute path of the CA file to verify the module's certificate with. <code>AI_ssl_cafile</code></div>
+                  </div>
+                  <div class="border-top pt-3">
+                    <div class="mb-3">
+                      <label class="form-label" for="aic-api-base">LLM endpoint</label>
+                      <input type="url" id="aic-api-base" class="form-control font-monospace"
+                             value="{{ cfg.AI_CONNECTOR_OPENAI_API_BASE }}" placeholder="http://127.0.0.1:11434/v1">
+                      <div class="form-text">Base URL of the OpenAI-compatible endpoint the module talks to, sent to it with every request. <code>AI_openai_api_base</code></div>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" for="aic-api-key">API key</label>
+                      <div class="input-group">
+                        <input type="password" id="aic-api-key" class="form-control font-monospace api-key-input"
+                               placeholder="{{ 'Configured, leave blank to keep' if cfg.AI_CONNECTOR_API_KEY }}" autocomplete="new-password">
+                        <button class="btn btn-outline-secondary api-key-toggle" type="button" title="Show/hide"><i class="fas fa-eye"></i></button>
+                      </div>
+                      {% if cfg.AI_CONNECTOR_API_KEY %}{{ remove_secret('AI_CONNECTOR_API_KEY', 'Remove the stored key') }}{% endif %}
+                      <div class="form-text">Leave empty if the endpoint does not require authentication. <code>AI_api_key</code></div>
+                    </div>
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="form-label" for="aic-model-id">Model</label>
+                        <input type="text" id="aic-model-id" class="form-control font-monospace"
+                               value="{{ cfg.AI_CONNECTOR_MODEL_ID }}" placeholder="gemma4:12b">
+                        <div class="form-text">The model at the LLM endpoint, with its tag on Ollama: <code>llama3.1:latest</code>, where the Local LLM settings also take <code>llama3.1</code>. The module looks for the name among the models the endpoint lists, and Ollama lists them with their tag. <code>AI_model_id</code></div>
+                      </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-3 align-items-center">
+                      <button type="button" class="btn btn-sm btn-outline-secondary" id="test-aic-btn">
+                        <i class="fas fa-plug me-1"></i>Test connection
+                      </button>
+                      <span class="small" id="test-aic-result"></span>
+                    </div>
+                    <div class="form-text mt-2">The test asks the module whether the LLM endpoint serves the model, with the values entered above, even before saving. Nothing is generated.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -837,6 +943,18 @@
                 </td>
               </tr>
               {% endfor %}
+              {# Set by the module itself, so it has nothing to save. #}
+              <tr id="aic-feature-row" class="{{ 'text-muted opacity-50' if not cfg.AI_CONNECTOR_ENABLED }}"
+                  title="Runs in the AI-connector MISP module with its own prompt. The model is set under the module above.">
+                <td class="py-2 ps-3">
+                  <div class="fw-semibold small">Summarise MISP event</div>
+                  <div class="text-muted" style="font-size:.78rem;">Summarises a whole MISP event in the AI-connector MISP module, with the module's own prompt.</div>
+                </td>
+                <td class="small"><i class="fas fa-plug me-1"></i>AI-connector MISP module</td>
+                <td class="small font-monospace" id="aic-feature-model">{{ cfg.AI_CONNECTOR_MODEL_ID }}</td>
+                <td></td>
+                <td></td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1715,6 +1833,56 @@
 
   featureProviders.forEach((sel) => sel.addEventListener('change', paintFeatureRows));
 
+  // The AI-connector module has a fixed feature row, greyed out while it is off.
+  const aicEnabled = document.getElementById('aic-enabled');
+  const aicModel = document.getElementById('aic-model-id');
+  const aicRow = document.getElementById('aic-feature-row');
+  function paintAiConnectorRow() {
+    aicRow.classList.toggle('text-muted', !aicEnabled.checked);
+    aicRow.classList.toggle('opacity-50', !aicEnabled.checked);
+    document.getElementById('aic-feature-model').textContent = aicModel.value.trim();
+  }
+  aicEnabled.addEventListener('change', paintAiConnectorRow);
+  aicModel.addEventListener('input', paintAiConnectorRow);
+
+  function aiConnectorSettings() {
+    return {
+      enabled: aicEnabled.checked,
+      url: document.getElementById('aic-url').value,
+      port: document.getElementById('aic-port').value,
+      timeout: document.getElementById('aic-timeout').value,
+      ssl_verify_peer: document.getElementById('aic-ssl-verify-peer').checked,
+      ssl_verify_host: document.getElementById('aic-ssl-verify-host').checked,
+      ssl_allow_self_signed: document.getElementById('aic-ssl-allow-self-signed').checked,
+      ssl_cafile: document.getElementById('aic-ssl-cafile').value,
+      openai_api_base: document.getElementById('aic-api-base').value,
+      api_key: document.getElementById('aic-api-key').value,
+      remove_api_key: !!document.getElementById('remove-AI_CONNECTOR_API_KEY')?.checked,
+      model_id: aicModel.value,
+    };
+  }
+
+  const testAicBtn = document.getElementById('test-aic-btn');
+  const testAicResult = document.getElementById('test-aic-result');
+  testAicBtn.addEventListener('click', async () => {
+    testAicBtn.disabled = true;
+    testAicResult.textContent = 'Testing…';
+    testAicResult.className = 'small text-muted';
+    let data;
+    try {
+      const resp = await fetch(SCRIPT_ROOT + '/config/test-ai-connector', {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify(aiConnectorSettings()),
+      });
+      data = await zsazsaReadJson(resp);
+    } catch (e) {
+      data = {ok: false, error: 'The test could not run: ' + zsazsaErrorText(e)};
+    }
+    testAicBtn.disabled = false;
+    testAicResult.textContent = data.ok ? data.message : (data.error || 'Failed');
+    testAicResult.className = 'small ' + (data.ok ? 'text-success' : 'text-danger');
+  });
+
   if (saveAiBtn) {
     saveAiBtn.addEventListener('click', () => {
       const providerSettings = {
@@ -1731,6 +1899,7 @@
           remove_api_key: !!document.getElementById('remove-LOCAL_LLM_API_KEY')?.checked,
           model: providers.local.model.value,
         },
+        ai_connector: aiConnectorSettings(),
       };
       const features = {};
       document.querySelectorAll('#ai-features-table tbody tr[data-feature-id]').forEach(row => {

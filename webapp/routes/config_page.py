@@ -13,7 +13,7 @@ import requests
 import config as _config
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, send_file, url_for
 from markupsafe import escape
-from core import flowintel_client
+from core import ai_connector, flowintel_client
 from core.atomic_write import write_atomically
 from webapp import audit, misp_session, misp_store, newsletter_parsers
 from webapp.collection_cache import _split_tags, filter_events_by_org, partner_tag_filter
@@ -35,6 +35,27 @@ _LOGO_MAX_BYTES = 2 * 1024 * 1024
 _CONFIG_FILE = _ROOT / "config" / "__init__.py"
 _BACKUP_FILE = _ROOT / "config" / "__init__.py.backup"
 _PROMPTS_DIR = _ROOT / "zsazsaprompts"
+
+# The ai-connector MISP module, with the defaults of MISP's Plugin.AI_* settings
+# except the port, where 6666 is the stock misp-modules server, and the model,
+# which MISP sets to one that may not be on the endpoint.
+AI_CONNECTOR_DEFAULTS = {
+    "AI_CONNECTOR_ENABLED": False,
+    "AI_CONNECTOR_URL": "http://127.0.0.1",
+    "AI_CONNECTOR_PORT": 6667,
+    "AI_CONNECTOR_TIMEOUT": 300,
+    "AI_CONNECTOR_SSL_VERIFY_PEER": True,
+    "AI_CONNECTOR_SSL_VERIFY_HOST": True,
+    "AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED": False,
+    "AI_CONNECTOR_SSL_CAFILE": "",
+    "AI_CONNECTOR_OPENAI_API_BASE": "http://127.0.0.1:11434/v1",
+    "AI_CONNECTOR_API_KEY": "",
+    "AI_CONNECTOR_MODEL_ID": "",
+}
+
+
+def _ai_connector_settings() -> dict:
+    return {name: getattr(_config, name, default) for name, default in AI_CONNECTOR_DEFAULTS.items()}
 
 # CTI products that can be linked to a Flowintel case template per instance.
 FLOWINTEL_CASE_TEMPLATE_PRODUCTS = [
@@ -236,6 +257,7 @@ def _read() -> dict:
         "LOCAL_LLM_API_KEY": getattr(_config, "LOCAL_LLM_API_KEY", ""),
         "LOCAL_LLM_MODEL": getattr(_config, "LOCAL_LLM_MODEL", ""),
         "LLM_DEFAULT_PROVIDER": getattr(_config, "LLM_DEFAULT_PROVIDER", "openai"),
+        **_ai_connector_settings(),
         "NOTIFICATION_CHANNELS": _read_notification_channels(),
         "SMTP_HOST": getattr(_config, "SMTP_HOST", ""),
         "SMTP_PORT": getattr(_config, "SMTP_PORT", 587),
@@ -527,6 +549,8 @@ def _write(values):
         flowintel_instances_repr = "[\n" + "\n".join(fi_lines) + "\n]"
     else:
         flowintel_instances_repr = "[]"
+    ai_connector_lines = "\n".join(f"{name} = {values.get(name, default)!r}"
+                                   for name, default in AI_CONNECTOR_DEFAULTS.items())
     content = f"""SECRET_KEY = {_config.SECRET_KEY!r}
 
 # MISP - scraper / analyser pipeline. Optional: set MISP_SCRAPER_ENABLED to
@@ -561,6 +585,11 @@ LOCAL_LLM_ENABLED = {bool(values.get('LOCAL_LLM_ENABLED', False))}
 LOCAL_LLM_URL = {values.get('LOCAL_LLM_URL', '')!r}
 LOCAL_LLM_API_KEY = {values.get('LOCAL_LLM_API_KEY', '')!r}
 LOCAL_LLM_MODEL = {values.get('LOCAL_LLM_MODEL', '')!r}
+
+# The ai-connector MISP module (https://github.com/cudeso/ai-connector), a
+# misp-modules server, with the same settings as MISP's Plugin.AI_*. It runs
+# its own prompts, so it is not a provider the AI features can choose.
+{ai_connector_lines}
 
 # Notification channels. 'type' is 'mattermost', 'teams' (a Teams Workflows
 # webhook URL) or 'email' (with 'recipient' instead of 'url').
@@ -808,6 +837,7 @@ def index():
             "LOCAL_LLM_API_KEY": getattr(_config, "LOCAL_LLM_API_KEY", ""),
             "LOCAL_LLM_MODEL": getattr(_config, "LOCAL_LLM_MODEL", ""),
             "LLM_DEFAULT_PROVIDER": getattr(_config, "LLM_DEFAULT_PROVIDER", "openai"),
+            **_ai_connector_settings(),
             "NOTIFICATION_CHANNELS": _read_notification_channels(),
             # The scraper queue is configured under Collection sources. Carried
             # through here because the file is rewritten whole: left out, each
@@ -1853,6 +1883,51 @@ def save_prompts():
     return jsonify({"ok": True})
 
 
+def _posted_ai_connector(posted, current):
+    """The ai-connector settings from the AI tab, as (settings, error)."""
+    try:
+        port = int(posted.get("port"))
+        timeout = int(posted.get("timeout"))
+    except (TypeError, ValueError):
+        port = timeout = 0
+    if not 1 <= port <= 65535:
+        return None, "The AI-connector port must be a number between 1 and 65535."
+    if timeout < 1:
+        return None, "The AI-connector timeout must be a number of seconds."
+    api_base = (posted.get("openai_api_base") or "").strip()
+    api_key = "" if posted.get("remove_api_key") else _kept_secret(
+        (posted.get("api_key") or "").strip(), current["AI_CONNECTOR_API_KEY"],
+        api_base, current["AI_CONNECTOR_OPENAI_API_BASE"])
+    if api_key is None:
+        return None, _reenter_message("AI-connector API key")
+    return {
+        "AI_CONNECTOR_ENABLED": bool(posted.get("enabled")),
+        "AI_CONNECTOR_URL": (posted.get("url") or "").strip().rstrip("/"),
+        "AI_CONNECTOR_PORT": port,
+        "AI_CONNECTOR_TIMEOUT": timeout,
+        "AI_CONNECTOR_SSL_VERIFY_PEER": bool(posted.get("ssl_verify_peer")),
+        "AI_CONNECTOR_SSL_VERIFY_HOST": bool(posted.get("ssl_verify_host")),
+        "AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED": bool(posted.get("ssl_allow_self_signed")),
+        "AI_CONNECTOR_SSL_CAFILE": (posted.get("ssl_cafile") or "").strip(),
+        "AI_CONNECTOR_OPENAI_API_BASE": api_base,
+        "AI_CONNECTOR_API_KEY": api_key,
+        "AI_CONNECTOR_MODEL_ID": (posted.get("model_id") or "").strip(),
+    }, None
+
+
+@bp.route("/config/test-ai-connector", methods=["POST"])
+@rate_limited("config_test_ai_connector", limit=20, window_s=60)
+def test_ai_connector():
+    """Ping the AI-connector module with the settings on the page, saved or not."""
+    data, err = _json_object()
+    if err:
+        return err
+    settings, error = _posted_ai_connector(data, _ai_connector_settings())
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify(ai_connector.ping(settings))
+
+
 @bp.route("/config/save-ai-features", methods=["POST"])
 @rate_limited("config_save_ai_features", limit=20, window_s=60)
 def save_ai_features():
@@ -1913,6 +1988,12 @@ def save_ai_features():
                 default_provider = (providers.get("default") or "").strip()
                 if default_provider in PROVIDERS:
                     current["LLM_DEFAULT_PROVIDER"] = default_provider
+                # The setup wizard does not show the module, so it sends nothing for it.
+                if isinstance(providers.get("ai_connector"), dict):
+                    connector, error = _posted_ai_connector(providers["ai_connector"], current)
+                    if error:
+                        return jsonify({"ok": False, "error": error}), 400
+                    current.update(connector)
             _write(current)
             importlib.reload(_config)
 

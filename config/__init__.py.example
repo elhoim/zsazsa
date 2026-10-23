@@ -35,6 +35,21 @@ LOCAL_LLM_URL = ''
 LOCAL_LLM_API_KEY = ''
 LOCAL_LLM_MODEL = ''
 
+# The ai-connector MISP module (https://github.com/cudeso/ai-connector), a
+# misp-modules server, with the same settings as MISP's Plugin.AI_*. It runs
+# its own prompts, so it is not a provider the AI features can choose.
+AI_CONNECTOR_ENABLED = False
+AI_CONNECTOR_URL = 'http://127.0.0.1'
+AI_CONNECTOR_PORT = 6667
+AI_CONNECTOR_TIMEOUT = 300
+AI_CONNECTOR_SSL_VERIFY_PEER = True
+AI_CONNECTOR_SSL_VERIFY_HOST = True
+AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED = False
+AI_CONNECTOR_SSL_CAFILE = ''
+AI_CONNECTOR_OPENAI_API_BASE = 'http://127.0.0.1:11434/v1'
+AI_CONNECTOR_API_KEY = ''
+AI_CONNECTOR_MODEL_ID = ''
+
 # Notification channels. 'type' is 'mattermost', 'teams' (a Teams Workflows
 # webhook URL) or 'email' (with 'recipient' instead of 'url').
 NOTIFICATION_CHANNELS = [

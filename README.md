@@ -484,13 +484,13 @@ SSO against MISP requires three things:
 
 All three failures look the same from the outside: nobody is ever identified, and with the redirect on it resembles a login loop. The **Test single sign-on** button in the Single sign-on section tells them apart. It reports which cookie name zsazsa expects, which cookies your browser actually sent, whether Redis is reachable and on which database, and whether a session was found. When the sessions turn out to be in another database of the same Redis, it names that database and the setting to change.
 
-A session lasts as long as MISP lets it. MISP ends a session when `Session.timeout` passes, and zsazsa treats it as ended at the same moment, even when its Redis key lives on for `Session.cookieTimeout`. Using zsazsa counts as activity: while you work in it, opening pages and taking actions, zsazsa asks MISP for your own user record with your session cookie every five minutes (`/users/view/me.json`), and MISP changes the session's expiry. What a page fetches in the background, such as the job list in the top bar, does not count, so a zsazsa tab left open does not keep the session alive. zsazsa never writes the session itself. 
+A session lasts as long as MISP lets it. MISP ends a session when `Session.timeout` passes, and zsazsa treats it as ended at the same moment, even when its Redis key lives on for `Session.cookieTimeout`. Using zsazsa counts as activity: while you work in it, opening pages and taking actions, zsazsa asks MISP for your own user record with your session cookie every five minutes (`/users/view/me.json`), or sooner when less than five minutes are left, and MISP changes the session's expiry. With `Session.autoRegenerate` on, zsazsa skips the request that would give the session a new ID, and leaves that to MISP's own pages. What a page fetches in the background, such as the job list in the top bar, does not count, so a zsazsa tab left open does not keep the session alive. zsazsa never writes the session itself. 
 
 With `MISP_SESSION_REDIRECT_TO_LOGIN` on, a visitor without a valid MISP session is redirected to MISP's login page. With it off, such requests fall back to the `admin@admin.test`. Users seen through a session are recorded and listed on the community page. Two URLs stay reachable without a session because they are meant to be handed out. The public indicator feed URL has a random token per feed. The URL of the Diamond Model image that a Mattermost or Teams notification shows is signed with `SECRET_KEY`, works only for a published profile, and stops working when `SECRET_KEY` changes.
 
 Approving, publishing and (re)sending a product, delivering an indicator feed or switching its public URL on or off, and setting a stakeholder's product to automated delivery, take MISP's own **publish** permission (`perm_publish` on the user's role). The Configuration and Collection sources pages take **site admin** (`perm_site_admin`).
 
-MISP keeps the role a user had when they logged in, so the publish check and the Settings menu only follow a role change after the user logs in to MISP again. The settings pages themselves ask MISP for the current role on every visit, so making someone site admin, or taking it away, counts straight away. For that, `MISP_WEBAPP_KEY` has to be allowed to look up users: use a site admin key, or an org admin key when everyone using zsazsa is in that organisation. When MISP cannot be asked, the settings stay closed and the zsazsa log says why.
+MISP keeps the role a user had when they logged in, so the publish check and the Settings menu only follow a role change after the user logs in to MISP again. The settings pages themselves ask MISP for the current role on every visit, so making someone site admin, or taking it away, counts straight away. zsazsa asks with the user's own session. When MISP cannot be asked, the settings stay closed and the zsazsa log says why.
 
 Both checks need to know who you are. zsazsa treats single sign-on as in use when `MISP_SESSION_REDIRECT_TO_LOGIN` is on, when `MISP_SESSION_COOKIE_NAME` is set, or once it has recognised anyone through a MISP session (they are listed on the community page). From then on, a request without a user may not publish or open the settings. That covers the `admin@admin.test` fallback and a session Redis that is down, so leaving the cookie out never gets anyone past the checks.
 
@@ -533,6 +533,8 @@ The AI tab starts with the LLM providers card, one section per provider. **OpenA
 
 Each provider has its own enable switch, and one provider is marked as the default with the "Default provider" button. A provider cannot be disabled while features still point at it.
 
+**AI-connector MISP module** is the [ai-connector](https://github.com/cudeso/ai-connector) misp-modules server, with the settings MISP has for it under `Plugin.AI_*`. On misp-docker it is at `http://ai-connector`, port 6667. Give an Ollama model with its tag, for example `llama3.1:latest`. It runs its own prompts, so no feature can choose it; its "Summarise MISP event" is a fixed row in the feature table. "Test connection" checks the module and the model, as MISP's "Test LLM" does.
+
 Below the providers, a table lists each AI-assisted feature (for example summarising a report or generating a Flash Intel Alert draft) with the provider it uses, an optional per-feature model override, a sampling temperature, and the prompt file it uses. An empty model field means the feature uses the default model of its provider. An empty temperature leaves sampling to the model, which for a locally hosted model can mean a value as high as 1.0; since almost every feature here is parsed back into structured data, a low temperature between 0 and 0.2 keeps that output stable. Not every model takes every setting: an OpenAI reasoning model only accepts its default temperature while it reasons, and older models do not know `reasoning_effort`. A model that refuses one is asked again without it, once, and zsazsa remembers that for the model. This feature-level configuration is stored separately, in `data/ai_features.json`, rather than in `config/__init__.py`, and is therefore untouched by a Settings save and not covered by the config backup.
 
 Token usage is recorded per provider in the `llm_usage` table of the analyser database and shown in each provider's section. Rows written before local LLM support are counted as OpenAI usage.
@@ -547,6 +549,17 @@ Token usage is recorded per provider in the `llm_usage` table of the analyser da
 | `LOCAL_LLM_URL` | Base URL of the OpenAI-compatible endpoint, for example `http://127.0.0.1:11434` |
 | `LOCAL_LLM_API_KEY` | API key for the local endpoint, empty when it needs none |
 | `LOCAL_LLM_MODEL` | Default local model used by AI features that don't specify their own |
+| `AI_CONNECTOR_ENABLED` | `Plugin.AI_services_enable` |
+| `AI_CONNECTOR_URL` | `Plugin.AI_services_url`, without the port |
+| `AI_CONNECTOR_PORT` | `Plugin.AI_services_port` |
+| `AI_CONNECTOR_TIMEOUT` | `Plugin.AI_timeout` |
+| `AI_CONNECTOR_SSL_VERIFY_PEER` | `Plugin.AI_ssl_verify_peer` |
+| `AI_CONNECTOR_SSL_VERIFY_HOST` | `Plugin.AI_ssl_verify_host` (not honoured by zsazsa) |
+| `AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED` | `Plugin.AI_ssl_allow_self_signed` (not honoured by zsazsa) |
+| `AI_CONNECTOR_SSL_CAFILE` | `Plugin.AI_ssl_cafile` |
+| `AI_CONNECTOR_OPENAI_API_BASE` | `Plugin.AI_openai_api_base` |
+| `AI_CONNECTOR_API_KEY` | `Plugin.AI_api_key` |
+| `AI_CONNECTOR_MODEL_ID` | `Plugin.AI_model_id` |
 | Per-feature provider, model, temperature and prompt (`data/ai_features.json`) | Overrides for each AI-assisted feature |
 
 ### Context elements

@@ -10,7 +10,7 @@ This guide covers installing zsazsa, with Docker or as a standard installation n
 
 zsazsa sits on top of MISP and requires:
 
-- **A MISP server to store CTI program data.** This is where zsazsa saves its objects: stakeholders, PIRs, GIRs, flash intel alerts, advisories, briefings, and so on. This is the server you point `MISP_WEBAPP_URL` at. The API key zsazsa uses for it also looks up a user's role for the settings pages, so it has to be allowed to view users: a site admin key, or an org admin key when everyone using zsazsa is in that organisation.
+- **A MISP server to store CTI program data.** This is where zsazsa saves its objects: stakeholders, PIRs, GIRs, flash intel alerts, advisories, briefings, and so on. This is the server you point `MISP_WEBAPP_URL` at.
 
 - **A MISP server running misp-scraper (optional).** The scraper feeds threat events into a MISP instance that zsazsa polls for the data collection and the analyser pipeline. This is the server you point `MISP_URL` at. It can be the same server as above. Leave `MISP_URL` and `MISP_KEY` empty, or set `MISP_SCRAPER_ENABLED = False`, to run without one, in which case collection comes from the other MISP servers and the manual sources, and the analyser pipeline has nothing to process.
 

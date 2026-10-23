@@ -6,6 +6,7 @@
 
 - Support for Microsoft Teams as a notification channel.
 - The stakeholder form has an icon next to "Products subscribed" that subscribes the stakeholder to every product, or clears the list.
+- AI settings for the AI-connector MISP module, with a "Test connection" button.
 
 ### Changed
 
@@ -25,6 +26,11 @@
 - Scope items of a PIR and a GIR no longer have a note: the add form has no Notes field, notes are no longer shown or exported, and a scope item is stored as `category|value`.
 - zsazsa needs Python 3.11 or later. Python 3.10 reached its end of life on 1 October 2026, and Pillow 13, which fixes the vulnerabilities below, no longer installs on it.
 
+### Fixed
+
+- The settings pages refused site admins when `MISP_WEBAPP_KEY` was not a site admin's key (#71). The role is now asked with the user's own session.
+- With single sign-on, a short MISP `Session.timeout` or `Session.autoRegenerate` could end the session while working in zsazsa.
+
 ### Security
 
 - Pillow is updated to 13.0.0 and certifi to 2026.10.19, for the advisories published against Pillow 12.3.0 and certifi 2026.7.22.
@@ -34,6 +40,7 @@
 - zsazsa no longer runs on Python 3.10. `venv/bin/python --version` in the installation directory shows which one it uses. On 3.10, install Python 3.11 or later, move the old `venv` aside, create a new one as the web user with `python3.11 -m venv venv` (or the newer version you installed), and run `venv/bin/pip install -r requirements.txt` in it before restarting. The Docker installation runs its own Python 3.12 and needs nothing.
 - Nothing needs doing for the scope item notes. A note already stored stays in MISP, unread, until the requirement's scope is saved again, which writes its items without one.
 - Existing notification channels keep working, and the `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
+- The `AI_CONNECTOR_*` settings are new and need nothing: the module stays disabled until set up on the AI tab.
 
 ## 1.0.9
 

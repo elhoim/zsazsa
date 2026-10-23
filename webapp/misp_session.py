@@ -206,18 +206,44 @@ def _read_session(session_id):
         return None
 
 
+def _session_config(session):
+    """The Config entry CakePHP keeps in a session: time, countdown, userAgent."""
+    config_entry = session.get("Config")
+    return config_entry if isinstance(config_entry, dict) else {}
+
+
+def _seconds_left(session):
+    """Seconds until MISP's own timeout runs out on this session, or None.
+
+    CakePHP keeps the moment a session expires in Config.time and sets it to
+    Session.timeout from now on every request MISP serves. Past it, MISP
+    destroys the session on its next request.
+    """
+    expires = _session_config(session).get("time")
+    return expires - time.time() if isinstance(expires, (int, float)) else None
+
+
+def _renews_session_id(session):
+    """Whether the next request MISP serves for this session gives it a new ID.
+
+    With Session.autoRegenerate on, CakePHP counts requests down in
+    Config.countdown and renews the ID when it runs out, deleting the old
+    session. Sent by zsazsa, that request would get the new ID instead of the
+    browser, which would be signed out of zsazsa and MISP both.
+    """
+    countdown = _session_config(session).get("countdown")
+    return isinstance(countdown, int) and countdown <= 1
+
+
 def _expired(session):
     """Whether MISP's own timeout has run out on this session.
 
-    CakePHP keeps the moment a session expires in Config.time and moves it
-    forward on every request MISP serves. Past it, MISP destroys the session
-    on its next request. The Redis key can live on well after that (MISP
-    gives it Session.cookieTimeout when that is set), so the key existing
-    does not mean MISP still accepts the session.
+    The Redis key can live on well after that (MISP gives it
+    Session.cookieTimeout when that is set), so the key existing does not mean
+    MISP still accepts the session.
     """
-    config_entry = session.get("Config")
-    expires = config_entry.get("time") if isinstance(config_entry, dict) else None
-    return isinstance(expires, (int, float)) and expires < time.time()
+    left = _seconds_left(session)
+    return left is not None and left < 0
 
 
 def get_misp_user(session_id):
@@ -339,14 +365,28 @@ def _explain_miss(cause, cookie_name):
             f"MISP_SESSION_REDIS_* names the same instance and database")
 
 
-# How often use of zsazsa has MISP refresh a session, at most. Well inside
-# MISP's own timeout (an hour by default), and one request to MISP per user
-# every few minutes.
+# How often use of zsazsa has MISP refresh a session, at most: one request to
+# MISP per user every few minutes. A session with less time than this left is
+# refreshed anyway, since MISP's Session.timeout can be shorter.
 _KEEPALIVE_EVERY_S = 300
-_KEEPALIVE_TIMEOUT_S = 5
+_VIEW_ME_TIMEOUT_S = 5
 
 # Session ID -> time.monotonic() of the last refresh asked for it.
 _last_keepalive = {}
+
+
+def _view_own_record(cookie_name, session_id):
+    """MISP's /users/view/me, asked with the user's own session cookie.
+
+    The browser's user agent goes along, since with Session.checkAgent on MISP
+    destroys a session that is used from another one.
+    """
+    return requests.get(f"{config.MISP_WEBAPP_URL.rstrip('/')}/users/view/me.json",
+                        cookies={cookie_name: session_id},
+                        headers={"Accept": "application/json",
+                                 "User-Agent": request.headers.get("User-Agent", "")},
+                        timeout=_VIEW_ME_TIMEOUT_S, verify=config.MISP_WEBAPP_VERIFYCERT,
+                        allow_redirects=False)
 
 
 def keep_misp_session_alive(cookie_name, session_id):
@@ -356,13 +396,19 @@ def keep_misp_session_alive(cookie_name, session_id):
     Config.time CakePHP keeps in it and the lifetime of its Redis key. Asking
     MISP for the user's own record with their session cookie takes it through
     that same path. /users/view/me does, where the version check and the
-    searches close the session without saving it. The browser's user agent
-    goes along, since with Session.checkAgent on MISP destroys a session that
-    is used from another one.
+    searches close the session without saving it.
+
+    Never on the request that would give the session a new ID: that renewal
+    is left to the next page the user opens in MISP.
     """
+    session = _read_session(session_id) or {}
+    if _renews_session_id(session):
+        return
     now = time.monotonic()
     last = _last_keepalive.get(session_id)
-    if last is not None and now - last < _KEEPALIVE_EVERY_S:
+    left = _seconds_left(session)
+    runs_out_soon = left is not None and left < _KEEPALIVE_EVERY_S
+    if last is not None and now - last < _KEEPALIVE_EVERY_S and not runs_out_soon:
         return
     # Forget the sessions not seen for a while, so this stays the size of the
     # sessions in use.
@@ -371,18 +417,13 @@ def keep_misp_session_alive(cookie_name, session_id):
             del _last_keepalive[sid]
     _last_keepalive[session_id] = now
 
-    url = f"{config.MISP_WEBAPP_URL.rstrip('/')}/users/view/me.json"
     try:
-        r = requests.get(url, cookies={cookie_name: session_id},
-                         headers={"Accept": "application/json",
-                                  "User-Agent": request.headers.get("User-Agent", "")},
-                         timeout=_KEEPALIVE_TIMEOUT_S, verify=config.MISP_WEBAPP_VERIFYCERT,
-                         allow_redirects=False)
+        r = _view_own_record(cookie_name, session_id)
     except requests.RequestException as e:
         logger.warning("could not have MISP refresh a session: %s", e)
         return
     if r.status_code != 200:
-        logger.warning("MISP did not refresh a session: HTTP %s from %s", r.status_code, url)
+        logger.warning("MISP did not refresh a session: HTTP %s from %s", r.status_code, r.url)
 
 
 def load_request_user():
@@ -503,6 +544,10 @@ def refuse_unless_site_admin():
     role is asked of MISP on every request instead: a user made site admin gets
     in straight away, and one who lost it is out straight away. Nobody gets in
     when MISP cannot be asked. Returns None when the request may go ahead.
+
+    MISP is asked with the user's own session, for their own record. Looking
+    them up with MISP_WEBAPP_KEY would need that key to be a site admin's:
+    MISP shows another user's record to a site admin only, not to an org admin.
     """
     message = "Only MISP site admins can open the zsazsa settings."
     user = getattr(g, "misp_user", None)
@@ -510,15 +555,21 @@ def refuse_unless_site_admin():
         if not sso_configured():
             return None
     else:
-        from webapp import misp_store  # misp_store imports this module
-        try:
-            if _role_grants(misp_store.user_role(user.get("id")), "perm_site_admin"):
-                return None
-        except Exception as exc:
-            logger.warning("could not ask MISP for the role of %s, so the settings stay closed: %s. "
-                           "MISP_WEBAPP_KEY has to be allowed to look up users.",
-                           user.get("email"), exc)
-            message = "Could not check your role in MISP, so the settings stay closed. See the zsazsa log."
+        cookie_name = _session_cookie_name()
+        session_id = request.cookies.get(cookie_name)
+        if _renews_session_id(_read_session(session_id) or {}):
+            message = "MISP is about to give your session a new ID. Open any page in MISP first, then reload this one."
+        else:
+            try:
+                r = _view_own_record(cookie_name, session_id)
+                if r.status_code != 200:
+                    raise RuntimeError(f"HTTP {r.status_code} from {r.url}")
+                if _role_grants(r.json().get("Role"), "perm_site_admin"):
+                    return None
+            except Exception as exc:
+                logger.warning("could not ask MISP for the role of %s, so the settings stay closed: %s",
+                               user.get("email"), exc)
+                message = "Could not check your role in MISP, so the settings stay closed. See the zsazsa log."
     if request.is_json:
         return jsonify({"ok": False, "error": message}), 403
     return message, 403

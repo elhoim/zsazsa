@@ -72,7 +72,10 @@ class SetupWizard(unittest.TestCase):
             mock.patch.object(misp_session, "keep_misp_session_alive"),
             mock.patch.object(misp_store, "list_collection_sources", return_value=[]),
             mock.patch.object(misp_session, "get_misp_user", return_value=SITE_ADMIN),
-            mock.patch.object(misp_store, "user_role", return_value=SITE_ADMIN["Role"]),
+            # The user's session, and what MISP answers for their own record, asked with it.
+            mock.patch.object(misp_session, "_read_session", return_value={"Auth": {"User": SITE_ADMIN}}),
+            mock.patch.object(misp_session, "_view_own_record", return_value=mock.Mock(
+                status_code=200, json=mock.Mock(return_value=SITE_ADMIN))),
             mock.patch.object(misp_session, "derive_cookie_name", return_value=""),
             mock.patch.object(setup_wizard, "scraper_enabled", return_value=False),
             # Saves go to a copy of the config, and the running config is left as it is.
