@@ -21,6 +21,9 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/MISP/misp-custom/zsazsa
 Environment=PYTHONUNBUFFERED=1
+# A service does not read /etc/environment by itself; this passes on an
+# outbound proxy set there (https_proxy, no_proxy).
+EnvironmentFile=-/etc/environment
 #Environment=ZSAZSA_BIND=127.0.0.1
 # SECRET_KEY can also be supplied here instead of in config/__init__.py:
 # Environment=SECRET_KEY=change-me-to-a-long-random-string

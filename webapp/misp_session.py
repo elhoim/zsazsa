@@ -274,6 +274,7 @@ def get_misp_user(session_id):
 # would otherwise cost each one a connection attempt.
 _RETRY_AFTER_SECONDS = 60
 _DERIVE_TIMEOUT_S = 5
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 _cookie_name_cache = {"value": "", "retry_after": 0.0}
 
@@ -290,15 +291,19 @@ def derive_cookie_name():
     stores its data in, not the misp-scraper instance it only polls. Those are
     often the same server, which is why reading the scraper went unnoticed.
     Returns ``MISP-<uuid>`` on success, or "" if the MISP server could not be
-    reached or did not report a UUID.
+    reached or did not report a UUID. MISP reports it only to a key whose role
+    has sync permission, and "-" to any other, which made a name that matches
+    no cookie and sent every request to the MISP login.
     """
     try:
         from pymisp import PyMISP
         misp = PyMISP(config.MISP_WEBAPP_URL, config.MISP_WEBAPP_KEY,
                       config.MISP_WEBAPP_VERIFYCERT, timeout=_DERIVE_TIMEOUT_S)
-        uuid = (misp.misp_instance_version or {}).get("uuid", "")
-        if uuid:
+        uuid = (misp.misp_instance_version or {}).get("uuid") or ""
+        if _UUID_RE.fullmatch(uuid):
             return f"MISP-{uuid}"
+        logger.warning("MISP did not report its instance UUID to MISP_WEBAPP_KEY, so the session cookie "
+                       "name stays as it is. MISP reports it only to a role with sync permission.")
     except Exception as e:
         logger.warning("could not derive MISP session cookie name from %s: %s",
                        getattr(config, "MISP_WEBAPP_URL", ""), e)
@@ -558,7 +563,8 @@ def refuse_unless_site_admin():
         cookie_name = _session_cookie_name()
         session_id = request.cookies.get(cookie_name)
         if _renews_session_id(_read_session(session_id) or {}):
-            message = "MISP is about to give your session a new ID. Open any page in MISP first, then reload this one."
+            message = ("MISP is about to give your session a new ID. Open any page in MISP first, then reload "
+                       "this one. If that does not help, log out of MISP and in again.")
         else:
             try:
                 r = _view_own_record(cookie_name, session_id)

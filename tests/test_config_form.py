@@ -23,6 +23,8 @@ from flask import Flask
 import config as _config
 from webapp.routes import config_page
 
+_DERIVE_COOKIE_NAME = config_page.misp_session.derive_cookie_name
+
 
 def _keyvals(path):
     namespace = {}
@@ -188,6 +190,21 @@ class ConfigSave(unittest.TestCase):
         form["MISP_WEBAPP_URL"] = "https://misp.example/"
         self.client.post("/config", data=form)
         self.assertEqual(self.saved()["MISP_WEBAPP_URL"], "https://misp.example")
+
+    def test_a_key_without_sync_permission_keeps_the_session_cookie_name(self):
+        """MISP tells such a key "-" for its instance UUID. A save with single
+        sign-on on stored "MISP--", which no browser sends, so every request
+        went to the MISP login and the settings could not be reached to undo it."""
+        stored = "MISP-d3d487f0-82ae-4a17-9165-c144c871c665"
+        form = self.full_form()
+        form["MISP_SESSION_REDIRECT_TO_LOGIN"] = "true"
+        with mock.patch.object(_config, "MISP_SESSION_COOKIE_NAME", stored, create=True), \
+             mock.patch.object(config_page.misp_session, "derive_cookie_name", _DERIVE_COOKIE_NAME), \
+             mock.patch("pymisp.PyMISP") as PyMISP, \
+             self.assertLogs("webapp.misp_session", level="WARNING"):
+            PyMISP.return_value.misp_instance_version = {"version": "2.5.50", "uuid": "-"}
+            self.client.post("/config", data=form)
+        self.assertEqual(self.saved()["MISP_SESSION_COOKIE_NAME"], stored)
 
     def test_every_key_survives_a_save(self):
         before = self.saved()

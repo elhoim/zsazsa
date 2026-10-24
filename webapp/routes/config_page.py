@@ -948,7 +948,10 @@ def index():
     active_tab = request.args.get("tab", "tab-connections")
     if active_tab not in _CONFIG_TABS:
         active_tab = "tab-connections"
-    return render_template("config_page.html", cfg=cfg, active_tab=active_tab, migrations=MIGRATIONS)
+    key_shortcomings = (misp_store.webapp_key_shortcomings()
+                        if cfg["MISP_WEBAPP_URL"] and cfg["MISP_WEBAPP_KEY"] else None)
+    return render_template("config_page.html", cfg=cfg, active_tab=active_tab, migrations=MIGRATIONS,
+                           key_shortcomings=key_shortcomings)
 
 
 @bp.route("/config/run-migration", methods=["POST"])

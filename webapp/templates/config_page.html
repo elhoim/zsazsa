@@ -156,6 +156,16 @@
 {% endmacro %}
 
 {% block content %}
+{% if key_shortcomings %}
+<div class="alert alert-warning small" id="key-shortcomings" role="alert">
+  <i class="fas fa-triangle-exclamation me-1"></i>
+  <strong>MISP_WEBAPP_KEY may not do everything zsazsa does with it.</strong>
+  Give its user a role that can, or use another key.
+  <ul class="mb-0 mt-1">
+    {% for line in key_shortcomings %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
 <form method="post" id="cfg-form">
   <input type="hidden" name="active_tab" id="cfg-active-tab-input" value="{{ active_tab }}">
 

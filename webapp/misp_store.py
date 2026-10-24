@@ -764,6 +764,28 @@ def _oa_json(obj, relation, lst):
         obj.add_attribute(relation, value=json.dumps(lst), type="text", disable_correlation=True)
 
 
+def _record_data(record, fields, **overrides):
+    """The write dict for an update, taken from a stored record.
+
+    The record's object is written again whole on every change, so anything
+    that rewrites it for one field (a review state, a status, a draft rule) has
+    to carry all the others across. Taking them from one list of fields instead
+    of each caller spelling them out again is what keeps one from being dropped
+    silently. `overrides` replaces the fields the caller is actually changing.
+    Lists and dicts are copied so the caller's namespace is not changed under it.
+    """
+    data = {}
+    for field in fields:
+        value = getattr(record, field, None)
+        if isinstance(value, list):
+            value = list(value)
+        elif isinstance(value, dict):
+            value = dict(value)
+        data[field] = value if value is not None else ""
+    data.update(overrides)
+    return data
+
+
 def _obj_attr(obj, relation):
     if obj is None:
         return None
@@ -875,6 +897,51 @@ def _check(result, label="MISP"):
     if isinstance(result, dict) and "errors" in result:
         raise RuntimeError(f"{label}: {result['errors']}")
     return result
+
+
+_KEY_CHECK_TIMEOUT_S = 5
+
+# What zsazsa does with MISP_WEBAPP_KEY that a role can be without, and what
+# stops working then. Site admin is not among them: the settings pages ask MISP
+# for the role of whoever is logged in, with their own session.
+_WEBAPP_KEY_PERMISSIONS = (
+    ("perm_add", "create its records: stakeholders, requirements and products"),
+    ("perm_modify", "change the records it created"),
+    ("perm_modify_org", "change records another user of the organisation created, such as those saved with an earlier key"),
+    ("perm_tagger", "tag events: TLP, workflow state and the zsazsa tags"),
+    ("perm_tag_editor", "create a tag that is not in MISP yet"),
+    ("perm_publish", "publish products in MISP"),
+    ("perm_sync", "read the instance UUID that the session cookie name is made from"),
+)
+
+
+def webapp_key_shortcomings():
+    """What MISP_WEBAPP_KEY may not do, one line each; None when MISP cannot be asked.
+
+    /users/view/me answers with the role as it is stored, whatever the key.
+    A read-only key loses every permission on each request instead, and
+    getVersion reports a few of them as the request has them, so one the stored
+    role grants and getVersion reports as off marks the key as read-only. One
+    that an older MISP does not report is not counted.
+    """
+    try:
+        # A client of its own, with a short timeout: the settings page is where
+        # a wrong MISP address is put right, so it must not wait on that MISP.
+        misp = PyMISP(config.MISP_WEBAPP_URL, config.MISP_WEBAPP_KEY,
+                      config.MISP_WEBAPP_VERIFYCERT, timeout=_KEY_CHECK_TIMEOUT_S)
+        me = misp.get_user("me")
+        version = misp.misp_instance_version
+    except Exception as exc:
+        logger.warning("could not ask MISP what MISP_WEBAPP_KEY may do: %s", exc)
+        return None
+    if "errors" in me:
+        return None
+    role = me.get("Role") or {}
+    if any(misp_session._role_grants(role, perm) and version.get(perm) is False
+           for perm in ("perm_sync", "perm_sighting", "perm_galaxy_editor", "perm_analyst_data")):
+        return ["The key is read-only, so zsazsa cannot store or change anything in MISP."]
+    return [f"Without {perm}, zsazsa cannot {what}."
+            for perm, what in _WEBAPP_KEY_PERMISSIONS if not misp_session._role_grants(role, perm)]
 
 
 def _is_not_found(result) -> bool:
@@ -5638,6 +5705,22 @@ def _vea_obj(data):
     return obj
 
 
+# Every field of an advisory, named as _vea_obj() takes them and as _vea_ns()
+# reads them back; see _record_data().
+_VEA_FIELDS = (
+    "vea_id", "cve_id", "summary", "cvss", "cwe", "title", "tlp", "author",
+    "audience", "affected_product", "affected_versions", "fixed_version",
+    "exposure", "observed_exploitation", "exploit_availability",
+    "exploitation_complexity", "threat_actor_interest", "cisa_kev",
+    "source_description", "source_reliability", "information_credibility",
+    "worst_case", "most_likely", "immediate_actions", "patch_sla_internet",
+    "patch_sla_internal", "target_patch_version", "exploitation_indicators",
+    "detection_rules", "references", "feedback_deadline", "review_state",
+    "rejection_reason", "source_event_uuids", "source_event_hints",
+    "linked_pir_uuid", "context_tags", "creator", "approved_by",
+)
+
+
 def _vea_ns(event):
     uuid = event.uuid
     obj = _get_obj(event, "zsazsa-vea")
@@ -5725,13 +5808,14 @@ def render_vea_markdown(vea, vea_id=None, preview_url: str = ""):
         f"**Date:** {date_str}",
         f"**Author:** {vea.author or 'unknown'}",
         f"**Audience:** {vea.audience or 'vulnerability management, SOC, application owners'}",
+        f"**CVSS:** {vea.cvss or '-'}",
+        f"**CWE:** {vea.cwe or '-'}",
         "",
         "---",
         "",
         "## Summary",
         "",
-        f"{vea.cve_id or 'This vulnerability'} affects {vea.affected_product or 'affected product'}.",
-        f"We assess with confidence that this vulnerability {vea.observed_exploitation or 'status unknown'}.",
+        vea.summary or f"{vea.cve_id or 'This vulnerability'} affects {vea.affected_product or 'affected product'}.",
         "",
         f"**Action required:** {vea.most_likely or '_To be defined._'}",
         "",
@@ -5939,38 +6023,8 @@ def set_vea_review_state(uuid, state, reason=None):
     if event is None:
         raise RuntimeError(f"VEA event {uuid} not found")
     vea = _vea_ns(event)
-
-    def _vea_data(v, state, reason):
-        return {
-            "vea_id": v.vea_id, "cve_id": v.cve_id, "title": v.title, "tlp": v.tlp,
-            "author": v.author, "audience": v.audience,
-            "affected_product": v.affected_product, "affected_versions": v.affected_versions,
-            "fixed_version": v.fixed_version, "exposure": v.exposure,
-            "observed_exploitation": v.observed_exploitation,
-            "exploit_availability": v.exploit_availability,
-            "exploitation_complexity": v.exploitation_complexity,
-            "threat_actor_interest": v.threat_actor_interest, "cisa_kev": v.cisa_kev,
-            "source_description": v.source_description,
-            "source_reliability": v.source_reliability,
-            "information_credibility": v.information_credibility,
-            "worst_case": v.worst_case, "most_likely": v.most_likely,
-            "immediate_actions": v.immediate_actions,
-            "patch_sla_internet": v.patch_sla_internet,
-            "patch_sla_internal": v.patch_sla_internal,
-            "target_patch_version": v.target_patch_version,
-            "exploitation_indicators": v.exploitation_indicators,
-            "detection_rules": v.detection_rules,
-            "references": v.references,
-            "feedback_deadline": v.feedback_deadline.isoformat() if getattr(v, "feedback_deadline", None) else "",
-            "source_event_uuids": list(getattr(v, "source_event_uuids", []) or []),
-            "source_event_hints": dict(getattr(v, "source_event_hints", {}) or {}),
-            "source_event_uuid": v.source_event_uuid,
-            "linked_pir_uuid": v.linked_pir_uuid,
-            "review_state": state,
-            "rejection_reason": reason or v.rejection_reason,
-        }
-
-    update_vea(uuid, _vea_data(vea, state, reason))
+    update_vea(uuid, _record_data(vea, _VEA_FIELDS, review_state=state,
+                                  rejection_reason=reason or vea.rejection_reason))
 
     workflow_map = {
         VEA_REVIEW_DRAFT: "draft",
@@ -6141,11 +6195,7 @@ def _der_ns(event):
 
 
 # Every field of a request, named as _der_obj() takes them and as _der_ns()
-# reads them back. The object is deleted and written again on every change, so
-# anything that rewrites it for one field (review state, engineering status,
-# the draft rule) has to carry all the others across. _der_data() builds that
-# dict from this list instead of each caller spelling the fields out again,
-# which is how one of them ends up silently dropping a field.
+# reads them back; see _record_data().
 _DER_FIELDS = (
     "der_id", "title", "technique", "log_sources", "hypothesis",
     "expected_output", "existing_coverage", "test_cases", "format",
@@ -6156,21 +6206,8 @@ _DER_FIELDS = (
 
 
 def _der_data(der, **overrides):
-    """The write dict for update_der(), taken from a stored request.
-
-    `overrides` replaces the fields the caller is actually changing. Lists and
-    dicts are copied so the caller's namespace is not changed under it.
-    """
-    data = {}
-    for field in _DER_FIELDS:
-        value = getattr(der, field, None)
-        if isinstance(value, list):
-            value = list(value)
-        elif isinstance(value, dict):
-            value = dict(value)
-        data[field] = value if value is not None else ""
-    data.update(overrides)
-    return data
+    """The write dict for update_der(), taken from a stored request."""
+    return _record_data(der, _DER_FIELDS, **overrides)
 
 
 def _der_id_from_event_id(event_id):

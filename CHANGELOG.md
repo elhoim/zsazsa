@@ -7,6 +7,7 @@
 - Support for Microsoft Teams as a notification channel.
 - The stakeholder form has an icon next to "Products subscribed" that subscribes the stakeholder to every product, or clears the list.
 - AI settings for the AI-connector MISP module, with a "Test connection" button.
+- The Configuration page warns when `MISP_WEBAPP_KEY` is read-only or its role lacks a permission zsazsa uses.
 
 ### Changed
 
@@ -30,6 +31,9 @@
 
 - The settings pages refused site admins when `MISP_WEBAPP_KEY` was not a site admin's key (#71). The role is now asked with the user's own session.
 - With single sign-on, a short MISP `Session.timeout` or `Session.autoRegenerate` could end the session while working in zsazsa.
+- Changing the review state of a vulnerability advisory deleted its summary, CVSS, CWE and context tags (#69). Its mail and MISP report now have the summary, CVSS and CWE.
+- The service template reads `/etc/environment`, so an outbound proxy set there reaches zsazsa (#72). docker/README.md says how to give Docker the proxy.
+- Saving the settings with single sign-on on and a `MISP_WEBAPP_KEY` without sync permission stored the session cookie name `MISP--`, after which zsazsa sent every request to MISP. The stored name is now kept.
 
 ### Security
 
@@ -41,6 +45,8 @@
 - Nothing needs doing for the scope item notes. A note already stored stays in MISP, unread, until the requirement's scope is saved again, which writes its items without one.
 - Existing notification channels keep working, and the `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
 - The `AI_CONNECTOR_*` settings are new and need nothing: the module stays disabled until set up on the AI tab.
+- An advisory whose review state changed before this release lost its summary, CVSS, CWE and context tags. MISP keeps them as deleted attributes of its object: show the deleted attributes on the event in MISP and restore them.
+- Behind an outbound proxy, add `EnvironmentFile=-/etc/environment` to `/etc/systemd/system/zsazsa.service`, then `systemctl daemon-reload` and restart zsazsa.
 
 ## 1.0.9
 

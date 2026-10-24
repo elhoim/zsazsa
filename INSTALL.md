@@ -167,6 +167,8 @@ sudo systemctl enable --now zsazsa.service
 
 For production, uncomment the `Environment=ZSAZSA_BIND=127.0.0.1` line in the service file, so zsazsa is only reachable through Apache. Leave it commented out for development if you need direct access from other machines on the network.
 
+Behind an outbound proxy, set `https_proxy` and `no_proxy` in `/etc/environment`, which the service template reads. Put your MISP servers and other internal hosts zsazsa calls, such as a local LLM, in `no_proxy`. Docker containers do not read that file; [docker/README.md](docker/README.md) says how to give them the proxy.
+
 ### 2. Enable the required Apache modules
 
 ```bash

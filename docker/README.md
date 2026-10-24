@@ -81,6 +81,15 @@ Scraper events never reach the analyser: zsazsa recognises them by `SCRAPER_MARK
 
 On a Mac, Docker Desktop containers do not share the Mac's `127.0.0.1`. A MISP or Redis on the Mac itself is reached as `host.docker.internal`.
 
+A vulnerability lookup fails with `Network is unreachable` behind an outbound proxy: the containers do not read the host's `/etc/environment`. Give the proxy to Docker instead, in `~/.docker/config.json` of the user who runs `docker compose` (root's with sudo), with the host of `MISP_WEBAPP_URL` and any other internal host zsazsa calls in `noProxy`:
+
+```json
+{"proxies": {"default": {"httpProxy": "http://proxy-host:8080", "httpsProxy": "http://proxy-host:8080",
+                         "noProxy": "127.0.0.1,localhost,misp.example.org"}}}
+```
+
+Docker sets it in a container when it creates one, so run `docker compose up -d --force-recreate`. It reaches misp-scraper's containers as well.
+
 ## Credits
 
 The Docker setup builds on the work of Chris Horsley (@chorsley) and @elhoim (PR #43).

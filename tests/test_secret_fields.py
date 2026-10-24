@@ -53,6 +53,7 @@ class RenderedPages(unittest.TestCase):
                                  MISP_SESSION_COOKIE_NAME="MISP-test", **SECRETS), \
              mock.patch.object(config_page, "importlib"), \
              mock.patch.object(config_page.misp_session, "refuse_unless_site_admin", return_value=None), \
+             mock.patch.object(config_page.misp_store, "webapp_key_shortcomings", return_value=None), \
              mock.patch.object(collection_sources.misp_store, "list_collection_sources", return_value=[]), \
              mock.patch.object(collection_cache, "start_worker"):
             client = create_app().test_client()

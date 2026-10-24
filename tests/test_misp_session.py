@@ -230,11 +230,21 @@ class HostingInstance(unittest.TestCase):
             self.assertIsNone(misp_session.login_redirect_url())
 
     def test_cookie_name_is_derived_from_the_hosting_misp(self):
+        uuid = "d3d487f0-82ae-4a17-9165-c144c871c665"
         with mock.patch("pymisp.PyMISP") as PyMISP:
-            PyMISP.return_value.misp_instance_version = {"uuid": "abc"}
-            self.assertEqual(misp_session.derive_cookie_name(), "MISP-abc")
+            PyMISP.return_value.misp_instance_version = {"uuid": uuid}
+            self.assertEqual(misp_session.derive_cookie_name(), f"MISP-{uuid}")
         url, key = PyMISP.call_args.args[0], PyMISP.call_args.args[1]
         self.assertEqual((url, key), ("https://misp.test", "webapp-key"))
+
+    def test_a_key_without_sync_permission_derives_no_name(self):
+        """MISP answers such a key with "-" for its UUID. Saving the settings with
+        it stored "MISP--", which no browser sends, and locked everyone out."""
+        with mock.patch("pymisp.PyMISP") as PyMISP, \
+             self.assertLogs("webapp.misp_session", level="WARNING") as logs:
+            PyMISP.return_value.misp_instance_version = {"version": "2.5.50", "uuid": "-"}
+            self.assertEqual(misp_session.derive_cookie_name(), "")
+        self.assertIn("sync permission", logs.output[0])
 
 
 class PublishPermission(unittest.TestCase):

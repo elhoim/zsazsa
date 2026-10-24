@@ -424,7 +424,7 @@ This tab covers the MISP server zsazsa uses as its own **data store**, configure
 | Setting | Description |
 |---|---|
 | `MISP_WEBAPP_URL` | URL of the MISP server zsazsa uses to store its own program data |
-| `MISP_WEBAPP_KEY` | API key for the webapp MISP server. It also looks up a user's role for the settings pages, so it has to be allowed to view users |
+| `MISP_WEBAPP_KEY` | API key for the webapp MISP server. It needs no site admin, but the Configuration page warns when its role lacks a permission zsazsa uses, such as publishing or tagging, or when the key is read-only |
 | `MISP_WEBAPP_VERIFYCERT` | Whether to verify the webapp MISP server's TLS certificate. On by default; see below for a MISP whose certificate comes from your own CA |
 | `RULEZET_URL` | Base URL of a [Rulezet](https://rulezet.org) instance. Product forms search it for public detection rules by CVE ID or MITRE ATT&CK technique, and a product page reads a saved rule back from it. A detection engineering request also validates its draft rule against it. Leave empty to disable the lookup |
 
