@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request
 
+import config
 from webapp import audit
 
 bp = Blueprint("logs", __name__)
@@ -22,4 +23,5 @@ def index():
         types=filters["types"],
         selected_action=selected_action,
         selected_type=selected_type,
+        retention_days=getattr(config, "AUDIT_LOG_RETENTION_DAYS", 365),
     )

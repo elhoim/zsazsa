@@ -21,7 +21,7 @@ import config
 from core.logging_setup import setup_logging
 from core import imap_collector
 from core.db import init_db, log_pipeline_run_start, log_pipeline_run_end
-from webapp import job_store, misp_store, newsletter_ingest, newsletter_parsers
+from webapp import audit, job_store, misp_store, newsletter_ingest, newsletter_parsers
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,8 @@ def main() -> None:
     setup_logging()
     logger.info("IMAP collector started")
     init_db()
+    # A run prunes the audit log, which the web app may not have created yet.
+    audit.init()
     run_id = log_pipeline_run_start("imap-collector", triggered_by="cli")
 
     mailboxes = [m for m in getattr(config, "IMAP_SOURCES", []) or [] if m.get("enabled")]

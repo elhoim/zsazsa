@@ -71,11 +71,11 @@
         {% endfor %}
       </tbody>
     </table>
-    {% if entries | length >= limit %}
     <p class="text-muted small px-3 py-2 mb-0 border-top">
-      The newest {{ limit }} entries are shown. Filter by action or type to reach older ones.
+      {% if entries | length >= limit %}The newest {{ limit }} entries are shown. Filter by action or type to reach older ones.{% endif %}
+      {% if retention_days %}Entries older than {{ retention_days }} days are removed.
+      {% else %}Entries are never removed, so the log keeps growing. Set a retention under Settings &rsaquo; System &rsaquo; Analyser.{% endif %}
     </p>
-    {% endif %}
     {% else %}
     <div class="empty-state py-5">
       <i class="fas fa-scroll fa-2x text-muted mb-3 d-block"></i>

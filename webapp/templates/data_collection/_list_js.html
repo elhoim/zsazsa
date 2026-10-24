@@ -1349,9 +1349,9 @@
   if (selectAllCb) selectAllCb.addEventListener('change', updateCreateProductBtn);
 
   /* ── Create AI summary ──
-     A choice in the summary dropdown shows its progress on the icon next to it,
-     and the whole group goes once the summary is there. The event summary then
-     stays on offer on its own icon, until there is one. */
+     A choice in the summary dropdown shows its progress on the icon next to it.
+     What was made is no longer offered: the wand goes with the report summary,
+     and the dropdown or the robot with the event summary. */
   document.querySelectorAll('.create-summary-btn').forEach(function(item) {
     item.addEventListener('click', function() {
       var uuid = item.dataset.uuid; var sourceId = item.dataset.sourceId;
@@ -1381,7 +1381,12 @@
           var result = job.result || {};
           if (result.summarised || result.event_summaries) {
             var eventSummaryBtn = btn.closest('tr').querySelector('.event-summary-btn');
-            (group || btn).remove();
+            if (result.summarised) {
+              (group || btn).remove();
+            } else if (group) {
+              group.querySelectorAll('.dropdown-toggle, .dropdown-menu').forEach(function(el) { el.remove(); });
+              btn.innerHTML = originalHtml;
+            }
             if (eventSummaryBtn && result.event_summaries) eventSummaryBtn.remove();
             else if (eventSummaryBtn) eventSummaryBtn.classList.remove('d-none');
             releaseRowActions(data.job_id);

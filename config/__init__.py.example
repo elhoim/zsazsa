@@ -197,7 +197,9 @@ SCRAPER_MARKER_TAG = 'zsazsa:source="misp-scraper"'
 MISP_SCRAPER_LIMIT = 500
 MISP_SCRAPER_SINCE_DAYS = 30
 EVENT_LOG_RETENTION_DAYS = 90
-PIPELINE_RUN_LOG_RETENTION_DAYS = 365
+PIPELINE_RUN_LOG_RETENTION_DAYS = 90
+# 0 keeps the audit log for good.
+AUDIT_LOG_RETENTION_DAYS = 365
 
 # Manual sources pushing to the misp-scraper queue (Redis pub/sub the scraper subscribes to)
 SCRAPER_REDIS_HOST = '127.0.0.1'

@@ -457,6 +457,13 @@
               <input type="number" name="PIPELINE_RUN_LOG_RETENTION_DAYS" class="form-control" value="{{ cfg.PIPELINE_RUN_LOG_RETENTION_DAYS }}" min="1">
               <div class="form-text">Analyser run history entries older than this are pruned automatically.</div>
             </div>
+            <div class="col-md-6">
+              <label class="form-label">Audit log retention (days)</label>
+              <input type="number" name="AUDIT_LOG_RETENTION_DAYS" class="form-control" value="{{ cfg.AUDIT_LOG_RETENTION_DAYS }}" min="0">
+              <div class="form-text">Entries of Reporting &rsaquo; Logs older than this are pruned automatically. A product's
+                delivery badge comes from this log, so one sent before then no longer shows it.
+                {% if not cfg.AUDIT_LOG_RETENTION_DAYS %}<strong>0 keeps it for good: it grows until you set a number of days here.</strong>{% else %}0 keeps it for good.{% endif %}</div>
+            </div>
           </div>
         </div>
       </div>

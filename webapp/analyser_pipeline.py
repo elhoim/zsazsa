@@ -430,10 +430,20 @@ def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tu
     # to summarise has no use for them.
     galaxy_lookup = _build_galaxy_lookup() if kept else {}
 
-    _emit(progress, "generate-summaries", "in_progress", "Ensuring AI summaries exist for eligible events...")
+    # Each missing summary is a model call, which on a local model can take
+    # minutes, so the job says which one it is on. A slow run then looks alive,
+    # and one that died shows how far it got.
+    missing = sum(not _extract_ai_summary(reports_cache[e.uuid]) for e in kept)
+    _emit(progress, "generate-summaries", "in_progress",
+          f"{missing} of {len(kept)} event(s) need an AI summary.")
 
+    written = 0
     for event in kept:
         reports = reports_cache[event.uuid]
+        if not _extract_ai_summary(reports):
+            written += 1
+            _emit(progress, "generate-summaries", "in_progress",
+                  f"AI summary {written} of {missing}: {(event.info or event.uuid)[:80]}")
         summary, created = _ensure_ai_summary(misp, event, reports, galaxy_lookup)
         if created:
             summary_created += 1
@@ -481,7 +491,10 @@ def run_daily_briefing_action(progress=None, days=1) -> dict:
     rejected_by_relevance = 0
     _emit(progress, "review-relevance", "in_progress", "Reviewing daily briefing relevance of candidate stories...")
     kept = []
-    for event in events:
+    for position, event in enumerate(events, start=1):
+        # One model call per event, as for the summaries.
+        _emit(progress, "review-relevance", "in_progress",
+              f"Relevance {position} of {len(events)}: {(event.info or event.uuid)[:80]}")
         reports = reports_cache.get(event.uuid, [])
         first_report = _first_non_empty_report_content(reports)
         report_title = (getattr(reports[0], "name", "") or "") if reports else ""
@@ -522,7 +535,9 @@ def run_daily_briefing_action(progress=None, days=1) -> dict:
         "threat_actors": list(getattr(config, "FOCUS_POINTS_THREAT_ACTORS", []) or []),
     }
     names_with_commas = galaxy_names_with_commas() if events else frozenset()
-    for event in events:
+    for position, event in enumerate(events, start=1):
+        _emit(progress, "build-briefing", "in_progress",
+              f"Story {position} of {len(events)}: {(event.info or event.uuid)[:80]}")
         summary = (summaries.get(event.uuid) or "").strip()
         article = _first_non_empty_report_content(reports_cache.get(event.uuid, []))
         source_text = summary or article

@@ -339,17 +339,16 @@ def forget_finished(statuses=("completed", "failed")) -> int:
     return gone
 
 
-def forget_abandoned(older_than_s: float) -> int:
-    """Drop queued or running entries untouched for that long, and count them.
+def forget_abandoned() -> int:
+    """Drop the stalled entries no worker in this process is on, and count them.
 
     For a worker that died with its process: nothing will ever move those jobs
-    off "running". The caller picks a wait long enough that work which is merely
-    slow between two progress messages keeps its entry.
+    off "running". A job still working here keeps its entry however quiet it
+    is. One working in another process only leaves the list, and goes on.
     """
-    cutoff = time.time() - older_than_s
     gone = 0
     for job in list_jobs():
-        if job.get("status") in IN_FLIGHT and job.get("updated_at", 0) < cutoff:
+        if stalled(job) and not worker_alive(job["id"]):
             forget_job(job["id"])
             gone += 1
     return gone

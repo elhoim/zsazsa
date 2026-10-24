@@ -11,7 +11,7 @@ from analyser.products.flash_intel import process as process_flash_intel
 from analyser.reader import get_new_scraper_events, load_last_briefing, save_last_briefing, save_last_run
 from core.db import init_db, log_event, log_pipeline_run_start, log_pipeline_run_end
 from core.misp_client import get_misp, get_misp_webapp
-from webapp import analyser_pipeline, feed_cache, job_store, misp_store
+from webapp import analyser_pipeline, audit, feed_cache, job_store, misp_store
 from webapp.utils import scraper_enabled
 
 
@@ -68,6 +68,8 @@ def main() -> None:
     logger.info("Analyser started")
 
     init_db()
+    # The scheduled actions write to the audit log, and the runs prune it.
+    audit.init()
     run_id = log_pipeline_run_start("analyser", triggered_by="cli")
 
     try:

@@ -192,12 +192,14 @@ class Route(unittest.TestCase):
 
 
 class Job(unittest.TestCase):
-    def run_job(self, mode, cached=None):
+    def run_job(self, mode, cached=None, source=SERVER):
         misp = mock.create_autospec(PyMISP, instance=True)
         misp.get_event.return_value = MISP_JSON
-        cached = cached if cached is not None else [{"uuid": UUID, "source_id": "intern-misp", "source_report_count": 1}]
+        cached = cached if cached is not None else [{"uuid": UUID, "source_id": source["id"], "source_report_count": 1}]
         updates = []
-        with mock.patch.object(data_collection, "_sources", return_value=[SERVER]), \
+        with mock.patch.object(data_collection, "_sources", return_value=[source]), \
+             mock.patch.object(data_collection.config, "AI_CONNECTOR_ENABLED", True, create=True), \
+             mock.patch.object(data_collection.misp_store, "_scraper_misp", return_value=misp), \
              mock.patch.object(data_collection.collection_cache, "get_events_by_uuids", return_value=cached), \
              mock.patch.object(data_collection, "PyMISP", return_value=misp), \
              mock.patch.object(data_collection.job_store, "update_job",
@@ -207,7 +209,7 @@ class Job(unittest.TestCase):
              mock.patch.object(data_collection, "_generate_ai_summary", return_value=(True, "ok", 200)) as report, \
              mock.patch.object(data_collection, "_generate_event_summary",
                                return_value=(True, "ok", 200)) as event:
-            data_collection._run_summarise_job("job-1", [{"uuid": UUID, "sourceId": "intern-misp"}],
+            data_collection._run_summarise_job("job-1", [{"uuid": UUID, "sourceId": source["id"]}],
                                                "koen@example.org", mode=mode)
         result = next(u["result"] for u in updates if "result" in u)
         return result, report, event
@@ -248,6 +250,13 @@ class Job(unittest.TestCase):
         self.assertEqual(self.run_job("event")[0]["message"], "1 event summary/summaries created")
         self.assertEqual(self.run_job("report")[0]["message"], "1 summary/summaries created")
 
+    def test_the_job_makes_no_event_summary_where_the_page_offers_none(self):
+        """The route refuses it, but the job is what writes to MISP."""
+        result, report, event = self.run_job("both", source=SCRAPER)
+        event.assert_not_called()
+        report.assert_called_once()
+        self.assertEqual(result["event_summaries"], 0)
+
     def test_an_event_without_a_report_still_gets_the_event_summary(self):
         cached = [{"uuid": UUID, "source_id": "intern-misp", "source_report_count": 0}]
         result, report, _event_summary = self.run_job("event", cached)
@@ -256,7 +265,7 @@ class Job(unittest.TestCase):
 
 
 class EventSummary(unittest.TestCase):
-    def summarise(self, module=None, published=None):
+    def summarise(self, module=None, published=None, event_json=MISP_JSON["Event"]):
         misp = mock.create_autospec(PyMISP, instance=True)
         misp.add_event_report.return_value = {"EventReport": {"id": "3"}}
         misp.publish.return_value = published or {"saved": True, "success": True}
@@ -265,8 +274,7 @@ class EventSummary(unittest.TestCase):
              mock.patch.object(data_collection.ai_connector, "settings", return_value=SETTINGS), \
              mock.patch.object(data_collection, "_refresh_cached_event"), \
              mock.patch.object(data_collection.audit, "record") as audit:
-            result = data_collection._generate_event_summary(misp, _event("Article"), MISP_JSON["Event"],
-                                                             "intern-misp")
+            result = data_collection._generate_event_summary(misp, _event("Article"), event_json, "intern-misp")
         return result, misp, summarise, audit
 
     def test_the_summary_is_a_report_of_its_own_for_our_organisation(self):
@@ -281,7 +289,15 @@ class EventSummary(unittest.TestCase):
 
     def test_the_module_reads_misp_s_json_of_the_event(self):
         _result, _misp, summarise, _audit = self.summarise()
-        self.assertIs(summarise.call_args.args[1], MISP_JSON["Event"])
+        self.assertEqual(summarise.call_args.args[1], MISP_JSON["Event"])
+
+    def test_the_module_is_not_given_deleted_reports_or_zsazsa_s_summaries(self):
+        """MISP's JSON keeps a deleted report, text someone took back."""
+        reports = [{"name": "Article", "content": "The article"},
+                   {"name": "Retracted", "content": "Wrong", "deleted": True},
+                   {"name": "[AI-Summary] Overlord", "content": "AI"}]
+        _result, _misp, summarise, _audit = self.summarise(event_json={**MISP_JSON["Event"], "EventReport": reports})
+        self.assertEqual(summarise.call_args.args[1]["EventReport"], reports[:1])
 
     def test_a_module_error_adds_nothing(self):
         with self.assertLogs("webapp.routes.data_collection", level="WARNING"):

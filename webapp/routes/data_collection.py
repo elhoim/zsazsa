@@ -639,6 +639,11 @@ def _generate_event_summary(misp, event, misp_json, source_id, user=""):
     Returns (ok, message_or_error, http_status).
     """
     uuid = event.uuid
+    # MISP's JSON keeps the deleted reports, and a summary zsazsa wrote is not
+    # what the event says either.
+    misp_json = {**misp_json, "EventReport": [
+        r for r in misp_json.get("EventReport") or []
+        if not r.get("deleted") and not collection_cache.is_ai_summary_report(r.get("name"))]}
     try:
         summary = ai_connector.summarise_event(ai_connector.settings(), misp_json)
     except ai_connector.ModuleError as exc:
@@ -1674,7 +1679,7 @@ def _run_summarise_job(job_id: str, batch: list[dict], user: str,
             # What the event still lacks: a summary of its report, which needs one
             # to summarise, and the module's summary of the event.
             report_summary = mode != "event" and row.get("source_report_count") and not row.get("has_ai_summary")
-            event_summary = mode != "report" and not row.get("has_ai_event_summary")
+            event_summary = mode != "report" and _may_summarise_event(src) and not row.get("has_ai_event_summary")
             if not (report_summary or event_summary):
                 skipped += 1
                 continue

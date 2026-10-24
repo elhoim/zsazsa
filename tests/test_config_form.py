@@ -234,6 +234,13 @@ class ConfigSave(unittest.TestCase):
         self.assertEqual(self.saved()["MISP_SERVERS"][-1]["org_filter"], org_filter)
         self.assertTrue(self.save_server("").get_json()["ok"])
 
+    def test_an_audit_retention_of_0_is_kept(self):
+        """0 keeps the audit log for good, which "or the default" would undo."""
+        form = self.full_form()
+        form["AUDIT_LOG_RETENTION_DAYS"] = "0"
+        self.client.post("/config", data=form)
+        self.assertEqual(self.saved()["AUDIT_LOG_RETENTION_DAYS"], 0)
+
     def test_a_server_may_allow_adding_reports(self):
         for sent, stored in ((True, True), (None, False)):
             with self.subTest(sent=sent):

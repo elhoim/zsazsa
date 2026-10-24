@@ -195,7 +195,8 @@ def log_pipeline_run_end(run_id: int, status: str, result: dict | None = None) -
 
 def _prune_logs() -> None:
     event_days = getattr(config, "EVENT_LOG_RETENTION_DAYS", 90)
-    run_days = getattr(config, "PIPELINE_RUN_LOG_RETENTION_DAYS", 365)
+    run_days = getattr(config, "PIPELINE_RUN_LOG_RETENTION_DAYS", 90)
+    audit_days = getattr(config, "AUDIT_LOG_RETENTION_DAYS", 365)
     try:
         with _connect() as conn:
             conn.execute(
@@ -206,6 +207,14 @@ def _prune_logs() -> None:
                 "DELETE FROM pipeline_run_log WHERE started_at < datetime('now', ?)",
                 (f"-{run_days} days",),
             )
+            # 0 keeps the audit log for good. Its timestamps are written as
+            # 2026-10-24T14:33:49, so the cutoff is too: datetime() puts a space
+            # where the T is, which as text sorts before every entry of that day.
+            if audit_days:
+                conn.execute(
+                    "DELETE FROM audit_log WHERE timestamp < strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)",
+                    (f"-{audit_days} days",),
+                )
     except sqlite3.Error as e:
         logger.warning("Log pruning failed: %s", e)
 

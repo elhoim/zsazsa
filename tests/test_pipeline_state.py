@@ -4,7 +4,9 @@ Two things that look like display details and are not. The watermark decides
 which scraper events the next analyser run will see, so anything that moves it
 without processing those events drops them for good. And a run row is only
 closed by the process that opened it, so the page reading them has to allow for
-one that never came back.
+one that never came back. Before each summary it writes, a run says which one it
+is on, so a slow run looks alive and one that died shows how far it got. The end
+of a run prunes the logs, the audit log too unless its retention is 0.
 
     python -m unittest tests.test_pipeline_state
 """
@@ -15,10 +17,13 @@ import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest import mock
 
 import config
 from analyser import reader
+from core import db
+from webapp import analyser_pipeline, audit
 from webapp.routes import dashboard
 from webapp.routes.dashboard import _pipeline_status
 from webapp.routes.pipeline import _mark_interrupted_runs
@@ -111,6 +116,66 @@ class InterruptedRuns(unittest.TestCase):
         ])
         for row in rows:
             self.assertNotIn("interrupted", row)
+
+
+
+class SummaryProgress(unittest.TestCase):
+    def test_each_missing_summary_is_announced_before_it_is_written(self):
+        events = [SimpleNamespace(uuid=c * 36, info=f"Event {c}", tags=[]) for c in "abc"]
+        reports = {"a" * 36: [SimpleNamespace(name="Article", content="An article")],
+                   "b" * 36: [SimpleNamespace(name="Article", content="An article"),
+                              SimpleNamespace(name="[AI-Summary] Event b", content="Done before")],
+                   "c" * 36: [SimpleNamespace(name="Article", content="An article")]}
+        said = []
+        pipeline = analyser_pipeline
+        with mock.patch.object(pipeline, "_refresh_scraper_cache"), \
+             mock.patch.object(pipeline, "_incomplete_scraper_events", return_value=(None, events)), \
+             mock.patch.object(pipeline, "_event_reports", side_effect=lambda misp, e: reports[e.uuid]), \
+             mock.patch.object(pipeline, "_event_http_error", return_value=False), \
+             mock.patch.object(pipeline, "_build_galaxy_lookup", return_value={}), \
+             mock.patch.object(pipeline, "_ensure_ai_summary",
+                               side_effect=lambda misp, e, r, g: said.append(f"ensure: {e.info}") or ("", e.info != "Event b")):
+            pipeline._common_candidate_events(
+                progress=lambda step, state, message="": said.append(message) if step == "generate-summaries" else None)
+        self.assertEqual(said[:7], ["2 of 3 event(s) need an AI summary.",
+                                    "AI summary 1 of 2: Event a", "ensure: Event a",
+                                    "ensure: Event b",
+                                    "AI summary 2 of 2: Event c", "ensure: Event c",
+                                    "AI summary pass complete: created 2 new summary report(s)."])
+
+
+
+class LogRetention(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(config, "DB_FILE", os.path.join(tmp.name, "test.db"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        db.init_db()
+        audit.init()
+
+    def entries_after_pruning(self, days):
+        now = datetime.now(timezone.utc)
+        ages = {"today": timedelta(0), "a day inside": timedelta(days=364),
+                "an hour past": timedelta(days=365, hours=1), "long gone": timedelta(days=500)}
+        with db.row_connection() as conn:
+            for label, age in ages.items():
+                conn.execute("INSERT INTO audit_log (timestamp, user, action, entity_type, details)"
+                             " VALUES (?, 'a@example.org', 'notify', 'fia', ?)",
+                             ((now - age).strftime("%Y-%m-%dT%H:%M:%S"), label))
+        with mock.patch.object(config, "AUDIT_LOG_RETENTION_DAYS", days, create=True):
+            db._prune_logs()
+        with db.row_connection() as conn:
+            return [r["details"] for r in conn.execute("SELECT details FROM audit_log ORDER BY id")]
+
+    def test_entries_past_the_retention_go_to_the_hour(self):
+        """The timestamps have a T where datetime() has a space, which kept a
+        whole day of entries past their retention."""
+        self.assertEqual(self.entries_after_pruning(365), ["today", "a day inside"])
+
+    def test_0_keeps_the_audit_log_for_good(self):
+        self.assertEqual(self.entries_after_pruning(0), ["today", "a day inside", "an hour past", "long gone"])
 
 
 if __name__ == "__main__":

@@ -2,17 +2,22 @@
 
 The store keeps jobs in Redis and falls back to memory when it is unreachable.
 The two copies have to stay in step, or a job written during an outage outlives
-the Redis one and reappears on the next blip.
+the Redis one and reappears on the next blip. A stalled entry that no worker in
+this process is on can be removed, from Abandoned and from All in the panel.
 
     python -m unittest tests.test_job_store
 """
 
 import json
+import threading
 import time
 import unittest
 from unittest import mock
 
+from flask import Flask
+
 from webapp import job_store
+from webapp.routes import dashboard
 
 
 class FakeRedis:
@@ -113,14 +118,35 @@ class ForgetFinished(unittest.TestCase):
                 stored["updated_at"] = time.time() - seconds
                 self.redis.hash[job_id] = json.dumps(stored)
 
-    def test_only_long_abandoned_unfinished_entries_go(self):
-        """A local LLM can be quiet for a while between progress messages, so a
-        job that is merely slow has to survive the abandoned sweep."""
+    def test_a_stalled_entry_without_a_worker_goes(self):
+        """A run cut off by a restart had to stay quiet for four hours first,
+        and All left it alone, so for an afternoon nothing removed it."""
         self._quiet_for("running", 40 * 60)
-        self._quiet_for("queued", 5 * 3600)
+        self._quiet_for("queued", 5 * 60)
 
-        self.assertEqual(job_store.forget_abandoned(4 * 3600), 1)
-        self.assertEqual(self._statuses(), ["completed", "failed", "running"])
+        self.assertEqual(job_store.forget_abandoned(), 1)
+        self.assertEqual(self._statuses(), ["completed", "failed", "queued"])
+
+    def test_a_quiet_job_this_process_is_still_working_on_stays(self):
+        self._quiet_for("running", 5 * 3600)
+        running = next(job for job in job_store.list_jobs() if job["status"] == "running")
+        done = threading.Event()
+        worker = threading.Thread(target=done.wait, name=job_store.thread_name(running["id"]))
+        worker.start()
+        self.addCleanup(worker.join)
+        self.addCleanup(done.set)
+
+        self.assertEqual(job_store.forget_abandoned(), 0)
+        self.assertIn("running", self._statuses())
+
+    def test_all_in_the_panel_takes_the_abandoned_entries_too(self):
+        self._quiet_for("running", 40 * 60)
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.bp)
+        with mock.patch.object(dashboard.audit, "record"):
+            reply = app.test_client().post("/pipeline/jobs/clear", json={"scope": "all"})
+        self.assertEqual(reply.get_json(), {"ok": True, "removed": 3})
+        self.assertEqual(self._statuses(), ["queued"])
 
 
 if __name__ == "__main__":

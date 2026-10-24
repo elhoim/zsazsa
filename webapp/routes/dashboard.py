@@ -222,12 +222,6 @@ def pipeline_job_status(job_id: str):
     return jsonify({"ok": True, "job": job})
 
 
-# Dropping the entry of a job that is only slow would hide work that is still
-# running, so removal asks for far more silence than the stalled marker does.
-# The analyser reports progress once per step, not once per LLM call, so a step
-# that summarises a batch on a local model can be quiet for a long while.
-_JOB_REMOVABLE_AFTER_SECONDS = 4 * 3600
-
 # Which AI feature to report on when an unfinished job is probed. A job that is
 # not listed here does not call a model, so there is nothing to ask about, and
 # the feature matters because each one can be pointed at its own provider and
@@ -318,9 +312,9 @@ def clear_jobs():
     """Drop job entries from the list in the top bar.
 
     POST JSON: {"scope": "completed"} for the runs that succeeded, {"scope":
-    "all"} for every finished run, failures included, or {"scope": "abandoned"}
-    for entries left behind by a worker that died with its process. This removes
-    the record, not the work.
+    "abandoned"} for entries left behind by a worker that died with its process,
+    or {"scope": "all"} for both and the failed runs. This removes the record,
+    not the work.
     """
     body, err = _json_object()
     if err:
@@ -329,10 +323,11 @@ def clear_jobs():
     if scope not in ("completed", "all", "abandoned"):
         return jsonify({"ok": False, "error": "Unknown scope."}), 400
 
-    if scope == "abandoned":
-        removed = job_store.forget_abandoned(_JOB_REMOVABLE_AFTER_SECONDS)
+    if scope == "completed":
+        removed = job_store.forget_finished(("completed",))
     else:
-        statuses = ("completed",) if scope == "completed" else ("completed", "failed")
-        removed = job_store.forget_finished(statuses)
+        removed = job_store.forget_abandoned()
+        if scope == "all":
+            removed += job_store.forget_finished()
     audit.record("clear", "background-jobs", details=f"scope={scope} removed={removed}")
     return jsonify({"ok": True, "removed": removed})

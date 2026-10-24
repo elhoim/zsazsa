@@ -463,7 +463,7 @@ The System tab holds six cards.
 
 **MISP event distribution** sets `MISP_EVENT_DISTRIBUTION`, the distribution level given to every event zsazsa creates in MISP.
 
-**Analyser** contains `POLL_WINDOW_HOURS` (how far back the analyser looks for new events on each run), what the scheduled analyser makes (see [The scheduled analyser](#the-scheduled-analyser)), `EVENT_LOG_RETENTION_DAYS` (how long rows in the `event_log` table are kept) and `PIPELINE_RUN_LOG_RETENTION_DAYS` (how long pipeline run history is kept). **Logging** sets `LOG_LEVEL`. **Web server** covers `HOSTNAME` and `PORT`, plus `SSL_ENABLED`, `SSL_CERT` and `SSL_KEY` for running the built-in server with TLS. After changing the port or SSL settings, restart the application for the change to take effect. zsazsa listens on `0.0.0.0` unless `ZSAZSA_BIND` in its environment names another address, and `ZSAZSA_PORT` there takes the place of `PORT`; the Docker setup sets both. `HOSTNAME` does not change the listener: it is kept for reference and for building links.
+**Analyser** contains `POLL_WINDOW_HOURS` (how far back the analyser looks for new events on each run), what the scheduled analyser makes (see [The scheduled analyser](#the-scheduled-analyser)), `EVENT_LOG_RETENTION_DAYS` (how long rows in the `event_log` table are kept), `PIPELINE_RUN_LOG_RETENTION_DAYS` (how long pipeline run history is kept) and `AUDIT_LOG_RETENTION_DAYS` (how long the audit log under Reporting > Logs is kept, 0 for good). A product's delivery badge comes from the audit log, so it goes when the entry does. **Logging** sets `LOG_LEVEL`. **Web server** covers `HOSTNAME` and `PORT`, plus `SSL_ENABLED`, `SSL_CERT` and `SSL_KEY` for running the built-in server with TLS. After changing the port or SSL settings, restart the application for the change to take effect. zsazsa listens on `0.0.0.0` unless `ZSAZSA_BIND` in its environment names another address, and `ZSAZSA_PORT` there takes the place of `PORT`; the Docker setup sets both. `HOSTNAME` does not change the listener: it is kept for reference and for building links.
 
 **Single sign-on** is described in its own section below.
 
@@ -480,6 +480,7 @@ The System tab holds six cards.
 | `ANALYSER_DAILY_BRIEFING_HOUR` | Hour (UTC) from which the daily briefing is made |
 | `EVENT_LOG_RETENTION_DAYS` | How long rows in the `event_log` table are kept |
 | `PIPELINE_RUN_LOG_RETENTION_DAYS` | How long pipeline run history is kept |
+| `AUDIT_LOG_RETENTION_DAYS` | How long the audit log is kept (365 days by default, 0 keeps it for good) |
 | `LOG_LEVEL` | Logging verbosity |
 | `HOSTNAME` | Hostname or IP shown for reference and used to build links |
 | `PORT` | Port the application listens on |

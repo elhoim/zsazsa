@@ -13,6 +13,7 @@
 - The dashboard shows how many products wait for a review or are drafts.
 - On the manual entry form, the AI summary ticks the scope items it names. The form also has a MITRE ATT&CK picker.
 - The scheduled analyser can also make flash intel alerts from PIRs and GIRs, vulnerability advisories and the daily briefing. Switch them on under Settings > System > Analyser.
+- The audit log under Reporting > Logs is pruned after `AUDIT_LOG_RETENTION_DAYS`, 365 by default. 0 keeps it for good, which the Logs page then says.
 
 ### Changed
 
@@ -22,6 +23,8 @@
 - The PIR list hides rejected PIRs and the GIR list hides retired GIRs.
 - The data collection table shows the ten words most titles share. A click on one searches for it.
 - On the data collection page, the actions of an event wait while an AI summary is being written for it, and come back when the summary ends.
+- While the analyser writes AI summaries for a daily briefing, flash intel alerts or advisories, the job says which one it is on.
+- In Background jobs, Abandoned and All remove a stalled job that no worker is on, such as a run cut off by a restart. Before, it stayed listed for four hours.
 - An RFI shows the answers given at triage in an Intake card, and they can be corrected on its edit form.
 - The intake checklist of a PIR can be corrected on its edit form.
 - With SSO, working in zsazsa keeps the MISP session alive: every five minutes, zsazsa requests MISP to refresh it.
@@ -59,6 +62,8 @@
 - An advisory whose review state changed before this release lost its summary, CVSS, CWE and context tags. MISP keeps them as deleted attributes of its object: show the deleted attributes on the event in MISP and restore them.
 - The collection cache gets two new columns. They are added when zsazsa starts, so nothing needs doing.
 - The new `ANALYSER_*` settings need nothing. By default the scheduled analyser only makes flash intel alerts from focus points, as before.
+- The first run after the upgrade removes audit log entries older than a year, and with them the delivery badge of products sent before then. The scheduled analyser runs on the new code without a restart, so to keep them, add `AUDIT_LOG_RETENTION_DAYS = 0`, or the number of days you want, to `config/__init__.py` before updating.
+- `PIPELINE_RUN_LOG_RETENTION_DAYS` now defaults to 90 days. A value already saved under Settings stays as it is.
 - Behind an outbound proxy, add `EnvironmentFile=-/etc/environment` to `/etc/systemd/system/zsazsa.service`, then `systemctl daemon-reload` and restart zsazsa.
 
 ## 1.0.9

@@ -299,7 +299,8 @@ def _read() -> dict:
         "JOB_REDIS_PASSWORD": getattr(_config, "JOB_REDIS_PASSWORD", ""),
         "JOB_REDIS_KEY": getattr(_config, "JOB_REDIS_KEY", "zsazsa:jobs"),
         "EVENT_LOG_RETENTION_DAYS": getattr(_config, "EVENT_LOG_RETENTION_DAYS", 90),
-        "PIPELINE_RUN_LOG_RETENTION_DAYS": getattr(_config, "PIPELINE_RUN_LOG_RETENTION_DAYS", 365),
+        "PIPELINE_RUN_LOG_RETENTION_DAYS": getattr(_config, "PIPELINE_RUN_LOG_RETENTION_DAYS", 90),
+        "AUDIT_LOG_RETENTION_DAYS": getattr(_config, "AUDIT_LOG_RETENTION_DAYS", 365),
         "LOG_LEVEL": _config.LOG_LEVEL,
         "HOSTNAME": getattr(_config, "HOSTNAME", "0.0.0.0"),
         "PORT": getattr(_config, "PORT", 5000),
@@ -682,7 +683,9 @@ SCRAPER_MARKER_TAG = {values['SCRAPER_MARKER_TAG']!r}
 MISP_SCRAPER_LIMIT = {int(values.get('MISP_SCRAPER_LIMIT') or 500)}
 MISP_SCRAPER_SINCE_DAYS = {int(values.get('MISP_SCRAPER_SINCE_DAYS') or 0)}
 EVENT_LOG_RETENTION_DAYS = {int(values.get('EVENT_LOG_RETENTION_DAYS') or 90)}
-PIPELINE_RUN_LOG_RETENTION_DAYS = {int(values.get('PIPELINE_RUN_LOG_RETENTION_DAYS') or 365)}
+PIPELINE_RUN_LOG_RETENTION_DAYS = {int(values.get('PIPELINE_RUN_LOG_RETENTION_DAYS') or 90)}
+# 0 keeps the audit log for good.
+AUDIT_LOG_RETENTION_DAYS = {int(values.get('AUDIT_LOG_RETENTION_DAYS', 365))}
 
 # Manual sources pushing to the misp-scraper queue (Redis pub/sub the scraper subscribes to)
 SCRAPER_REDIS_HOST = {values.get('SCRAPER_REDIS_HOST', '127.0.0.1')!r}
@@ -887,7 +890,8 @@ def index():
             "ANALYSER_DAILY_BRIEFING_HOUR": min(23, max(0, _form_int("ANALYSER_DAILY_BRIEFING_HOUR", 21))),
             "SCRAPER_MARKER_TAG": _form_tag("SCRAPER_MARKER_TAG"),
             "EVENT_LOG_RETENTION_DAYS": max(1, _form_int("EVENT_LOG_RETENTION_DAYS", 90)),
-            "PIPELINE_RUN_LOG_RETENTION_DAYS": max(1, _form_int("PIPELINE_RUN_LOG_RETENTION_DAYS", 365)),
+            "PIPELINE_RUN_LOG_RETENTION_DAYS": max(1, _form_int("PIPELINE_RUN_LOG_RETENTION_DAYS", 90)),
+            "AUDIT_LOG_RETENTION_DAYS": max(0, _form_int("AUDIT_LOG_RETENTION_DAYS", 365)),
             "LOG_LEVEL": _form_str("LOG_LEVEL") or "INFO",
             "HOSTNAME": _form_str("HOSTNAME") or "0.0.0.0",
             "PORT": _form_int("PORT", 5000),

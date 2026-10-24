@@ -436,8 +436,8 @@
         </p>
         <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
           <span class="text-muted" style="font-size:.72rem;">
-            Removing clears the entry, not the work, so queued and running jobs keep theirs
-            until they end or go quiet for hours.
+            Removing clears the entry, not the work. A stalled job goes with All and
+            Abandoned, unless this instance is still working on it.
           </span>
           <div class="btn-group flex-shrink-0" role="group" aria-label="Remove job entries">
             <button type="button" class="btn btn-xs btn-outline-secondary" id="jobs-clear-completed"
@@ -445,11 +445,11 @@
               <i class="fas fa-broom me-1"></i>Completed
             </button>
             <button type="button" class="btn btn-xs btn-outline-secondary" id="jobs-clear-all"
-                    title="Remove every finished entry, failures included">
+                    title="Remove every finished entry, failures included, and the abandoned ones">
               <i class="fas fa-trash-can me-1"></i>All
             </button>
             <button type="button" class="btn btn-xs btn-outline-secondary" id="jobs-clear-abandoned"
-                    title="Remove entries left on running by a worker that died with its process">
+                    title="Remove the stalled entries this instance has no worker for, such as a run cut off by a restart">
               <i class="fas fa-ghost me-1"></i>Abandoned
             </button>
           </div>
@@ -1125,9 +1125,9 @@
 
     // The list is shared through Redis, so clearing it clears it for everyone.
     var CLEAR_CONFIRM = {
-      all: 'Remove every finished job entry, failures included?',
-      abandoned: 'Remove entries for work that went quiet hours ago? Anything still running '
-               + 'carries on, it just stops being listed.'
+      all: 'Remove every finished job entry, failures included, and the abandoned ones?',
+      abandoned: 'Remove the stalled entries this instance has no worker for? Work still going '
+               + 'in another process goes on, it just stops being listed.'
     };
 
     // Only the list is cleared; the server keeps anything still queued or
