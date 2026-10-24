@@ -38,6 +38,7 @@
 ### Security
 
 - Pillow is updated to 13.0.0 and certifi to 2026.10.19, for the advisories published against Pillow 12.3.0 and certifi 2026.7.22.
+- brotli is updated to 1.2.1, and brotlicffi to 1.2.1.0, for the out-of-bounds write in the Brotli decoder (GHSA-9v8h-qqgm-4m35).
 
 ### Upgrading
 

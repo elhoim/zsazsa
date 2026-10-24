@@ -12,9 +12,9 @@ beautifulsoup4==4.15.0
     #   markdownify
 blinker==1.9.0
     # via flask
-brotli==1.2.0 ; platform_python_implementation == 'CPython'
+brotli==1.2.1 ; platform_python_implementation == 'CPython'
     # via fonttools
-brotlicffi==1.2.0.2 ; platform_python_implementation != 'CPython'
+brotlicffi==1.2.1.0 ; platform_python_implementation != 'CPython'
     # via fonttools
 certifi==2026.10.19
     # via
