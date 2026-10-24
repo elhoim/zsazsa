@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -7,10 +8,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import config
 from core.logging_setup import setup_logging
 from analyser.products.flash_intel import process as process_flash_intel
-from analyser.reader import get_new_scraper_events, save_last_run
+from analyser.reader import get_new_scraper_events, load_last_briefing, save_last_briefing, save_last_run
 from core.db import init_db, log_event, log_pipeline_run_start, log_pipeline_run_end
 from core.misp_client import get_misp, get_misp_webapp
-from webapp import feed_cache, job_store
+from webapp import analyser_pipeline, feed_cache, job_store, misp_store
 from webapp.utils import scraper_enabled
 
 
@@ -22,6 +23,42 @@ def load_focus_points() -> dict:
         "threat_types": list(getattr(config, "FOCUS_POINTS_THREAT_TYPES", []) or []),
         "threat_actors": list(getattr(config, "FOCUS_POINTS_THREAT_ACTORS", []) or []),
     }
+
+
+def scheduled_actions(now: datetime) -> list[str]:
+    """The dashboard's analyser actions this run makes, in the order they go.
+
+    Settings > System switches each one on. The daily briefing comes once a
+    day, from its hour on, and last: it rejects the events it finds irrelevant,
+    which takes them out of the other two.
+    """
+    actions = []
+    if getattr(config, "ANALYSER_FLASH_INTEL_REQUIREMENTS", False):
+        actions.append("flash-intel")
+    if getattr(config, "ANALYSER_VULNERABILITY_ADVISORIES", False):
+        actions.append("vea")
+    if (getattr(config, "ANALYSER_DAILY_BRIEFING", False)
+            and now.hour >= getattr(config, "ANALYSER_DAILY_BRIEFING_HOUR", 21)
+            and load_last_briefing() != now.date().isoformat()):
+        actions.append("daily-briefing")
+    return actions
+
+
+def run_scheduled_actions() -> None:
+    logger = logging.getLogger(__name__)
+    now = datetime.now(timezone.utc)
+    for action in scheduled_actions(now):
+        label = analyser_pipeline.ACTION_LABELS[action]
+        job = job_store.create_job(action, label=f"Scheduled {label.lower()}",
+                                   steps=analyser_pipeline.action_steps(action))
+        # Yesterday's events too: one that came in after the last run of the
+        # day, or after the day's briefing, would otherwise never be read.
+        result = analyser_pipeline.run_action(job["id"], "analyser", triggered_by="schedule", days=2)
+        if result is None:
+            continue
+        logger.info("Scheduled %s: %s", label.lower(), result.get("message", ""))
+        if action == "daily-briefing":
+            save_last_briefing(now.date().isoformat())
 
 
 def main() -> None:
@@ -40,12 +77,15 @@ def main() -> None:
         # no events so the feed caches below still get their scheduled refresh.
         misp = misp_webapp = None
         events = []
-        if scraper_enabled():
+        alerted = set()
+        if not scraper_enabled():
+            logger.info("No MISP scraper configured; refreshing feed caches only")
+        elif getattr(config, "ANALYSER_FLASH_INTEL", True):
             misp = get_misp()
             misp_webapp = get_misp_webapp()
             events = get_new_scraper_events(misp)
-        else:
-            logger.info("No MISP scraper configured; refreshing feed caches only")
+            # One alert per event, whichever run made it and whatever became of it.
+            alerted = misp_store.flash_intel_source_uuids()
     except Exception as e:
         logger.error("Startup failed: %s", e)
         log_pipeline_run_end(run_id, "failed")
@@ -64,6 +104,9 @@ def main() -> None:
     try:
         for position, event in enumerate(events, start=1):
             job_store.update_job(job["id"], message=f"Event {position} of {len(events)}: {event.info or event.uuid[:8]}")
+            if event.uuid in alerted:
+                logger.info("Event %s already has a flash intel alert", event.uuid)
+                continue
             try:
                 result = process_flash_intel(misp, misp_webapp, event, focus_points)
                 outcome = result["outcome"]
@@ -97,6 +140,9 @@ def main() -> None:
         # moving it over a window nothing was read from skips it for good.
         if misp is not None:
             save_last_run(run_start)
+
+        if scraper_enabled():
+            run_scheduled_actions()
 
         # Cached indicator feeds are re-run here rather than on a timer of their
         # own: this run is already the scheduled MISP work of the application.

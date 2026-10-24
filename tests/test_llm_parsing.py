@@ -3,7 +3,8 @@
 Three answers matter beyond a well-formed one: JSON wrapped in a markdown
 fence, which local models produce often, an empty answer, which is what a model
 that runs out of tokens returns instead of an error, and an answer cut off at
-its token budget, which looks complete but is not.
+its token budget, which looks complete but is not. A report summary keeps each
+labelled line in a paragraph of its own, which Markdown would otherwise join.
 
     python -m unittest tests.test_llm_parsing
 """
@@ -174,6 +175,31 @@ class ModelParameters(unittest.TestCase):
         create = mock.Mock(side_effect=self.refusal("messages", "This model's maximum context length is exceeded."))
         with self.assertRaises(llm.openai.BadRequestError):
             self.call(create)
+
+
+class ReportSummaryLayout(unittest.TestCase):
+    """The prompt sets the labels one line below the other, and MISP showed
+    "What happened", "Who is affected" and "Why it matters" as one paragraph."""
+
+    SUMMARY = ("**Summary**\n\n**What happened:** A probe.\n**Who is affected:** PHP sites.\n\n"
+               "**MISP context**\n- **Targeted sector:** None identified\n- **Vendor/Technology:** PHP")
+
+    def summarise(self, answer):
+        with mock.patch.object(llm, "_call", return_value=answer), \
+             mock.patch.object(llm, "_feature_cfg", return_value={}), \
+             mock.patch.object(llm, "_resolve_prompt", return_value=""), \
+             mock.patch.object(llm, "_build_system_prompt", return_value=""):
+            return llm.summarise_report("An article")
+
+    def test_each_label_is_a_paragraph_and_the_context_list_stays_a_list(self):
+        self.assertEqual(self.summarise(self.SUMMARY),
+                         "**Summary**\n\n**What happened:** A probe.\n\n**Who is affected:** PHP sites.\n\n"
+                         "**MISP context**\n- **Targeted sector:** None identified\n- **Vendor/Technology:** PHP")
+
+    def test_an_answer_already_in_paragraphs_and_a_quality_line_are_left_alone(self):
+        for answer in ("**What happened:**\nA probe.\n\n**Who is affected:**\nPHP sites.",
+                       "QUALITY: insufficient content for analysis"):
+            self.assertEqual(self.summarise(answer), answer)
 
 
 class BriefingStoryFormatting(unittest.TestCase):

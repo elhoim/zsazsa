@@ -46,6 +46,17 @@ def save_last_run(timestamp: int) -> None:
     _save_state(state)
 
 
+def load_last_briefing() -> str | None:
+    """The day (UTC, ISO) the scheduled analyser last made a daily briefing."""
+    return _load_state().get("analyser_last_briefing")
+
+
+def save_last_briefing(day: str) -> None:
+    state = _load_state()
+    state["analyser_last_briefing"] = day
+    _save_state(state)
+
+
 def load_last_action() -> int | None:
     return _load_state().get("pipeline_last_action")
 

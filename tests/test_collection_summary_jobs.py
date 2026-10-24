@@ -4,7 +4,8 @@ The manual entry form has no MISP event yet, so it summarises the text on the
 page; that call goes through a job like every other LLM run, or the analyst is
 left watching a request that can outlive its proxy. An event typed in by hand
 lives on the webapp MISP rather than the scraper one, which is what kept it out
-of the summary path. And while a summary runs, the table holds back the actions
+of the summary path. An event from another MISP server is summarised only when
+that server allows adding reports, and then gets the report alone. And while a summary runs, the table holds back the actions
 of its events: a flag or a reject set meanwhile is undone when it finishes.
 
     python -m unittest tests.test_collection_summary_jobs
@@ -19,7 +20,7 @@ from unittest import mock
 
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask
+from flask import Flask, render_template
 from pymisp import PyMISP
 
 import config as _config
@@ -66,10 +67,15 @@ class SummariseContentEndpoint(unittest.TestCase):
 class SummariseContentJob(unittest.TestCase):
     """The form applies whatever a completed job carries, so an answer the model
     declined to give has to fail the job rather than complete it empty. A form
-    saved while the job ran has handed it the event to write into."""
+    saved while the job ran has handed it the event to write into. The job's
+    result also has the scope the summary's "MISP context" names, which the
+    form ticks."""
+
+    NO_SCOPE = {"sectors": [], "geographies": [], "attack_techniques": [], "threat_actors": [], "vendor": []}
 
     def _run(self, summarised, event=None):
         with mock.patch.object(api.job_store, "update_job") as update, \
+             mock.patch.object(api.analyser_pipeline, "galaxy_names_with_commas", return_value=frozenset()), \
              mock.patch.object(api.job_store, "get_job", return_value={"event": event} if event else {}), \
              mock.patch.object(api, "_add_summary_to_event") as self.added, \
              mock.patch.object(api.audit, "record"), \
@@ -80,14 +86,24 @@ class SummariseContentJob(unittest.TestCase):
     def test_a_summary_completes_the_job_with_the_text(self):
         final = self._run("Two hauliers were hit.")
         self.assertEqual(final["status"], "completed")
-        self.assertEqual(final["result"], {"summary": "Two hauliers were hit."})
+        self.assertEqual(final["result"], {"summary": "Two hauliers were hit.", "scope": self.NO_SCOPE})
         self.added.assert_not_called()
+
+    def test_the_scope_the_summary_names_comes_with_it(self):
+        summary = ("**What happened:** Two hauliers were hit.\n\n**MISP context**\n"
+                   "- **Targeted sector:** Transportation\n- **Geographic scope:** Belgium, France\n"
+                   "- **MITRE ATT&CK techniques:** T1566.001 T1486\n- **Threat actor:** None identified\n"
+                   "- **Vendor/Technology:** None identified")
+        scope = self._run(summary)["result"]["scope"]
+        self.assertEqual((scope["sectors"], scope["geographies"], scope["attack_techniques"], scope["threat_actors"]),
+                         (["Transportation"], ["Belgium", "France"], ["T1566.001", "T1486"], []))
 
     def test_the_summary_goes_into_an_event_saved_meanwhile(self):
         event = {"uuid": "e" * 36, "source": "Newsletter", "title": "An article"}
         final = self._run("Two hauliers were hit.", event=event)
         self.added.assert_called_once_with(event, "Two hauliers were hit.")
-        self.assertEqual(final["result"], {"summary": "Two hauliers were hit.", "added_to": "e" * 36})
+        self.assertEqual(final["result"], {"summary": "Two hauliers were hit.", "scope": self.NO_SCOPE,
+                                           "added_to": "e" * 36})
 
     def test_an_empty_answer_fails_the_job(self):
         final = self._run("  ")
@@ -188,6 +204,14 @@ class ManualEntrySavedDuringASummary(unittest.TestCase):
         _reply, hand, _flashes = self.save(summary_job="job-1", summary="Written by hand.")
         hand.assert_not_called()
 
+    def test_the_scope_ticked_on_the_form_is_saved_with_it(self):
+        self.client.post("/collection/manual/new", data={
+            "source": "Newsletter", "title": "An article", "sectors": ["Finance"],
+            "mitre_attack_techniques": ["Phishing - T1566", "Spearphishing Attachment - T1566.001"]})
+        data = data_collection.misp_store.create_manual_collection_event.call_args.args[0]
+        self.assertEqual((data["sectors"], data["mitre_attack_techniques"]),
+                         (["Finance"], ["Phishing - T1566", "Spearphishing Attachment - T1566.001"]))
+
     def test_a_failed_hand_over_leaves_the_event_saved(self):
         reply, _hand, flashes = self.save(hand_over=mock.Mock(side_effect=RuntimeError("MISP down")),
                                           summary_job="job-1")
@@ -215,29 +239,44 @@ class AiSummaryReport(unittest.TestCase):
 _SCRAPER_SOURCE = {"id": "scraper", "kind": "scraper", "label": "MISP scraper"}
 _MANUAL_SOURCE = {"id": "manual-slack", "kind": "manual", "label": "Slack"}
 _EXTERNAL_SOURCE = {"id": "partner-misp", "kind": "misp", "label": "Partner"}
-_ALL_SOURCES = [_SCRAPER_SOURCE, _MANUAL_SOURCE, _EXTERNAL_SOURCE]
+_REPORTING_SOURCE = {"id": "intern-misp", "kind": "misp", "label": "Intern", "url": "https://misp.intern.example",
+                     "api_key": "k", "verify_tls": True, "allow_reports": True}
+_ALL_SOURCES = [_SCRAPER_SOURCE, _MANUAL_SOURCE, _EXTERNAL_SOURCE, _REPORTING_SOURCE]
 
 
 class SummarisableSources(unittest.TestCase):
     """The summary is written back as a report, so it needs a MISP we may write
-    to: the scraper, or the webapp instance holding the manual entries."""
+    to: the scraper, the webapp instance holding the manual entries, or a MISP
+    server whose settings allow adding reports."""
 
-    def _kinds(self, sources=_ALL_SOURCES):
+    def _ids(self, sources=_ALL_SOURCES):
         with mock.patch.object(data_collection, "_sources", return_value=sources):
-            return data_collection._summarisable_sources()
+            return set(data_collection._summarisable_sources())
 
     def test_scraper_and_manual_events_can_be_summarised(self):
-        self.assertEqual(self._kinds(), {"scraper": "scraper", "manual-slack": "manual"})
+        self.assertLessEqual({"scraper", "manual-slack"}, self._ids())
 
     def test_a_third_party_misp_server_is_left_out(self):
-        self.assertNotIn("partner-misp", self._kinds())
+        self.assertNotIn("partner-misp", self._ids())
+
+    def test_a_misp_server_that_allows_reports_is_summarised(self):
+        self.assertIn("intern-misp", self._ids())
+
+    def test_the_setting_reaches_the_source_list(self):
+        servers = [{"id": "intern-misp", "label": "Intern", "url": "https://misp.intern.example",
+                    "allow_reports": True},
+                   {"id": "partner-misp", "label": "Partner", "url": "https://misp.partner.example"}]
+        with mock.patch.object(_config, "MISP_SERVERS", servers), \
+             mock.patch.object(collection_cache, "scraper_enabled", return_value=False):
+            sources = collection_cache._build_sources(with_manual=False)
+        self.assertEqual(self._ids(sources), {"intern-misp"})
 
     def test_manual_events_are_read_from_the_webapp_misp(self):
         """They are created there, so the scraper connection would not find them."""
         with mock.patch.object(data_collection.misp_store, "_misp", return_value="webapp"), \
              mock.patch.object(data_collection.misp_store, "_scraper_misp", return_value="scraper"):
-            self.assertEqual(data_collection._summarise_misp("manual"), "webapp")
-            self.assertEqual(data_collection._summarise_misp("scraper"), "scraper")
+            self.assertEqual(data_collection._connect_source(_MANUAL_SOURCE), ("webapp", None))
+            self.assertEqual(data_collection._connect_source(_SCRAPER_SOURCE), ("scraper", None))
 
 
 class SummariseRoute(unittest.TestCase):
@@ -280,6 +319,11 @@ class SummariseRoute(unittest.TestCase):
         reply, args = self.post({"source": "partner-misp"})
         self.assertEqual(reply.status_code, 400)
         self.assertIsNone(args)
+
+    def test_an_event_from_a_misp_server_that_allows_reports_starts_a_job(self):
+        reply, args = self.post({"source": "intern-misp"})
+        self.assertEqual(reply.status_code, 200)
+        self.assertEqual(args[1], [{"uuid": "u" * 36, "sourceId": "intern-misp"}])
 
 
 class EventsBeingSummarised(unittest.TestCase):
@@ -359,9 +403,13 @@ class BatchAcrossSources(unittest.TestCase):
         the connections themselves were opened.
         """
         if cached is None:
-            cached = [{"uuid": ev["uuid"], "source_id": ev["sourceId"]} for ev in batch]
+            cached = [{"uuid": ev["uuid"], "source_id": ev["sourceId"], "source_report_count": 1} for ev in batch]
         scraper_misp, webapp_misp = mock.MagicMock(), mock.MagicMock()
+        server_misp = mock.create_autospec(PyMISP, instance=True)
+        for misp in (scraper_misp, webapp_misp, server_misp):
+            misp.get_event.return_value = {"Event": {"id": "7", "info": "An event", "date": "2026-10-20"}}
         with mock.patch.object(data_collection, "_sources", return_value=sources) as list_sources, \
+             mock.patch.object(data_collection, "PyMISP", return_value=server_misp), \
              mock.patch.object(data_collection.collection_cache, "get_events_by_uuids",
                                side_effect=lambda uuids: [row for row in cached if row["uuid"] in uuids]), \
              mock.patch.object(data_collection.misp_store, "_scraper_misp", return_value=scraper_misp), \
@@ -372,7 +420,7 @@ class BatchAcrossSources(unittest.TestCase):
                                return_value=(True, "ok", 200)) as generate:
             data_collection._run_summarise_job("job-1", batch, "koen@example.org")
         return SimpleNamespace(list_sources=list_sources, open_webapp=open_webapp,
-                               scraper_misp=scraper_misp, webapp_misp=webapp_misp,
+                               scraper_misp=scraper_misp, webapp_misp=webapp_misp, server_misp=server_misp,
                                generate=generate, update=update)
 
     def test_each_event_is_loaded_from_its_own_source(self):
@@ -382,6 +430,11 @@ class BatchAcrossSources(unittest.TestCase):
         self.assertEqual(run.webapp_misp.get_event.call_args[0][0], "b" * 36)
         self.assertEqual([call[0][2] for call in run.generate.call_args_list],
                          ["scraper", "manual-slack"])
+
+    def test_an_event_from_a_misp_server_is_loaded_from_that_server(self):
+        run = self._run([{"uuid": "d" * 36, "sourceId": "intern-misp"}])
+        self.assertEqual(run.server_misp.get_event.call_args[0][0], "d" * 36)
+        self.assertEqual(run.generate.call_args.kwargs["kind"], "misp")
 
     def test_the_source_list_is_read_once_for_the_whole_batch(self):
         """It is fetched from MISP, so reading it per event would put two extra
@@ -399,6 +452,13 @@ class BatchAcrossSources(unittest.TestCase):
             sources=_ALL_SOURCES + [{"id": "manual-newsletter", "kind": "manual", "label": "News"}])
         self.assertEqual(run.webapp_misp.get_event.call_count, 2)
         run.open_webapp.assert_called_once()
+
+    def test_an_event_without_a_report_is_skipped(self):
+        """There is nothing to summarise, and one that only has an AI summary has
+        nothing either."""
+        run = self._run([{"uuid": "b" * 36, "sourceId": "manual-slack"}],
+                        cached=[{"uuid": "b" * 36, "source_id": "manual-slack", "source_report_count": 0}])
+        run.generate.assert_not_called()
 
     def test_an_event_the_collection_does_not_list_is_skipped(self):
         """A manual source writes to zsazsa's own MISP, where an id from the
@@ -563,6 +623,86 @@ class NamesWithCommas(unittest.TestCase):
                                                        "sectors": context["sectors"]})
         self.assertEqual(sorted(misp.tagged), ["country-tag", "sector-tag"])
         self.assertEqual(sorted(scope_tags), ["country-tag", "sector-tag"])
+
+
+class SummaryOnAnotherMispServer(unittest.TestCase):
+    """A MISP server that allows adding reports gets the summary report and
+    nothing else: for our organisation alone, with the event published again
+    without an e-mail, because MISP unpublishes an event a report is added to
+    and only published events are read from such a server. The workflow state
+    and the tags belong to that server."""
+
+    def summarise(self, kind="misp", published=None):
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.get_event_reports.return_value = [SimpleNamespace(content="An article about a RAT.")]
+        misp.add_event_report.return_value = {"EventReport": {"id": "3"}}
+        misp.publish.return_value = published or {"saved": True, "success": True}
+        event = SimpleNamespace(id=7, uuid="u" * 36, info="Overlord RAT campaign", tags=[])
+        with mock.patch("analyser.llm.summarise_report", return_value="## Summary\nA RAT."), \
+             mock.patch("analyser.tagger.set_workflow_state") as workflow, \
+             mock.patch.object(data_collection, "_tag_event_scope", return_value=[]) as scope, \
+             mock.patch.object(data_collection.collection_cache, "mark_ai_summary"), \
+             mock.patch.object(data_collection, "_refresh_cached_event"), \
+             mock.patch.object(data_collection.audit, "record"):
+            result = data_collection._generate_ai_summary(misp, event, "intern-misp", kind=kind)
+        return result, misp, workflow, scope
+
+    def test_the_report_is_for_our_organisation_only(self):
+        _result, misp, _workflow, _scope = self.summarise()
+        report = misp.add_event_report.call_args[0][1]
+        self.assertEqual(report.distribution, 0)
+        self.assertTrue(report.name.startswith(misp_store.AI_SUMMARY_PREFIX))
+
+    def test_the_event_is_published_again_without_an_email(self):
+        (ok, _message, _status), misp, _workflow, _scope = self.summarise()
+        self.assertTrue(ok)
+        misp.publish.assert_called_once_with(7, alert=False)
+
+    def test_the_workflow_state_and_tags_are_left_alone(self):
+        _result, misp, workflow, scope = self.summarise()
+        workflow.assert_not_called()
+        scope.assert_not_called()
+        misp.tag.assert_not_called()
+
+    def test_an_event_that_could_not_be_published_again_is_said_so(self):
+        with self.assertLogs("webapp.routes.data_collection", level="WARNING"):
+            (ok, message, _status), *_ = self.summarise(published={"errors": (403, "Not allowed")})
+        self.assertTrue(ok)
+        self.assertIn("could not be published again", message)
+
+    def test_a_scraper_event_keeps_the_event_distribution_and_is_not_published(self):
+        _result, misp, workflow, _scope = self.summarise(kind="scraper")
+        self.assertEqual(misp.add_event_report.call_args[0][1].distribution, 5)
+        misp.publish.assert_not_called()
+        workflow.assert_called_once()
+
+
+class SummaryButton(unittest.TestCase):
+    """The table offers the summary on an event of a source zsazsa may write to,
+    that has a report to summarise and no summary yet."""
+
+    def buttons(self, *events):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.multiple(_config, create=True, DB_FILE=str(Path(tmp) / "test.db"),
+                                 LOG_FILE=str(Path(tmp) / "test.log")), \
+             mock.patch.object(collection_cache, "start_worker"):
+            app = create_app()
+            with app.test_request_context():
+                html = render_template("data_collection/_list_table.html", events=list(events),
+                                       flagged_uuids=set(), events_being_summarised={},
+                                       summarisable_source_ids={"intern-misp"}, event_summary_source_ids=set())
+        return [b["data-uuid"] for b in BeautifulSoup(html, "html.parser").select(".create-summary-btn")]
+
+    def row(self, uuid, source_id="intern-misp", report_count=1, has_ai_summary=False):
+        return {"uuid": uuid, "source_id": source_id, "source_kind": "misp", "info": "Event", "tags": [],
+                "report_count": report_count, "source_report_count": report_count, "has_ai_summary": has_ai_summary}
+
+    def test_only_an_event_with_a_report_and_no_summary_gets_the_button(self):
+        self.assertEqual(self.buttons(self.row("with-report"),
+                                      self.row("no-report", report_count=0),
+                                      self.row("summarised", has_ai_summary=True),
+                                      self.row("partner", source_id="partner-misp")),
+                         ["with-report"])
 
 
 if __name__ == "__main__":

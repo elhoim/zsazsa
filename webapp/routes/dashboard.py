@@ -8,8 +8,7 @@ from flask import Blueprint, jsonify, render_template
 
 import config
 from analyser import llm
-from analyser.reader import load_last_action, load_last_run, save_last_action
-from core.db import log_pipeline_run_start, log_pipeline_run_end
+from analyser.reader import load_last_action, load_last_run
 from webapp import analyser_pipeline, audit, collection_cache
 from webapp import job_store, misp_session, misp_store
 from webapp.routes import setup_wizard
@@ -18,94 +17,6 @@ from webapp.utils import json_body as _json_object, ordered_counts, scraper_enab
 
 logger = logging.getLogger(__name__)
 bp = Blueprint("dashboard", __name__)
-
-
-_ACTION_LABELS = {
-    "daily-briefing": "Daily briefing",
-    "flash-intel": "Flash intel alert",
-    "vea": "Vulnerability advisory",
-}
-
-
-def _steps_for_action(action: str) -> list[dict]:
-    common = [
-        {"id": "refresh-cache", "label": "Refresh scraper cache", "state": "pending"},
-        {"id": "collect-events", "label": "Load today's incomplete events", "state": "pending"},
-        {"id": "filter-events", "label": "Filter hard negatives", "state": "pending"},
-        {"id": "generate-summaries", "label": "Generate missing LLM summaries", "state": "pending"},
-    ]
-    if action == "daily-briefing":
-        common.extend([
-            {"id": "review-relevance", "label": "Review relevance and usefulness", "state": "pending"},
-            {"id": "build-briefing", "label": "Build briefing story set", "state": "pending"},
-            {"id": "check-overlap", "label": "Check overlap and remove duplicates", "state": "pending"},
-            {"id": "write-summary", "label": "Write the briefing summary", "state": "pending"},
-            {"id": "create-drafts", "label": "Create daily briefing draft", "state": "pending"},
-        ])
-    elif action == "flash-intel":
-        common.extend([
-            {"id": "match-requirements", "label": "Match events to PIR/GIR", "state": "pending"},
-            {"id": "create-drafts", "label": "Create flash intel draft(s)", "state": "pending"},
-        ])
-    elif action == "vea":
-        common.extend([
-            {"id": "detect-cves", "label": "Detect CVE matches", "state": "pending"},
-            {"id": "create-drafts", "label": "Create vulnerability advisory draft(s)", "state": "pending"},
-        ])
-    return common
-
-
-def _run_pipeline_job(job_id: str, user: str) -> None:
-    """Run one analyser action. ``user`` is the analyst who started it, read
-    from the request before this thread began, for the audit entries."""
-    job = job_store.get_job(job_id)
-    if not job:
-        return
-    action = job["action"]
-    handlers = {
-        "daily-briefing": analyser_pipeline.run_daily_briefing_action,
-        "flash-intel": analyser_pipeline.run_flash_intel_action,
-        "vea": analyser_pipeline.run_vea_action,
-    }
-    handler = handlers.get(action)
-    if handler is None:
-        job_store.update_job(job_id, status="failed", error="Unknown pipeline action.",
-                             message="Unknown pipeline action.")
-        return
-
-    run_id = log_pipeline_run_start(action, triggered_by="dashboard")
-    audit.record("run-start", "pipeline", entity_label=action, details="triggered by dashboard", user=user)
-    job_store.update_job(job_id, status="running", message="Running...")
-    job_store.append_log(job_id, f"Started action '{action}'.")
-
-    def _progress(*, step: str, state: str, message: str = ""):
-        job_store.set_step(job_id, step=step, state=state, message=message)
-
-    try:
-        result = handler(progress=_progress)
-        # Freshness only. Not save_last_run: that is the analyser's watermark
-        # for which scraper events it has already seen, and these actions read a
-        # different set (today's incomplete events), so moving it forward here
-        # would make the next analyser run skip everything published in between.
-        save_last_action(int(time.time()))
-        log_pipeline_run_end(run_id, "completed", result)
-        audit.record("run-complete", "pipeline", entity_label=action,
-                     details=(result or {}).get("message") or "", user=user)
-        job_store.complete_open_steps(job_id)
-        job_store.update_job(
-            job_id,
-            status="completed",
-            result=result,
-            message=(result or {}).get("message") or "Completed.",
-            error=None,
-        )
-        job_store.append_log(job_id, "Action completed.")
-    except Exception as exc:
-        log_pipeline_run_end(run_id, "failed")
-        audit.record("run-failed", "pipeline", entity_label=action, details=str(exc), user=user)
-        job_store.update_job(job_id, status="failed", error=str(exc), message=f"Failed: {exc}")
-        job_store.append_log(job_id, f"Action failed: {exc}")
-        logger.exception("Pipeline job %s failed", job_id)
 
 
 def _pipeline_status():
@@ -207,19 +118,30 @@ def widgets():
     except Exception:
         pending_email_sources = 0
 
-    # Awaiting feedback and the threat actor chart both read the alerts, so
-    # they are fetched once for the two.
+    # Awaiting feedback and the products to review read the alerts and the
+    # advisories, and the threat actor chart the alerts, so each is fetched once.
     try:
         fias = misp_store.list_fias()
     except Exception:
         logger.exception("Failed to load flash intel alerts for the dashboard")
         fias = []
+    try:
+        veas = misp_store.list_veas()
+    except Exception:
+        logger.exception("Failed to load vulnerability advisories for the dashboard")
+        veas = []
 
     try:
-        pending_feedback = misp_store.list_pending_feedback_products(fias)
+        pending_feedback = misp_store.list_pending_feedback_products(fias, veas)
     except Exception:
         logger.exception("Failed to load pending-feedback products")
         pending_feedback = []
+
+    try:
+        to_review = misp_store.products_to_review(fias, veas)
+    except Exception:
+        logger.exception("Failed to load the products to review")
+        to_review = []
 
     # Both summary charts show the eight busiest entries, most active first.
     try:
@@ -254,6 +176,7 @@ def widgets():
         cycle_counts=ordered_counts((g.review_cycle for g in active_girs), REVIEW_CYCLES),
         pending_email_sources=pending_email_sources,
         pending_feedback=pending_feedback,
+        to_review=to_review,
         actor_type_products=actor_type_products,
         throughput_by_source=throughput_by_source,
         configured_sources=configured_sources,
@@ -283,9 +206,9 @@ def run_pipeline_action():
     if action not in {"daily-briefing", "flash-intel", "vea"}:
         return jsonify({"ok": False, "error": "Unknown pipeline action."}), 400
 
-    job = job_store.create_job(action, label=_ACTION_LABELS.get(action, action),
-                               steps=_steps_for_action(action))
-    t = threading.Thread(target=_run_pipeline_job, args=(job["id"], misp_session.current_user_email()),
+    job = job_store.create_job(action, label=analyser_pipeline.ACTION_LABELS[action],
+                               steps=analyser_pipeline.action_steps(action))
+    t = threading.Thread(target=analyser_pipeline.run_action, args=(job["id"], misp_session.current_user_email()),
                          daemon=True, name=job_store.thread_name(job["id"]))
     t.start()
     return jsonify({"ok": True, "job_id": job["id"], "action": action})

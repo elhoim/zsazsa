@@ -184,7 +184,7 @@ class OtherLimitedSearches(unittest.TestCase):
     def test_todays_events_for_the_analyser(self):
         with mock.patch.object(analyser_pipeline, "scraper_enabled", return_value=True), \
              mock.patch.object(misp_store, "_scraper_misp", return_value=self.misp):
-            analyser_pipeline._today_incomplete_scraper_events()
+            analyser_pipeline._incomplete_scraper_events()
         self.assertEqual(self.order(), misp_store.NEWEST_FIRST)
 
     def test_the_pull_estimate_asks_as_the_refresh_does(self):

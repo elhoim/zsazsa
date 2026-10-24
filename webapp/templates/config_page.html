@@ -393,12 +393,58 @@
       </div>
 
       <div class="card content-card mb-4">
-        <div class="card-header"><i class="fas fa-gears me-2"></i>Analyser</div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="fas fa-gears me-2"></i>Analyser</span>
+          <button type="button" class="btn btn-link btn-sm p-0" data-bs-toggle="collapse" data-bs-target="#analyser-run-help"
+                  aria-expanded="false" aria-controls="analyser-run-help" title="How a scheduled run works">
+            <i class="fas fa-circle-info"></i>
+          </button>
+        </div>
         <div class="card-body">
+          <div class="collapse" id="analyser-run-help">
+            <div class="alert alert-info small">
+              <p class="fw-semibold mb-1">How a scheduled run works</p>
+              <ul class="mb-0 ps-3">
+                <li>The analyser runs from cron or from its container, every hour by default. It makes what is switched on below, in this order: the alerts from focus points, the alerts from PIRs and GIRs, the vulnerability advisories, and the daily briefing last, because it rejects the events it finds irrelevant.</li>
+                <li>The last three are the options of the <strong>Start analyser</strong> button on the dashboard. They show in the job list and on the Pipeline page like a run started there.</li>
+                <li>Those three read the scraper events of yesterday and today, so an event that came in after the last run of the day, or after the day's briefing, is not left out. An event already in a product is skipped.</li>
+                <li>An event gets one flash intel alert at most: an event any alert was made from, also a rejected one, is left alone.</li>
+                <li>The daily briefing comes once a day, from the hour set below.</li>
+                <li>Before they start, those three write an AI summary for every new scraper event that has none, as the button does, so each one switched on adds a model call per event.</li>
+              </ul>
+            </div>
+          </div>
           <div class="mb-3">
             <label class="form-label">Poll window (hours)</label>
             <input type="number" name="POLL_WINDOW_HOURS" class="form-control" value="{{ cfg.POLL_WINDOW_HOURS }}" min="1" max="168">
             <div class="form-text">How far back to look for new scraper events on each run.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">On each scheduled run, make</label>
+            {% for name, label, help in (
+                 ('ANALYSER_FLASH_INTEL', 'Flash intel alerts from focus points',
+                  'New scraper events whose article the AI finds relevant to the focus points, as drafts.'),
+                 ('ANALYSER_FLASH_INTEL_REQUIREMENTS', 'Flash intel alerts from PIRs and GIRs',
+                  'Scraper events that match an active PIR or GIR, as drafts.'),
+                 ('ANALYSER_VULNERABILITY_ADVISORIES', 'Vulnerability advisories',
+                  'Scraper events that name a CVE, as drafts.'),
+                 ('ANALYSER_DAILY_BRIEFING', 'Daily briefing',
+                  'Once a day, from the hour below: the scraper events relevant to the focus points, as one draft.')) %}
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" name="{{ name }}" id="{{ name | lower }}"
+                     value="true" {{ 'checked' if cfg[name] }}>
+              <input type="hidden" name="{{ name }}" value="false">
+              <label class="form-check-label" for="{{ name | lower }}">{{ label }}</label>
+              <div class="form-text mt-0 mb-1">{{ help }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Daily briefing from (hour, UTC)</label>
+            <input type="number" name="ANALYSER_DAILY_BRIEFING_HOUR" class="form-control"
+                   value="{{ cfg.ANALYSER_DAILY_BRIEFING_HOUR }}" min="0" max="23">
+            <div class="form-text">The first scheduled run from this hour on makes the day's briefing. Events
+              that come in later go into the next day's.</div>
           </div>
           <div class="row g-3">
             <div class="col-md-6">

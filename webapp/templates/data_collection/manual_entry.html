@@ -160,6 +160,11 @@
             {{ galaxy_multiselect("threat_actors", values=[], items=galaxy_threat_actors) }}
           </div>
 
+          <div class="mb-3">
+            <label class="form-label">MITRE ATT&amp;CK techniques</label>
+            {{ galaxy_multiselect("mitre_attack_techniques", values=[], items=galaxy_mitre_attack) }}
+          </div>
+
           <div>
             <label class="form-label">Threat types</label>
             {{ tag_input("threat_types", values=[],
@@ -360,6 +365,32 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
+  /* Tick what the summary's "MISP context" names, in the pickers that hold it:
+     a name by its galaxy value, a technique by the T-number its value ends in.
+     Returns how many were ticked; a name the galaxy does not have is left out,
+     as it would get no tag on saving either. */
+  function tickScope(scope) {
+    var lower = function(names) { return (names || []).map(function(n) { return n.trim().toLowerCase(); }); };
+    var fields = {
+      geographic_scope: lower(scope.geographies),
+      sectors: lower(scope.sectors),
+      threat_actors: lower(scope.threat_actors),
+    };
+    var techniques = scope.attack_techniques || [];
+    var ticked = 0;
+    document.querySelectorAll('.gms-list input[type="checkbox"]').forEach(function(cb) {
+      var match = cb.name === 'mitre_attack_techniques'
+        ? techniques.indexOf((cb.value.match(/T\d{4}(?:\.\d{3})?$/) || [''])[0]) !== -1
+        : (fields[cb.name] || []).indexOf(cb.value.trim().toLowerCase()) !== -1;
+      if (match && !cb.checked) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        ticked++;
+      }
+    });
+    return ticked;
+  }
+
   document.getElementById('btn-llm-summary').addEventListener('click', function() {
     var content = document.getElementById('description').value.trim();
     var status = document.getElementById('llm-summary-status');
@@ -423,8 +454,12 @@ document.addEventListener('DOMContentLoaded', function() {
       status.textContent = 'Generating summary… (job ' + data.job_id.slice(0, 8) + ')';
       summaryJob.value = data.job_id;
       zsazsaFollowJob(data.job_id, function(job) {
-        summary.value = (job.result || {}).summary || '';
-        status.textContent = 'Summary generated.';
+        var result = job.result || {};
+        summary.value = result.summary || '';
+        var ticked = tickScope(result.scope || {});
+        status.textContent = ticked
+          ? 'Summary generated. ' + ticked + ' scope item' + (ticked === 1 ? '' : 's') + ' from its MISP context ticked on the right.'
+          : 'Summary generated.';
         status.className = 'form-text text-success';
         busy(false);
       }, fail);

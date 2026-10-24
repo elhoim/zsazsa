@@ -8,14 +8,16 @@ This module provides three manual analyser actions used from the dashboard:
 
 import logging
 import re
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 import config
 from analyser import llm, tagger
-from core.db import log_event
+from analyser.reader import save_last_action
+from core.db import log_event, log_pipeline_run_end, log_pipeline_run_start
 from core.vuln_lookup import fetch_cve_info
 from pymisp import MISPEventReport
-from webapp import collection_cache, matching as req_matching, misp_store
+from webapp import audit, collection_cache, job_store, matching as req_matching, misp_store
 from webapp.collection_cache import AI_SUMMARY_PREFIX
 from webapp.utils import scraper_enabled
 
@@ -183,16 +185,17 @@ def _refresh_scraper_cache() -> None:
     collection_cache.refresh_source({"id": "scraper", "kind": "scraper"})
 
 
-def _today_incomplete_scraper_events():
+def _incomplete_scraper_events(days=1):
+    """The scraper's incomplete events of the last ``days`` days, today included."""
     # These candidates come from the scraper only. Without one the pipeline runs
     # and reports no candidates, rather than failing the whole action.
     if not scraper_enabled():
         return None, []
     misp = misp_store._scraper_misp()
-    today = datetime.now(timezone.utc).date().isoformat()
+    first_day = datetime.now(timezone.utc).date() - timedelta(days=days - 1)
     events = misp.search(
         tags=[config.SCRAPER_MARKER_TAG],
-        date_from=today,
+        date_from=first_day.isoformat(),
         limit=getattr(config, "MISP_SCRAPER_LIMIT", 500),
         page=1,
         pythonify=True,
@@ -370,14 +373,15 @@ def _extract_admiralty(event, prefix: str) -> str:
     return ""
 
 
-def _common_candidate_events(progress=None, title_exclusions=None) -> tuple:
+def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tuple:
     _emit(progress, "refresh-cache", "in_progress", "Refreshing scraper cache...")
     _refresh_scraper_cache()
     _emit(progress, "refresh-cache", "completed", "Scraper cache refreshed.")
 
-    _emit(progress, "collect-events", "in_progress", "Collecting today's incomplete scraper events...")
-    misp, events = _today_incomplete_scraper_events()
-    _emit(progress, "collect-events", "completed", f"Loaded {len(events)} incomplete event(s) for today.")
+    period = "today" if days == 1 else f"the last {days} days"
+    _emit(progress, "collect-events", "in_progress", f"Collecting the incomplete scraper events of {period}...")
+    misp, events = _incomplete_scraper_events(days)
+    _emit(progress, "collect-events", "completed", f"Loaded {len(events)} incomplete event(s) of {period}.")
 
     hard_rejected = 0
     excluded_by_title = 0
@@ -462,10 +466,10 @@ def _duplicate_story_indexes(overlaps) -> set:
     return to_drop
 
 
-def run_daily_briefing_action(progress=None) -> dict:
+def run_daily_briefing_action(progress=None, days=1) -> dict:
     exclusions = daily_briefing_title_exclusions()
     misp, events, summaries, stats, reports_cache = _common_candidate_events(
-        progress=progress, title_exclusions=exclusions or None,
+        progress=progress, title_exclusions=exclusions or None, days=days,
     )
     decisions = list(stats.get("event_decisions", []))
 
@@ -661,9 +665,11 @@ def run_daily_briefing_action(progress=None) -> dict:
     }
 
 
-def run_flash_intel_action(progress=None) -> dict:
-    _misp, events, summaries, stats, _ = _common_candidate_events(progress=progress)
-    events = [e for e in events if not _event_has_product_tag(e, "flash-intel")]
+def run_flash_intel_action(progress=None, days=1) -> dict:
+    _misp, events, summaries, stats, _ = _common_candidate_events(progress=progress, days=days)
+    # One alert per event, whichever run made it and whatever became of it.
+    alerted = misp_store.flash_intel_source_uuids()
+    events = [e for e in events if e.uuid not in alerted]
 
     _emit(progress, "match-requirements", "in_progress", "Matching eligible events against active PIR/GIR scope...")
     match_events = []
@@ -745,8 +751,8 @@ def run_flash_intel_action(progress=None) -> dict:
     }
 
 
-def run_vea_action(progress=None) -> dict:
-    _misp, events, summaries, stats, reports_cache = _common_candidate_events(progress=progress)
+def run_vea_action(progress=None, days=1) -> dict:
+    _misp, events, summaries, stats, reports_cache = _common_candidate_events(progress=progress, days=days)
     events = [e for e in events if not _event_has_product_tag(e, "vea")]
 
     _emit(progress, "detect-cves", "in_progress", "Detecting CVE matches in eligible events...")
@@ -844,3 +850,96 @@ def run_vea_action(progress=None) -> dict:
         "message": f"Created {created} vulnerability advisory draft(s) from CVE-matched events.",
         **stats,
     }
+
+
+ACTION_LABELS = {
+    "daily-briefing": "Daily briefing",
+    "flash-intel": "Flash intel alert",
+    "vea": "Vulnerability advisory",
+}
+
+
+def action_steps(action: str) -> list[dict]:
+    common = [
+        {"id": "refresh-cache", "label": "Refresh scraper cache", "state": "pending"},
+        {"id": "collect-events", "label": "Load the incomplete events", "state": "pending"},
+        {"id": "filter-events", "label": "Filter hard negatives", "state": "pending"},
+        {"id": "generate-summaries", "label": "Generate missing LLM summaries", "state": "pending"},
+    ]
+    if action == "daily-briefing":
+        common.extend([
+            {"id": "review-relevance", "label": "Review relevance and usefulness", "state": "pending"},
+            {"id": "build-briefing", "label": "Build briefing story set", "state": "pending"},
+            {"id": "check-overlap", "label": "Check overlap and remove duplicates", "state": "pending"},
+            {"id": "write-summary", "label": "Write the briefing summary", "state": "pending"},
+            {"id": "create-drafts", "label": "Create daily briefing draft", "state": "pending"},
+        ])
+    elif action == "flash-intel":
+        common.extend([
+            {"id": "match-requirements", "label": "Match events to PIR/GIR", "state": "pending"},
+            {"id": "create-drafts", "label": "Create flash intel draft(s)", "state": "pending"},
+        ])
+    elif action == "vea":
+        common.extend([
+            {"id": "detect-cves", "label": "Detect CVE matches", "state": "pending"},
+            {"id": "create-drafts", "label": "Create vulnerability advisory draft(s)", "state": "pending"},
+        ])
+    return common
+
+
+def run_action(job_id: str, user: str, triggered_by: str = "dashboard", days: int = 1) -> dict | None:
+    """Run the analyser action of a job made with action_steps(), and return its
+    result, or None when it did not complete. ``user`` goes on the audit
+    entries: the analyst, read from the request before this thread began, or
+    "analyser" for the schedule. ``days`` is how many days of scraper events it
+    reads, today included."""
+    job = job_store.get_job(job_id)
+    if not job:
+        return None
+    action = job["action"]
+    handlers = {
+        "daily-briefing": run_daily_briefing_action,
+        "flash-intel": run_flash_intel_action,
+        "vea": run_vea_action,
+    }
+    handler = handlers.get(action)
+    if handler is None:
+        job_store.update_job(job_id, status="failed", error="Unknown pipeline action.",
+                             message="Unknown pipeline action.")
+        return None
+
+    run_id = log_pipeline_run_start(action, triggered_by=triggered_by)
+    audit.record("run-start", "pipeline", entity_label=action, details=f"triggered by {triggered_by}", user=user)
+    job_store.update_job(job_id, status="running", message="Running...")
+    job_store.append_log(job_id, f"Started action '{action}'.")
+
+    def _progress(*, step: str, state: str, message: str = ""):
+        job_store.set_step(job_id, step=step, state=state, message=message)
+
+    try:
+        result = handler(progress=_progress, days=days)
+        # Freshness only. Not save_last_run: that is the analyser's watermark
+        # for which scraper events it has already seen, and these actions read a
+        # different set (the day's incomplete events), so moving it forward here
+        # would make the next analyser run skip everything published in between.
+        save_last_action(int(time.time()))
+        log_pipeline_run_end(run_id, "completed", result)
+        audit.record("run-complete", "pipeline", entity_label=action,
+                     details=(result or {}).get("message") or "", user=user)
+        job_store.complete_open_steps(job_id)
+        job_store.update_job(
+            job_id,
+            status="completed",
+            result=result,
+            message=(result or {}).get("message") or "Completed.",
+            error=None,
+        )
+        job_store.append_log(job_id, "Action completed.")
+        return result
+    except Exception as exc:
+        log_pipeline_run_end(run_id, "failed")
+        audit.record("run-failed", "pipeline", entity_label=action, details=str(exc), user=user)
+        job_store.update_job(job_id, status="failed", error=str(exc), message=f"Failed: {exc}")
+        job_store.append_log(job_id, f"Action failed: {exc}")
+        logger.exception("Pipeline job %s failed", job_id)
+        return None

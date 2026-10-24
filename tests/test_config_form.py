@@ -6,7 +6,8 @@ rendered, would otherwise be written back as an empty string, an empty list or
 False. That silently drops MISP keys, SMTP passwords and TLS switches.
 
 An additional MISP server's organisation filter is also checked on save, because
-the collection sources page shows it back.
+the collection sources page shows it back, and a server entry is written back
+with the keys it has, so one saved before a release added a key stays as it was.
 
     python -m unittest tests.test_config_form
 """
@@ -232,6 +233,23 @@ class ConfigSave(unittest.TestCase):
         self.assertTrue(self.save_server(org_filter).get_json()["ok"])
         self.assertEqual(self.saved()["MISP_SERVERS"][-1]["org_filter"], org_filter)
         self.assertTrue(self.save_server("").get_json()["ok"])
+
+    def test_a_server_may_allow_adding_reports(self):
+        for sent, stored in ((True, True), (None, False)):
+            with self.subTest(sent=sent):
+                body = {"label": "Partner", "url": "https://misp.partner.example"}
+                if sent is not None:
+                    body["allow_reports"] = sent
+                self.assertTrue(self.client.post("/config/sources/save-server", json=body).get_json()["ok"])
+                self.assertIs(self.saved()["MISP_SERVERS"][-1]["allow_reports"], stored)
+
+    def test_a_server_saved_by_an_older_release_is_written_back_as_it_was(self):
+        """It has no allow_reports, which was written back as None."""
+        server = {"id": "partner", "label": "Partner", "url": "https://misp.partner.example",
+                  "api_key": "k", "verify_tls": True, "enabled": True}
+        with mock.patch.object(_config, "MISP_SERVERS", [server]):
+            self.client.post("/config", data={})
+        self.assertEqual(self.saved()["MISP_SERVERS"], [server])
 
 
 if __name__ == "__main__":

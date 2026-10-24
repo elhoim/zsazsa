@@ -521,7 +521,22 @@ def summarise_report(report_content: str, event_info: str = "", tags: list = Non
         ctx_lines.append(f"Event tags: {', '.join(tags)}")
     prefix = "\n".join(ctx_lines)
     user_message = f"{prefix}\n\nReport content:\n{report_content[:12000]}" if prefix else f"Report content:\n{report_content[:12000]}"
-    return _call(system, user_message, 1024, feature="summarise_report", cfg=fc)
+    return _label_paragraphs(_call(system, user_message, 1024, feature="summarise_report", cfg=fc))
+
+
+def _label_paragraphs(text: str) -> str:
+    """Put each line that opens with a bold label in a paragraph of its own.
+
+    The prompt puts "**What happened:**" and the labels after it on lines of
+    their own, and Markdown, MISP's included, joins lines with no blank line
+    between them.
+    """
+    lines = []
+    for line in text.split("\n"):
+        if line.startswith("**") and lines and lines[-1].strip():
+            lines.append("")
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def draft_vea_sections(cve_id: str, product_info: str = "", article_content: str = "") -> dict:

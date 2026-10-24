@@ -36,27 +36,6 @@ _CONFIG_FILE = _ROOT / "config" / "__init__.py"
 _BACKUP_FILE = _ROOT / "config" / "__init__.py.backup"
 _PROMPTS_DIR = _ROOT / "zsazsaprompts"
 
-# The ai-connector MISP module, with the defaults of MISP's Plugin.AI_* settings
-# except the port, where 6666 is the stock misp-modules server, and the model,
-# which MISP sets to one that may not be on the endpoint.
-AI_CONNECTOR_DEFAULTS = {
-    "AI_CONNECTOR_ENABLED": False,
-    "AI_CONNECTOR_URL": "http://127.0.0.1",
-    "AI_CONNECTOR_PORT": 6667,
-    "AI_CONNECTOR_TIMEOUT": 300,
-    "AI_CONNECTOR_SSL_VERIFY_PEER": True,
-    "AI_CONNECTOR_SSL_VERIFY_HOST": True,
-    "AI_CONNECTOR_SSL_ALLOW_SELF_SIGNED": False,
-    "AI_CONNECTOR_SSL_CAFILE": "",
-    "AI_CONNECTOR_OPENAI_API_BASE": "http://127.0.0.1:11434/v1",
-    "AI_CONNECTOR_API_KEY": "",
-    "AI_CONNECTOR_MODEL_ID": "",
-}
-
-
-def _ai_connector_settings() -> dict:
-    return {name: getattr(_config, name, default) for name, default in AI_CONNECTOR_DEFAULTS.items()}
-
 # CTI products that can be linked to a Flowintel case template per instance.
 FLOWINTEL_CASE_TEMPLATE_PRODUCTS = [
     {"key": "Flash intel alert", "label": "Flash intel report"},
@@ -257,7 +236,7 @@ def _read() -> dict:
         "LOCAL_LLM_API_KEY": getattr(_config, "LOCAL_LLM_API_KEY", ""),
         "LOCAL_LLM_MODEL": getattr(_config, "LOCAL_LLM_MODEL", ""),
         "LLM_DEFAULT_PROVIDER": getattr(_config, "LLM_DEFAULT_PROVIDER", "openai"),
-        **_ai_connector_settings(),
+        **ai_connector.settings(),
         "NOTIFICATION_CHANNELS": _read_notification_channels(),
         "SMTP_HOST": getattr(_config, "SMTP_HOST", ""),
         "SMTP_PORT": getattr(_config, "SMTP_PORT", 587),
@@ -300,6 +279,11 @@ def _read() -> dict:
         "RECOMMENDED_ACTIONS_IMMEDIATE": getattr(_config, "RECOMMENDED_ACTIONS_IMMEDIATE", []),
         "RECOMMENDED_ACTIONS_NEAR_TERM": getattr(_config, "RECOMMENDED_ACTIONS_NEAR_TERM", []),
         "POLL_WINDOW_HOURS": _config.POLL_WINDOW_HOURS,
+        "ANALYSER_FLASH_INTEL": getattr(_config, "ANALYSER_FLASH_INTEL", True),
+        "ANALYSER_FLASH_INTEL_REQUIREMENTS": getattr(_config, "ANALYSER_FLASH_INTEL_REQUIREMENTS", False),
+        "ANALYSER_VULNERABILITY_ADVISORIES": getattr(_config, "ANALYSER_VULNERABILITY_ADVISORIES", False),
+        "ANALYSER_DAILY_BRIEFING": getattr(_config, "ANALYSER_DAILY_BRIEFING", False),
+        "ANALYSER_DAILY_BRIEFING_HOUR": getattr(_config, "ANALYSER_DAILY_BRIEFING_HOUR", 21),
         "MISP_SCRAPER_ENABLED": getattr(_config, "MISP_SCRAPER_ENABLED", True),
         "SCRAPER_MARKER_TAG": _config.SCRAPER_MARKER_TAG,
         "MISP_SCRAPER_LIMIT": getattr(_config, "MISP_SCRAPER_LIMIT", 500),
@@ -495,8 +479,10 @@ def _write(values):
         lines = []
         for s in servers:
             lines.append("    {")
-            for k in ("id", "label", "url", "api_key", "verify_tls", "enabled", "tags", "tags_and", "tags_not", "org_filter_type", "org_filter", "since_days", "limit"):
-                lines.append(f"        {k!r}: {s.get(k)!r},")
+            for k in ("id", "label", "url", "api_key", "verify_tls", "enabled", "allow_reports", "tags", "tags_and", "tags_not",
+                      "org_filter_type", "org_filter", "since_days", "limit"):
+                if k in s:
+                    lines.append(f"        {k!r}: {s[k]!r},")
             lines.append("    },")
         servers_repr = "[\n" + "\n".join(lines) + "\n]"
     else:
@@ -550,7 +536,7 @@ def _write(values):
     else:
         flowintel_instances_repr = "[]"
     ai_connector_lines = "\n".join(f"{name} = {values.get(name, default)!r}"
-                                   for name, default in AI_CONNECTOR_DEFAULTS.items())
+                                   for name, default in ai_connector.DEFAULTS.items())
     content = f"""SECRET_KEY = {_config.SECRET_KEY!r}
 
 # MISP - scraper / analyser pipeline. Optional: set MISP_SCRAPER_ENABLED to
@@ -685,6 +671,13 @@ RECOMMENDED_ACTIONS_NEAR_TERM = {values.get('RECOMMENDED_ACTIONS_NEAR_TERM', [])
 
 # Analyser
 POLL_WINDOW_HOURS = {int(values['POLL_WINDOW_HOURS'])}
+# What each scheduled run makes. The daily briefing is made once a day, by the
+# first run from this hour (UTC) on.
+ANALYSER_FLASH_INTEL = {bool(values.get('ANALYSER_FLASH_INTEL', True))}
+ANALYSER_FLASH_INTEL_REQUIREMENTS = {bool(values.get('ANALYSER_FLASH_INTEL_REQUIREMENTS'))}
+ANALYSER_VULNERABILITY_ADVISORIES = {bool(values.get('ANALYSER_VULNERABILITY_ADVISORIES'))}
+ANALYSER_DAILY_BRIEFING = {bool(values.get('ANALYSER_DAILY_BRIEFING'))}
+ANALYSER_DAILY_BRIEFING_HOUR = {int(values.get('ANALYSER_DAILY_BRIEFING_HOUR', 21))}
 SCRAPER_MARKER_TAG = {values['SCRAPER_MARKER_TAG']!r}
 MISP_SCRAPER_LIMIT = {int(values.get('MISP_SCRAPER_LIMIT') or 500)}
 MISP_SCRAPER_SINCE_DAYS = {int(values.get('MISP_SCRAPER_SINCE_DAYS') or 0)}
@@ -837,7 +830,7 @@ def index():
             "LOCAL_LLM_API_KEY": getattr(_config, "LOCAL_LLM_API_KEY", ""),
             "LOCAL_LLM_MODEL": getattr(_config, "LOCAL_LLM_MODEL", ""),
             "LLM_DEFAULT_PROVIDER": getattr(_config, "LLM_DEFAULT_PROVIDER", "openai"),
-            **_ai_connector_settings(),
+            **ai_connector.settings(),
             "NOTIFICATION_CHANNELS": _read_notification_channels(),
             # The scraper queue is configured under Collection sources. Carried
             # through here because the file is rewritten whole: left out, each
@@ -887,6 +880,11 @@ def index():
             "RECOMMENDED_ACTIONS_IMMEDIATE": lines("RECOMMENDED_ACTIONS_IMMEDIATE"),
             "RECOMMENDED_ACTIONS_NEAR_TERM": lines("RECOMMENDED_ACTIONS_NEAR_TERM"),
             "POLL_WINDOW_HOURS": _form_int("POLL_WINDOW_HOURS", 24),
+            "ANALYSER_FLASH_INTEL": _form_bool("ANALYSER_FLASH_INTEL"),
+            "ANALYSER_FLASH_INTEL_REQUIREMENTS": _form_bool("ANALYSER_FLASH_INTEL_REQUIREMENTS"),
+            "ANALYSER_VULNERABILITY_ADVISORIES": _form_bool("ANALYSER_VULNERABILITY_ADVISORIES"),
+            "ANALYSER_DAILY_BRIEFING": _form_bool("ANALYSER_DAILY_BRIEFING"),
+            "ANALYSER_DAILY_BRIEFING_HOUR": min(23, max(0, _form_int("ANALYSER_DAILY_BRIEFING_HOUR", 21))),
             "SCRAPER_MARKER_TAG": _form_tag("SCRAPER_MARKER_TAG"),
             "EVENT_LOG_RETENTION_DAYS": max(1, _form_int("EVENT_LOG_RETENTION_DAYS", 90)),
             "PIPELINE_RUN_LOG_RETENTION_DAYS": max(1, _form_int("PIPELINE_RUN_LOG_RETENTION_DAYS", 365)),
@@ -1074,6 +1072,7 @@ def save_server_config():
     try:
         verify_tls = _parse_bool(data.get("verify_tls", True), default=True)
         enabled = _parse_bool(data.get("enabled", True), default=True)
+        allow_reports = _parse_bool(data.get("allow_reports", False), default=False)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     # Only organisation UUIDs ever match, and the page shows the value back.
@@ -1094,6 +1093,7 @@ def save_server_config():
         "api_key": api_key,
         "verify_tls": verify_tls,
         "enabled": enabled,
+        "allow_reports": allow_reports,
         "tags": (data.get("tags") or "").strip(),
         "tags_and": (data.get("tags_and") or "").strip(),
         "tags_not": (data.get("tags_not") or "").strip(),
@@ -1925,7 +1925,7 @@ def test_ai_connector():
     data, err = _json_object()
     if err:
         return err
-    settings, error = _posted_ai_connector(data, _ai_connector_settings())
+    settings, error = _posted_ai_connector(data, ai_connector.settings())
     if error:
         return jsonify({"ok": False, "error": error}), 400
     return jsonify(ai_connector.ping(settings))

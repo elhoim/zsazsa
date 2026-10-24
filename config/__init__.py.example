@@ -186,6 +186,13 @@ RECOMMENDED_ACTIONS_NEAR_TERM = ['Apply vendor patches or available mitigations'
 
 # Analyser
 POLL_WINDOW_HOURS = 24
+# What each scheduled run makes. The daily briefing is made once a day, by the
+# first run from this hour (UTC) on.
+ANALYSER_FLASH_INTEL = True
+ANALYSER_FLASH_INTEL_REQUIREMENTS = False
+ANALYSER_VULNERABILITY_ADVISORIES = False
+ANALYSER_DAILY_BRIEFING = False
+ANALYSER_DAILY_BRIEFING_HOUR = 21
 SCRAPER_MARKER_TAG = 'zsazsa:source="misp-scraper"'
 MISP_SCRAPER_LIMIT = 500
 MISP_SCRAPER_SINCE_DAYS = 30

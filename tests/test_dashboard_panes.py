@@ -1,12 +1,14 @@
 """The dashboard panes below the counts: active PIRs and GIRs, products by threat
 actor type, throughput by collection source and events per configured source,
-and what loading them asks of MISP.
+and what loading them asks of MISP. Above them, the products waiting for a
+review or still a draft, per kind, which the scheduled analyser's alerts would
+otherwise wait unseen in.
 
 Each pane still shows everything it did before it had charts: the rows, their
 numbers and links, and an empty state. The requirement panes add the mix of
 priorities or review cycles. A load reads the alerts once for the two panes
-that use them, counts stakeholders from their metadata, and has MISP count the
-pending scraper events.
+that use them and the advisories once for the two that use those, counts
+stakeholders from their metadata, and has MISP count the pending scraper events.
 
 The fragment the dashboard loads is rendered with stand-in data, MISP is an
 autospec of PyMISP, and the database and log are temporary.
@@ -108,6 +110,34 @@ class Panes(unittest.TestCase):
                              ("By configured source", "No events cached yet.")):
             self.assertIn(empty, self.text(self.pane(page, title)), title)
 
+    def test_each_kind_links_to_its_list_and_each_count_to_its_state(self):
+        rows = [SimpleNamespace(kind="briefing", review=0, drafts=5, total=5),
+                SimpleNamespace(kind="flash-intel", review=2, drafts=1, total=3),
+                SimpleNamespace(kind="threat-actor-profile", review=0, drafts=1, total=1),
+                SimpleNamespace(kind="threat-landscape", review=1, drafts=0, total=1)]
+        pane = self.render(to_review=rows).select_one("#products-to-review")
+        self.assertIn("To review 3 Draft 7", self.text(pane.select_one(".chart-legend")))
+        rows = pane.select(".chart-row")
+        self.assertEqual([" ".join(r.get_text().split()) for r in rows],
+                         ["Daily briefings · 5 drafts 5", "Flash intel alerts · 2 to review, 1 draft 3",
+                          "Threat actor profiles · 1 draft 1", "Threat landscapes · 1 to review 1"])
+        with self.app.test_request_context("/"):
+            self.assertEqual([[(self.text(a), a["href"]) for a in r.select("a")] for r in rows], [
+                [("Daily briefings", url_for("daily_briefing.list_briefings")),
+                 ("5 drafts", url_for("daily_briefing.list_briefings", state="draft"))],
+                [("Flash intel alerts", url_for("flash_intel.review")),
+                 ("2 to review", url_for("flash_intel.review", state="pending-review")),
+                 ("1 draft", url_for("flash_intel.review", state="draft"))],
+                [("Threat actor profiles", url_for("threat_actor_profile.review")),
+                 ("1 draft", url_for("threat_actor_profile.review", state="Draft"))],
+                # Its list has no state filter.
+                [("Threat landscapes", url_for("threat_landscape.review"))],
+            ])
+        self.assertEqual([s["title"] for s in rows[1].select(".chart-bar > span")], ["2 to review", "1 draft"])
+
+    def test_nothing_is_shown_when_nothing_waits(self):
+        self.assertIsNone(self.render(to_review=[]).select_one("#products-to-review"))
+
 
 class Loading(unittest.TestCase):
     """What one load of the panes asks of MISP."""
@@ -124,28 +154,59 @@ class Loading(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.client = create_app().test_client()
 
-    def test_the_alerts_are_read_once_for_both_panes_and_stakeholders_only_counted(self):
-        """Both panes searched MISP for every alert, and every stakeholder was
-        loaded whole to show how many there are."""
+    def load(self, veas):
         alert = SimpleNamespace(uuid="f" * 36, fia_id="FIA-00001", title="Grid", review_state="approved",
                                 actor_types=["State-Nexus Actors"], feedback_deadline=None, published=True)
         status = {"last_run": None, "stale": True, "minutes_since": None, "pending": None,
                   "total_24h": 0, "processed_24h": {}}
         empty = {name: mock.Mock(return_value=[]) for name in (
-            "list_pirs", "list_girs", "list_pending_newsletters", "list_veas", "list_briefings",
-            "list_threat_actor_profiles", "data_collection_source_counts")}
+            "list_pirs", "list_girs", "list_pending_newsletters", "list_briefings",
+            "list_threat_actor_profiles", "list_tlrs", "list_ders", "data_collection_source_counts")}
         with mock.patch.multiple(misp_store, **empty), \
-             mock.patch.object(misp_store, "list_fias", return_value=[alert]) as list_fias, \
-             mock.patch.object(misp_store, "list_stakeholders") as list_stakeholders, \
-             mock.patch.object(misp_store, "count_records", return_value=10) as count_records, \
+             mock.patch.object(misp_store, "list_fias", return_value=[alert]) as self.list_fias, \
+             mock.patch.object(misp_store, "list_veas", veas), \
+             mock.patch.object(misp_store, "list_stakeholders") as self.list_stakeholders, \
+             mock.patch.object(misp_store, "count_records", return_value=10) as self.count_records, \
              mock.patch.object(misp_store, "_misp", return_value=mock.create_autospec(PyMISP, instance=True)), \
              mock.patch.object(collection_cache, "cached_event_counts", return_value=[]), \
              mock.patch.object(dashboard, "_pipeline_status", return_value=status):
-            html = self.client.get("/dashboard/widgets").get_json()["html"]
-        list_fias.assert_called_once_with()
+            return self.client.get("/dashboard/widgets").get_json()["html"]
+
+    def test_the_alerts_are_read_once_for_both_panes_and_stakeholders_only_counted(self):
+        """Both panes searched MISP for every alert, and every stakeholder was
+        loaded whole to show how many there are."""
+        veas = mock.Mock(return_value=[])
+        html = self.load(veas)
+        self.list_fias.assert_called_once_with()
+        veas.assert_called_once_with()
         self.assertIn("State-Nexus Actors", html)
-        list_stakeholders.assert_not_called()
-        count_records.assert_called_once_with(config.TAG_STAKEHOLDER)
+        self.list_stakeholders.assert_not_called()
+        self.count_records.assert_called_once_with(config.TAG_STAKEHOLDER)
+
+    def test_the_alerts_still_show_when_the_advisories_fail(self):
+        with self.assertLogs("webapp.routes.dashboard", level="ERROR"):
+            html = self.load(mock.Mock(side_effect=RuntimeError("MISP refused")))
+        self.assertIn("State-Nexus Actors", html)
+
+
+class CountProductsToReview(unittest.TestCase):
+    def states(self, *states, field="review_state"):
+        return [SimpleNamespace(**{field: s}) for s in states]
+
+    def test_review_and_drafts_are_counted_per_kind_in_menu_order(self):
+        lists = dict(
+            list_briefings=self.states("draft", "published"),
+            list_tlrs=self.states("internal-review", "stakeholder-review", "approved", "draft"),
+            list_veas=self.states("approved", "rejected"),
+            list_threat_actor_profiles=self.states("Draft", "Published", field="status"),
+            list_ders=self.states("pending-review"),
+        )
+        alerts = self.states("pending-review", "pending-review", "draft", "approved")
+        with mock.patch.multiple(misp_store, **{name: mock.Mock(return_value=v) for name, v in lists.items()}):
+            counts = misp_store.products_to_review(fias=alerts)
+        self.assertEqual([(c.kind, c.review, c.drafts, c.total) for c in counts],
+                         [("briefing", 0, 1, 1), ("threat-landscape", 2, 1, 3), ("flash-intel", 2, 1, 3),
+                          ("threat-actor-profile", 0, 1, 1), ("detection-eng", 1, 0, 1)])
 
 
 class PendingScraperEvents(unittest.TestCase):

@@ -53,6 +53,13 @@ def _db():
 
 
 AI_SUMMARY_PREFIX = "[AI-Summary]"
+# A summary of the whole event, written by the AI-connector MISP module.
+AI_EVENT_SUMMARY_PREFIX = "[AI-Event-Summary]"
+
+
+def is_ai_summary_report(name: str) -> bool:
+    """True for a report zsazsa wrote as an AI summary, of a report or of the event."""
+    return (name or "").startswith((AI_SUMMARY_PREFIX, AI_EVENT_SUMMARY_PREFIX))
 
 
 def init_db():
@@ -109,12 +116,18 @@ def init_db():
             "ALTER TABLE source_status ADD COLUMN last_event_count INTEGER",
             "ALTER TABLE source_status ADD COLUMN last_new_count INTEGER",
             "ALTER TABLE source_status ADD COLUMN last_limit_reached INTEGER",
+            "ALTER TABLE events ADD COLUMN has_ai_event_summary INTEGER DEFAULT 0",
+            "ALTER TABLE events ADD COLUMN source_report_count INTEGER",
         ]:
             try:
                 conn.execute(_col_ddl)
             except sqlite3.OperationalError as exc:
                 if "duplicate column" not in str(exc).lower():
                     raise
+        # Rows cached before the column existed had no event summary yet, so
+        # their AI summary is the only report a summary is not made from.
+        conn.execute("UPDATE events SET source_report_count = report_count - has_ai_summary"
+                     " WHERE source_report_count IS NULL")
 
 
 def get_source_status() -> dict:
@@ -205,6 +218,8 @@ def get_events(source_ids: list, tag_filters: list, limit: int, exclude=()) -> l
             "galaxy_names": json.loads(r["galaxy_names"] or "[]"),
             "report_count": r["report_count"],
             "has_ai_summary": bool(r["has_ai_summary"]),
+            "has_ai_event_summary": bool(r["has_ai_event_summary"]),
+            "source_report_count": r["source_report_count"],
             "vulnerability_ids": json.loads(r["vulnerability_ids"] or "[]"),
             "source_id": r["source_id"],
             "fetched_at": r["fetched_at"],
@@ -278,10 +293,7 @@ def _extract_row(e, source_id: str) -> dict:
     # An event carries its soft-deleted reports too; those are not shown anywhere,
     # so leave them out of the count and the AI-summary marker.
     reports = [r for r in (getattr(e, "event_reports", []) or []) if not getattr(r, "deleted", False)]
-    has_ai = any(
-        (getattr(r, "name", "") or "").startswith(AI_SUMMARY_PREFIX)
-        for r in reports
-    )
+    names = [getattr(r, "name", "") or "" for r in reports]
     return {
         "uuid": e.uuid,
         "event_id": str(e.id),
@@ -294,7 +306,10 @@ def _extract_row(e, source_id: str) -> dict:
         "object_count": len(getattr(e, "Object", []) or []),
         "galaxy_names": galaxies,
         "report_count": len(reports),
-        "has_ai_summary": has_ai,
+        "has_ai_summary": any(n.startswith(AI_SUMMARY_PREFIX) for n in names),
+        "has_ai_event_summary": any(n.startswith(AI_EVENT_SUMMARY_PREFIX) for n in names),
+        # The reports a summary can be made from: the ones that are not AI summaries.
+        "source_report_count": sum(not is_ai_summary_report(n) for n in names),
         "vulnerability_ids": event_cves(e),
         "source_id": source_id,
     }
@@ -355,6 +370,7 @@ def _build_sources(with_manual: bool = True) -> list:
             "org_filter": _split_tags(s.get("org_filter", "")),
             "since_days": int(s.get("since_days") or 7),
             "limit": int(s.get("limit") or 500),
+            "allow_reports": bool(s.get("allow_reports")),
         })
     if not with_manual:
         return srcs
@@ -423,6 +439,26 @@ def partner_tag_filter(misp, src: dict):
     return tags_or or None
 
 
+def _sync_flags(conn, source_id: str, rows: list, since: float) -> None:
+    """Bring flagged_events in line with the follow-up tag on a refreshed source.
+
+    The Flag button tags the event in MISP and records it here, where the page
+    looks. A rebuilt cache, or the tag added or removed in MISP itself, sets the
+    two apart until this runs. A flag set after the search started is kept, and
+    so is one on an event that has the tag in another source.
+    """
+    tag = getattr(config, "TAG_COLLECTION_FOLLOWUP", 'zsazsa:collection="follow-up"')
+    tagged = {r["uuid"] for r in rows if tag in r["tags"]}
+    now = time.time()
+    conn.executemany("INSERT OR IGNORE INTO flagged_events (uuid, flagged_at) VALUES (?, ?)",
+                     [(uuid, now) for uuid in tagged])
+    elsewhere = {r["uuid"] for r in conn.execute("SELECT uuid, tags FROM events WHERE source_id != ?", (source_id,))
+                 if tag in json.loads(r["tags"] or "[]")}
+    keep = tagged | elsewhere
+    conn.executemany("DELETE FROM flagged_events WHERE uuid = ? AND flagged_at < ?",
+                     [(r["uuid"], since) for r in rows if r["uuid"] not in keep])
+
+
 def refresh_source(src: dict) -> dict:
     """Re-read one source into the cache.
 
@@ -450,10 +486,13 @@ def refresh_source(src: dict) -> dict:
         try:
             misp = PyMISP(config.MISP_URL, config.MISP_KEY, config.MISP_VERIFYCERT, False,
                           timeout=misp_store.HTTP_TIMEOUT)
+            # The follow-up and dismiss tags are local, and MISP leaves local
+            # tags out for a key with sync permission unless it is asked for
+            # them. Every search below asks.
             kwargs = dict(
                 tags=[config.SCRAPER_MARKER_TAG],
                 limit=scraper_limit, page=1, metadata=False, pythonify=True,
-                order=misp_store.NEWEST_FIRST,
+                order=misp_store.NEWEST_FIRST, excludeLocalTags=False,
             )
             if since_days > 0:
                 kwargs["date_from"] = (_dt.date.today() - _dt.timedelta(days=since_days)).isoformat()
@@ -482,6 +521,7 @@ def refresh_source(src: dict) -> dict:
                     tags=misp.build_complex_query(
                         and_parameters=[misp_store.TAG_MANUAL_ENTRY, src["source_tag"]]),
                     limit=limit, page=1, metadata=False, pythonify=True, order=misp_store.NEWEST_FIRST,
+                    excludeLocalTags=False,
                 )
                 payload_err = _search_payload_error(events)
                 if payload_err:
@@ -501,7 +541,7 @@ def refresh_source(src: dict) -> dict:
                               timeout=misp_store.HTTP_TIMEOUT)
                 limit = src.get("limit") or 500
                 kwargs = dict(limit=limit, page=1, metadata=False, pythonify=True, published=True,
-                              order=misp_store.NEWEST_FIRST)
+                              order=misp_store.NEWEST_FIRST, excludeLocalTags=False)
                 tags = partner_tag_filter(misp, src)
                 if tags:
                     kwargs["tags"] = tags
@@ -549,16 +589,19 @@ def refresh_source(src: dict) -> dict:
                     """INSERT OR REPLACE INTO events
                        (source_id, uuid, event_id, info, date, tags, org, orgc,
                         attribute_count, object_count, galaxy_names, report_count,
-                        has_ai_summary, vulnerability_ids, fetched_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        has_ai_summary, has_ai_event_summary, source_report_count,
+                        vulnerability_ids, fetched_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     [(r["source_id"], r["uuid"], r["event_id"], r["info"], r["date"],
                       json.dumps(r["tags"]), r["org"], r["orgc"],
                       r["attribute_count"], r["object_count"],
                       json.dumps(r["galaxy_names"]), r["report_count"],
                       1 if r.get("has_ai_summary") else 0,
+                      1 if r.get("has_ai_event_summary") else 0, r.get("source_report_count", 0),
                       json.dumps(r.get("vulnerability_ids") or []), now)
                      for r in rows],
                 )
+            _sync_flags(conn, source_id, rows, t0)
         # event_count is intentionally not written: get_source_status computes
         # it live from the events table, so persisting a copy here would only
         # create a value that can disagree with reality (e.g. on a fetch error
@@ -710,8 +753,9 @@ def insert_event(row: dict) -> None:
             """INSERT OR REPLACE INTO events
                (source_id, uuid, event_id, info, date, tags, org, orgc,
                 attribute_count, object_count, galaxy_names, report_count,
-                has_ai_summary, vulnerability_ids, fetched_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                has_ai_summary, has_ai_event_summary, source_report_count,
+                vulnerability_ids, fetched_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 row["source_id"], row["uuid"], row.get("event_id", ""),
                 row.get("info", ""), row.get("date", ""),
@@ -721,6 +765,8 @@ def insert_event(row: dict) -> None:
                 json.dumps(row.get("galaxy_names", [])),
                 row.get("report_count", 0),
                 1 if row.get("has_ai_summary") else 0,
+                1 if row.get("has_ai_event_summary") else 0,
+                row.get("source_report_count", 0),
                 json.dumps(row.get("vulnerability_ids") or []),
                 time.time(),
             ),
@@ -752,6 +798,8 @@ def get_events_by_uuids(uuids: list) -> list:
                 "galaxy_names": json.loads(r["galaxy_names"] or "[]"),
                 "report_count": r["report_count"],
                 "has_ai_summary": bool(r["has_ai_summary"]),
+                "has_ai_event_summary": bool(r["has_ai_event_summary"]),
+                "source_report_count": r["source_report_count"],
                 "vulnerability_ids": json.loads(r["vulnerability_ids"] or "[]"),
                 "source_id": r["source_id"],
             }

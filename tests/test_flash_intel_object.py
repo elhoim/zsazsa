@@ -5,7 +5,9 @@ template, so it had no meta-category, and every draft was filed without the
 fields the wizard edits while the log said it was created. It also answered
 Invalid Target to the source-type tag put on an event report. A model that
 answers "relevant" without naming a focus point the article matches does not
-get a draft: the local model did so on an article about none of them.
+get a draft: the local model did so on an article about none of them. The
+draft names its source event, which is what keeps that event from a second
+alert, and the source event is tagged as one, as the dashboard's alerts tag it.
 
     python -m unittest tests.test_flash_intel_object
 """
@@ -33,6 +35,13 @@ class Object(unittest.TestCase):
         self.assertEqual(obj.to_dict()["meta-category"], "intelligence")
         relations = {a.object_relation for a in obj.attributes}
         self.assertLessEqual({"fia-id", "review-state", "summary", "source-event-uuid"}, relations)
+
+    def test_it_is_a_draft_that_names_its_source(self):
+        """A draft, as everything else the analyser makes is, and its source is
+        what keeps the event from a second alert."""
+        _saved, obj = self.add({"Object": {}})
+        values = {a.object_relation: a.value for a in obj.attributes}
+        self.assertEqual((values["review-state"], values["source-event-uuid"]), ("draft", "s" * 36))
 
     def test_a_refused_object_is_reported(self):
         with self.assertLogs(flash_intel.logger, "ERROR") as logs:
@@ -65,13 +74,21 @@ class Process(unittest.TestCase):
              mock.patch.object(flash_intel, "_automated_subscribers", return_value=[]), \
              mock.patch.object(flash_intel, "tagger") as tagger:
             result = flash_intel.process(misp, misp_webapp, event, {})
-        self.generate = generate
+        self.generate, self.misp_webapp = generate, misp_webapp
         return result, tagger, event, report
 
     def test_the_source_type_goes_on_the_event_not_on_its_report(self):
         _result, tagger, event, report = self.run_process(True)
-        tagger.add_tag.assert_called_once_with(mock.ANY, event, 'osint:source-type="news-report"')
-        self.assertNotIn(report, tagger.add_tag.call_args[0])
+        self.assertIn(mock.call(mock.ANY, event, 'osint:source-type="news-report"'), tagger.add_tag.call_args_list)
+        self.assertFalse(any(report in c.args for c in tagger.add_tag.call_args_list))
+
+    def test_the_source_event_is_marked_as_the_source_of_an_alert(self):
+        _result, tagger, event, _report = self.run_process(True)
+        self.assertIn(mock.call(mock.ANY, event, 'zsazsa:product="flash-intel"'), tagger.add_tag.call_args_list)
+
+    def test_its_event_has_the_draft_workflow_state(self):
+        self.run_process(True)
+        self.assertIn(mock.call("p" * 36, 'workflow:state="draft"', local=True), self.misp_webapp.tag.call_args_list)
 
     def test_a_draft_without_its_object_says_so(self):
         result, _tagger, _event, _report = self.run_process(False)

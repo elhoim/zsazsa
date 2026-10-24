@@ -404,28 +404,37 @@
     return badge;
   }
 
-  /* Rebuild the reports count and the AI-summary marker of a row from the
+  function showMarker(cell, marker, glyph, shown, title) {
+    var icon = cell.querySelector('.' + marker);
+    if (shown && !icon) {
+      icon = document.createElement('i');
+      icon.className = 'fas ' + glyph + ' text-success ' + marker;
+      icon.style.fontSize = '.8rem';
+      icon.title = title;
+      cell.appendChild(icon);
+    } else if (!shown && icon) {
+      icon.remove();
+    }
+  }
+
+  /* Rebuild the reports count and the AI-summary markers of a row from the
      reports the preview endpoint returned, so a summary created from the list
      shows up without reloading the page. */
   function updateReportCells(row, reports) {
     var count = reports.length;
     row.dataset.reportCount = String(count);
 
-    var hasAi = reports.some(function(r) { return (r.name || '').indexOf('[AI-Summary]') === 0; });
+    function hasReport(prefix) {
+      return reports.some(function(r) { return (r.name || '').indexOf(prefix) === 0; });
+    }
+    var hasAi = hasReport('[AI-Summary]');
     row.dataset.hasAiSummary = hasAi ? '1' : '0';
 
     var aiCell = row.querySelector('.ai-summary-cell');
     if (aiCell) {
-      var icon = aiCell.querySelector('.ai-summary-icon');
-      if (hasAi && !icon) {
-        icon = document.createElement('i');
-        icon.className = 'fas fa-wand-magic-sparkles text-success ai-summary-icon';
-        icon.style.fontSize = '.8rem';
-        icon.title = 'AI summary available';
-        aiCell.appendChild(icon);
-      } else if (!hasAi && icon) {
-        icon.remove();
-      }
+      showMarker(aiCell, 'ai-summary-icon', 'fa-wand-magic-sparkles', hasAi, 'AI summary available');
+      showMarker(aiCell, 'ai-event-summary-icon', 'fa-robot', hasReport('[AI-Event-Summary]'),
+                 'AI event summary available');
     }
 
     var reportCell = row.querySelector('.report-count-cell');
@@ -1339,16 +1348,21 @@
   document.querySelectorAll('.event-row-cb').forEach(function(cb) { cb.addEventListener('change', updateCreateProductBtn); });
   if (selectAllCb) selectAllCb.addEventListener('change', updateCreateProductBtn);
 
-  /* ── Create AI summary ── */
-  document.querySelectorAll('.create-summary-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var uuid = btn.dataset.uuid; var sourceId = btn.dataset.sourceId;
+  /* ── Create AI summary ──
+     A choice in the summary dropdown shows its progress on the icon next to it,
+     and the whole group goes once the summary is there. The event summary then
+     stays on offer on its own icon, until there is one. */
+  document.querySelectorAll('.create-summary-btn').forEach(function(item) {
+    item.addEventListener('click', function() {
+      var uuid = item.dataset.uuid; var sourceId = item.dataset.sourceId;
+      var group = item.closest('.summary-actions');
+      var btn = group ? group.querySelector('.summary-icon-btn') : item;
       var originalHtml = btn.innerHTML;
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
       fetch(SCRIPT_ROOT + '/collection/' + uuid + '/summarise', {
         method:'POST',
         headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-        body:JSON.stringify({source:sourceId}),
+        body:JSON.stringify({source:sourceId, mode:item.dataset.mode}),
       })
       .then(zsazsaReadJson)
       .then(function(data) {
@@ -1364,14 +1378,21 @@
         followedJobs.add(data.job_id);
         holdRowActions(btn.closest('tr'), data.job_id);
         zsazsaFollowJob(data.job_id, function(job) {
-          if ((job.result || {}).summarised) {
-            btn.remove();
+          var result = job.result || {};
+          if (result.summarised || result.event_summaries) {
+            var eventSummaryBtn = btn.closest('tr').querySelector('.event-summary-btn');
+            (group || btn).remove();
+            if (eventSummaryBtn && result.event_summaries) eventSummaryBtn.remove();
+            else if (eventSummaryBtn) eventSummaryBtn.classList.remove('d-none');
             releaseRowActions(data.job_id);
-            /* The summary is a new MISP report and the event moved to workflow
-               state 'draft', so pull the row back from the source to show both. */
+            /* The summary is a new MISP report, and on zsazsa's own MISP the event
+               moved to workflow state 'draft', so pull the row back from the source. */
             refreshEventRowTags(uuid, sourceId).catch(function() {
               showFeedback('The summary was created, but the row could not be refreshed. Reload the page to see it.', 'warning');
             });
+            if (result.errors) {
+              showFeedback('Not every summary was created. The Background jobs panel says why.', 'warning');
+            }
             return;
           }
           releaseRowActions(data.job_id);
@@ -1905,7 +1926,7 @@
     selectionSummariseBtn.addEventListener('click', function() {
       var selected = getSelectedEvents();
       if (!selected.length) { alert('Select at least one event using the checkboxes.'); return; }
-      if (!confirm('Generate AI summaries for the selected events?\n\nThis only applies to scraper and manual events that do not yet have a summary; the rest are skipped.')) {
+      if (!confirm('Generate AI summaries for the selected events?\n\nThis only applies to events without a summary from the scraper, a manual source or a MISP server that allows adding reports; the rest are skipped.')) {
         return;
       }
 

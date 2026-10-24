@@ -119,7 +119,7 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     # zsazsa-namespace and workflow tags are applied locally via the tag endpoint;
     # tags embedded in add_event are attached globally even when flagged local.
     misp_webapp.tag(product_event.uuid, config.TAG_FLASH_INTEL, local=True)
-    misp_webapp.tag(product_event.uuid, 'workflow:state="ongoing"', local=True)
+    misp_webapp.tag(product_event.uuid, 'workflow:state="draft"', local=True)
     fia_id = f"FIA-{int(event_id):05d}"
     if "FIA-#####" in fia_content:
         fia_content = fia_content.replace("FIA-#####", fia_id)
@@ -142,6 +142,9 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     # does not take, the event still reads as incomplete and the next run makes
     # a second draft for it, so the activity log has to say so.
     routed = tagger.set_workflow_state(misp, event, "ongoing")
+    # As an alert made from the dashboard does, so the collection page shows
+    # the event went into one.
+    tagger.add_tag(misp, event, 'zsazsa:product="flash-intel"')
     detail = fia_id if routed else f"{fia_id} (source event still marked incomplete)"
     if not object_saved:
         detail += " (draft object not saved)"
@@ -158,7 +161,7 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
     logger.info(
         "Created %s draft for source event %s (%s)",
         fia_id, event.uuid,
-        "auto-published" if auto else "pending review",
+        "auto-published" if auto else "a draft to review",
     )
     return {
         "outcome": "product_created",
@@ -236,7 +239,7 @@ def _add_flash_intel_object(misp_webapp, product_event, fia_id, source_event, co
     add("summary", _extract_section(content, "Summary"))
     add("source-description", f"OSINT feed: {tagger.get_source_feed(source_event)}")
     add("source-reliability", _get_source_reliability(source_event).upper())
-    add("review-state", "pending-review")
+    add("review-state", "draft")
     add("source-event-uuid", source_event.uuid)
     add("author", "analyser")
     if matched:

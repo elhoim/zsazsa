@@ -4,6 +4,7 @@
 of a source event, so a reference stored as "url" is invisible to every product
 built from that entry. These checks pin the type down at the point it is
 written, and cover the migration that repairs entries written before the fix.
+The MITRE ATT&CK techniques picked on the form are tagged on the entry too.
 
     python -m unittest tests.test_manual_entry_references
 """
@@ -11,6 +12,8 @@ written, and cover the migration that repairs entries written before the fix.
 import unittest
 from types import SimpleNamespace
 from unittest import mock
+
+from pymisp import PyMISP
 
 from webapp import misp_store
 
@@ -67,6 +70,29 @@ class ReferenceAttributeType(unittest.TestCase):
 def _attr(uuid, type_, value, category="External analysis", deleted=False):
     return SimpleNamespace(uuid=uuid, type=type_, value=value, category=category,
                            deleted=deleted)
+
+
+class Techniques(unittest.TestCase):
+    def test_the_techniques_picked_on_the_form_are_tagged(self):
+        """Only as galaxy tags: _build_scope_tags leaves techniques out, since a
+        PIR or GIR keeps them on its object."""
+        misp = mock.create_autospec(PyMISP, instance=True)
+        misp.add_event.return_value = _created()
+        tag_map = {"Phishing - T1566": 'misp-galaxy:mitre-attack-pattern="Phishing - T1566"'}
+        with mock.patch.object(misp_store, "_misp", return_value=misp), \
+             mock.patch.object(misp_store, "_tag_local"), \
+             mock.patch.object(misp_store, "_build_scope_tags", return_value=['misp-galaxy:sector="Finance"']), \
+             mock.patch.object(misp_store, "_galaxy_tag_map", return_value=tag_map) as galaxy:
+            misp_store.create_manual_collection_event(
+                {"title": "An entry", "mitre_attack_techniques": ["Phishing - T1566", "Not a technique"]})
+        galaxy.assert_called_once_with(misp_store.GALAXY_MITRE_ATTACK)
+        self.assertEqual([c.args[1] for c in misp.tag.call_args_list if "galaxy" in c.args[1]],
+                         ['misp-galaxy:sector="Finance"', 'misp-galaxy:mitre-attack-pattern="Phishing - T1566"'])
+
+    def test_the_techniques_come_from_the_attack_pattern_galaxy(self):
+        """It was d752161c-..., MISP's mitre-malware galaxy, where no technique
+        is found, so none was ever tagged."""
+        self.assertEqual(misp_store.GALAXY_MITRE_ATTACK, "c4e851fa-775f-11e7-8163-b774922098cd")
 
 
 class Migration(unittest.TestCase):

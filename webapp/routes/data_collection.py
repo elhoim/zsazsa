@@ -6,6 +6,7 @@ one event live - a single event fetch is fast; querying hundreds is not.
 """
 
 import concurrent.futures
+import copy
 import datetime
 import logging
 import re
@@ -16,9 +17,10 @@ from collections import Counter
 import urllib3
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
-from pymisp import PyMISP
+from pymisp import MISPEvent, PyMISP
 
 import config
+from core import ai_connector
 from core.db import log_pipeline_run_start, log_pipeline_run_end
 from webapp import (analyser_pipeline, audit, collection_cache, job_store, matching as _matching,
                     misp_session, misp_store, newsletter_ingest, newsletter_parsers, scraper_queue)
@@ -230,6 +232,8 @@ def _build_list_context() -> dict:
         scope_galaxy=misp_store.scope_galaxy_items(),
         draft_briefings=_draft_briefings(),
         events_being_summarised=_events_being_summarised(),
+        summarisable_source_ids={s["id"] for s in sources if _may_summarise(s)},
+        event_summary_source_ids={s["id"] for s in sources if _may_summarise_event(s)},
     )
 
 
@@ -483,30 +487,61 @@ def _tag_event_scope(misp, event, context: dict) -> list:
     return applied
 
 
-def _summarisable_sources() -> dict:
-    """Sources we can summarise, mapped to their kind.
+def _may_summarise(src: dict) -> bool:
+    """True when zsazsa may write a summary back to this source's events.
 
-    The summary is written back as a MISP report on the event, so it needs a
-    connection zsazsa may write to: the scraper MISP, or the webapp MISP that
-    holds the manual entries. Events pulled from a third-party MISP server are
-    not ours to write to.
+    The summary is a MISP report on the event. The scraper MISP and the webapp
+    MISP, which holds the manual entries, are zsazsa's own; another MISP server
+    only when its "Allow adding reports to events" setting is on.
+    """
+    return src["kind"] in ("scraper", "manual") or bool(src.get("allow_reports"))
+
+
+def _may_summarise_event(src: dict) -> bool:
+    """True when the AI-connector MISP module may summarise this source's events.
+
+    Offered on another MISP server that allows adding reports, while the module
+    is enabled. The scraper and manual events are summarised from their report.
+    """
+    return (src["kind"] == "misp" and bool(src.get("allow_reports"))
+            and bool(getattr(config, "AI_CONNECTOR_ENABLED", False)))
+
+
+def _summarisable_sources() -> dict:
+    """The sources we can summarise, by id.
 
     This reads the manual sources from MISP, so callers working through a batch
     resolve it once rather than per event.
     """
-    return {s["id"]: s["kind"] for s in _sources() if s["kind"] in ("scraper", "manual")}
+    return {s["id"]: s for s in _sources() if _may_summarise(s)}
 
 
-def _summarise_misp(kind: str):
-    """The MISP connection holding the events of a source of this kind."""
-    return misp_store._scraper_misp() if kind == "scraper" else misp_store._misp()
+_NOT_PUBLISHED_AGAIN = ", but it could not be published again. Publish it in MISP to keep it on this page."
 
 
-def _generate_ai_summary(misp, event, source_id, user=""):
+def _publish_again(misp, event) -> bool:
+    """Publish an event again, without the alert e-mail, after a summary was added.
+
+    MISP unpublishes an event when a report is added to it, and only published
+    events are read from another MISP server, so it would leave the collection
+    page at the next refresh.
+    """
+    try:
+        failed = _misp_response_errors(misp.publish(event.id, alert=False))
+    except Exception as exc:
+        failed = str(exc)
+    if failed:
+        logger.warning("Could not publish %s again after its summary: %s", event.uuid, failed)
+    return not failed
+
+
+def _generate_ai_summary(misp, event, source_id, user="", kind="scraper"):
     """Generate an LLM summary from an event's first MISP report and save it back to MISP.
 
-    Runs on a worker thread, so ``user`` carries the analyst who asked for it
-    through to the audit entry.
+    Runs on a worker thread, so ``user`` is the analyst who asked for it, for
+    the audit entry. On another MISP server (``kind`` "misp") only
+    the report is added, for our organisation alone: the workflow state and
+    the tags of the event belong to that server.
     Returns (ok, message_or_error, http_status).
     """
     uuid = event.uuid
@@ -517,6 +552,8 @@ def _generate_ai_summary(misp, event, source_id, user=""):
         logger.warning("Could not load reports for %s: %s", uuid, exc)
         return False, "Could not load event reports", 502
 
+    # A summary zsazsa wrote earlier, of a report or of the event, is not the article.
+    reports = [r for r in reports if not collection_cache.is_ai_summary_report(getattr(r, "name", ""))]
     if not reports:
         return False, "No reports attached to this event", 400
 
@@ -540,27 +577,37 @@ def _generate_ai_summary(misp, event, source_id, user=""):
         return False, summary, 400
 
     try:
-        misp_store.add_ai_summary_report(misp, event.id, event.info or uuid, summary)
+        misp_store.add_ai_summary_report(misp, event.id, event.info or uuid, summary,
+                                         distribution=0 if kind == "misp" else 5)
     except Exception as exc:
         logger.warning("Could not add summary report to %s: %s", uuid, exc)
         return False, "Could not save summary to MISP.", 502
 
     collection_cache.mark_ai_summary(uuid, source_id)
 
-    try:
-        from analyser import tagger
-        tagger.set_workflow_state(misp, event, "draft")
-    except Exception as exc:
-        logger.warning("Could not update workflow state for %s: %s", uuid, exc)
+    details = "LLM summary created from first MISP report"
+    message = "Summary created and added to MISP event"
+    if kind == "misp":
+        if not _publish_again(misp, event):
+            details += "; the event could not be published again"
+            message += _NOT_PUBLISHED_AGAIN
+    else:
+        applied_tags = []
+        try:
+            from analyser import tagger
+            tagger.set_workflow_state(misp, event, "draft")
+        except Exception as exc:
+            logger.warning("Could not update workflow state for %s: %s", uuid, exc)
 
-    applied_tags = []
-    try:
-        context = analyser_pipeline.parse_misp_context(summary, analyser_pipeline.galaxy_names_with_commas())
-        applied_tags = _tag_event_scope(misp, event, context)
-    except Exception as exc:
-        logger.warning("Could not apply scope tags to %s: %s", uuid, exc)
-    if applied_tags:
-        logger.info("Applied scope tags to %s: %s", uuid, applied_tags)
+        try:
+            context = analyser_pipeline.parse_misp_context(summary, analyser_pipeline.galaxy_names_with_commas())
+            applied_tags = _tag_event_scope(misp, event, context)
+        except Exception as exc:
+            logger.warning("Could not apply scope tags to %s: %s", uuid, exc)
+        if applied_tags:
+            logger.info("Applied scope tags to %s: %s", uuid, applied_tags)
+        tag_note = f"; tagged: {', '.join(applied_tags)}" if applied_tags else ""
+        details += f"; workflow state updated to draft{tag_note}"
 
     # Refresh cache row so new tags/galaxies are immediately visible without a manual refresh
     _refresh_cached_event(
@@ -571,16 +618,54 @@ def _generate_ai_summary(misp, event, source_id, user=""):
         row_mutator=lambda row: row.__setitem__("has_ai_summary", True),
     )
 
-    tag_note = f"; tagged: {', '.join(applied_tags)}" if applied_tags else ""
     audit.record(
         "summarise", "misp-event",
         entity_id=uuid,
         entity_label=event.info or uuid,
-        details=f"LLM summary created from first MISP report; workflow state updated to draft{tag_note}",
+        details=details,
         user=user,
     )
 
-    return True, "Summary created and added to MISP event", 200
+    return True, message, 200
+
+
+def _generate_event_summary(misp, event, misp_json, source_id, user=""):
+    """Have the AI-connector MISP module summarise the whole event, as a report of its own.
+
+    ``misp_json`` is the event as MISP's JSON has it, which is what the module
+    reads. Only for another MISP server that allows adding reports, so, as with a
+    report summary there, the report is for our organisation alone, the event is
+    published again and its tags are left alone.
+    Returns (ok, message_or_error, http_status).
+    """
+    uuid = event.uuid
+    try:
+        summary = ai_connector.summarise_event(ai_connector.settings(), misp_json)
+    except ai_connector.ModuleError as exc:
+        logger.warning("AI-connector event summary failed for %s: %s", uuid, exc)
+        return False, f"The AI-connector module did not summarise the event. {exc}", 502
+
+    try:
+        misp_store.add_ai_summary_report(misp, event.id, event.info or uuid, summary, distribution=0,
+                                         prefix=collection_cache.AI_EVENT_SUMMARY_PREFIX)
+    except Exception as exc:
+        logger.warning("Could not add event summary report to %s: %s", uuid, exc)
+        return False, "Could not save the event summary to MISP.", 502
+
+    details = "Event summary created by the AI-connector MISP module"
+    message = "Event summary created and added to MISP event"
+    if not _publish_again(misp, event):
+        details += "; the event could not be published again"
+        message += _NOT_PUBLISHED_AGAIN
+    _refresh_cached_event(uuid, source_id, misp, context="event summary")
+    audit.record("summarise-event", "misp-event", entity_id=uuid, entity_label=event.info or uuid,
+                 details=details, user=user)
+    return True, message, 200
+
+
+# "report" summarises the first report with zsazsa's own LLM, "event" has the
+# AI-connector MISP module summarise the whole event, and "both" does the two.
+_SUMMARY_MODES = ("report", "event", "both")
 
 
 @bp.route("/<string:uuid>/summarise", methods=["POST"])
@@ -594,15 +679,25 @@ def summarise(uuid):
     if err:
         return err
     source_id = data.get("source") or _SCRAPER_SOURCE_ID
-    if source_id not in _summarisable_sources():
+    mode = data.get("mode") or "report"
+    if mode not in _SUMMARY_MODES:
+        return jsonify({"ok": False, "error": "Unknown kind of summary"}), 400
+    src = _summarisable_sources().get(source_id)
+    if src is None:
         return jsonify({"ok": False,
-                        "error": "Summarisation is only available for scraper and manual events"}), 400
+                        "error": "Summarisation is only available for scraper and manual events, and for "
+                                 "MISP servers that allow adding reports"}), 400
+    if mode != "report" and not _may_summarise_event(src):
+        return jsonify({"ok": False,
+                        "error": "An event summary needs a MISP server that allows adding reports, and the "
+                                 "AI-connector MISP module enabled"}), 400
 
     job = job_store.create_job("summarise", label="AI summary")
     job_store.update_job(job["id"], events=[uuid])
     threading.Thread(
         target=_run_summarise_job,
         args=(job["id"], [{"uuid": uuid, "sourceId": source_id}], misp_session.current_user_email()),
+        kwargs={"mode": mode},
         daemon=True, name=job_store.thread_name(job["id"]),
     ).start()
     return jsonify({"ok": True, "job_id": job["id"]})
@@ -659,6 +754,7 @@ def manual_new():
             "sectors": request.form.getlist("sectors"),
             "threat_types": request.form.getlist("threat_types"),
             "threat_actors": request.form.getlist("threat_actors"),
+            "mitre_attack_techniques": request.form.getlist("mitre_attack_techniques"),
         }
         if selected_source not in manual_sources:
             flash("Please select a valid enabled manual source.", "warning")
@@ -695,6 +791,7 @@ def manual_new():
         "galaxy_countries": misp_store.galaxy_geography(),
         "galaxy_sectors": misp_store.galaxy_sectors(),
         "galaxy_threat_actors": misp_store.galaxy_threat_actors(),
+        "galaxy_mitre_attack": misp_store.galaxy_mitre_attack_patterns(),
     }
     return render_template("data_collection/manual_entry.html", **ctx)
 
@@ -1542,75 +1639,102 @@ def bulk_reject():
 
 
 def _run_summarise_job(job_id: str, batch: list[dict], user: str,
-                       skipped: int = 0, run_action: str = "") -> None:
-    """Summarise the given events, one LLM call each, reporting progress.
+                       skipped: int = 0, run_action: str = "", mode: str = "report") -> None:
+    """Summarise the given events, one model call per summary, reporting progress.
 
     ``user`` is the analyst who asked, read from the request before this thread
     started. ``skipped`` is what the caller already left out because the batch
     was capped. ``run_action`` records the work in the analyser run history under
     that name; a single event is left out of it, so the history stays about
-    batch runs.
+    batch runs. ``mode`` is one of _SUMMARY_MODES; a batch only summarises reports.
     """
     uuids = [(ev.get("uuid") or "").strip() for ev in batch if (ev.get("uuid") or "").strip()]
-    cached_by_uuid = {row["uuid"]: row for row in collection_cache.get_events_by_uuids(uuids)}
-    summarised = errors = 0
+    cached = {(row["uuid"], row["source_id"]): row for row in collection_cache.get_events_by_uuids(uuids)}
+    summarised = event_summaries = errors = 0
 
     run_id = log_pipeline_run_start(run_action, triggered_by="data collection") if run_action else 0
     job_store.update_job(job_id, status="running", message=f"Summarising {len(batch)} event(s)...")
 
     try:
-        # A batch can mix scraper events with manual entries, which live on the
-        # webapp MISP, so both the source list and the connections are resolved
-        # once here and shared by every event that needs them.
-        kind_by_source = _summarisable_sources()
-        misp_by_kind = {}
+        # A batch can mix sources, so both the source list and the connections
+        # are resolved once here and shared by every event that needs them. All
+        # manual sources live on the webapp MISP and share its connection.
+        sources = _summarisable_sources()
+        connections = {}
         for position, ev in enumerate(batch, start=1):
             uuid = (ev.get("uuid") or "").strip()
             source_id = (ev.get("sourceId") or _SCRAPER_SOURCE_ID).strip()
             job_store.update_job(job_id, message=f"Event {position} of {len(batch)}: generating summary")
 
-            kind = kind_by_source.get(source_id)
-            if not uuid or kind is None or not _is_collected(uuid, source_id):
+            src = sources.get(source_id)
+            if not uuid or src is None or not _is_collected(uuid, source_id):
                 skipped += 1
                 continue
-            if cached_by_uuid.get(uuid, {}).get("has_ai_summary"):
+            row = cached.get((uuid, source_id), {})
+            # What the event still lacks: a summary of its report, which needs one
+            # to summarise, and the module's summary of the event.
+            report_summary = mode != "event" and row.get("source_report_count") and not row.get("has_ai_summary")
+            event_summary = mode != "report" and not row.get("has_ai_event_summary")
+            if not (report_summary or event_summary):
                 skipped += 1
                 continue
 
-            if kind not in misp_by_kind:
-                misp_by_kind[kind] = _summarise_misp(kind)
-            misp = misp_by_kind[kind]
+            key = source_id if src["kind"] == "misp" else src["kind"]
+            if key not in connections:
+                connections[key] = _connect_source(src)
+            misp, why_not = connections[key]
+            if misp is None:
+                job_store.append_log(job_id, f"{uuid[:8]}: {why_not}")
+                errors += 1
+                continue
 
+            # MISP's own JSON, which the AI-connector module is given as MISP gives
+            # it: PyMISP writes some dates in a form the module reads wrongly.
             try:
-                event = misp.get_event(uuid, pythonify=True)
+                misp_json = misp.get_event(uuid)
             except Exception as exc:
                 logger.warning("bulk_summarise: cannot load %s: %s", uuid, exc)
                 job_store.append_log(job_id, f"{uuid[:8]}: could not be loaded from MISP")
                 errors += 1
                 continue
-            if not event or isinstance(event, dict):
+            if not isinstance(misp_json, dict) or not isinstance(misp_json.get("Event"), dict):
                 job_store.append_log(job_id, f"{uuid[:8]}: not found on {source_id}")
                 errors += 1
                 continue
+            event = MISPEvent()
+            event.load(copy.deepcopy(misp_json))  # load() takes the dict apart
 
             # The model can hold this for minutes, and the job cannot report
             # progress from inside one call, so keep it visibly alive instead.
             with job_store.heartbeat(job_id, f"Event {position} of {len(batch)}: generating summary"):
-                ok, message, _status = _generate_ai_summary(misp, event, source_id, user=user)
-            if ok:
-                summarised += 1
-            else:
-                logger.warning("bulk_summarise: failed for %s: %s", uuid, message)
+                outcomes = []
+                if report_summary:
+                    outcomes.append(("report", *_generate_ai_summary(misp, event, source_id, user=user,
+                                                                     kind=src["kind"])))
+                if event_summary:
+                    outcomes.append(("event", *_generate_event_summary(misp, event, misp_json["Event"], source_id,
+                                                                       user=user)))
+            for what, ok, message, _status in outcomes:
+                if not ok:
+                    logger.warning("bulk_summarise: failed for %s: %s", uuid, message)
+                    errors += 1
+                elif what == "report":
+                    summarised += 1
+                else:
+                    event_summaries += 1
                 job_store.append_log(job_id, f"{event.info or uuid[:8]}: {message}")
-                errors += 1
 
-        parts = [f"{summarised} summary/summaries created"]
+        parts = []
+        if mode != "event":
+            parts.append(f"{summarised} summary/summaries created")
+        if mode != "report":
+            parts.append(f"{event_summaries} event summary/summaries created")
         if skipped:
             parts.append(f"{skipped} skipped")
         if errors:
             parts.append(f"{errors} error(s)")
-        result = {"summarised": summarised, "skipped": skipped, "errors": errors,
-                  "message": ", ".join(parts)}
+        result = {"summarised": summarised, "event_summaries": event_summaries, "skipped": skipped,
+                  "errors": errors, "message": ", ".join(parts)}
         log_pipeline_run_end(run_id, "completed", result)
         job_store.update_job(job_id, status="completed", result=result, message=result["message"])
     except Exception as exc:
@@ -1626,10 +1750,11 @@ def bulk_summarise():
 
     POST JSON: {"events": [{"uuid": "...", "sourceId": "..."}]}
     One LLM call per event takes long enough that the work runs on a background
-    thread: this answers with a job id, and the job carries the progress and the
+    thread: this answers with a job id, and the job holds the progress and the
     outcome so they survive the analyst leaving the page. Events from a source we
-    cannot write the summary back to, and events that already have a summary, are
-    skipped, and only the first _BULK_SUMMARISE_LIMIT events are processed.
+    cannot write the summary back to, events without a report and events that
+    already have a summary are skipped, and only the first _BULK_SUMMARISE_LIMIT
+    events are processed.
     Returns JSON: {ok, job_id, message}
     """
     data, err = _json_object()

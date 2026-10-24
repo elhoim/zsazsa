@@ -123,7 +123,7 @@
             <th style="width:7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Source"><i class="fas fa-satellite-dish text-muted"></i></th>
             <th class="text-end" style="width:4rem;" title="Reports"><i class="fas fa-file-lines text-muted"></i></th>
             <th class="text-end" style="width:3rem;" title="AI summary"><i class="fas fa-wand-magic-sparkles fa-xs" title="AI summary"></i></th>
-            <th class="text-end" style="width:10.5rem;" title="Actions">
+            <th class="text-end" style="width:12rem;" title="Actions">
               <span id="selection-actions-toolbar" class="gap-1 justify-content-end" style="display:none;">
                 <button type="button" class="btn btn-xs btn-outline-warning" id="selection-flag-btn" title="Flag selected events for follow-up">
                   <i class="fas fa-flag"></i>
@@ -340,6 +340,10 @@
               <i class="fas fa-wand-magic-sparkles text-success ai-summary-icon"
                  style="font-size:.8rem;" title="AI summary available"></i>
               {% endif %}
+              {% if e.has_ai_event_summary %}
+              <i class="fas fa-robot text-success ai-event-summary-icon"
+                 style="font-size:.8rem;" title="AI event summary available"></i>
+              {% endif %}
             </td>
             <td class="text-end" style="white-space:nowrap;">
               {% set _busy_job = events_being_summarised.get(e.uuid) %}
@@ -382,12 +386,45 @@
                         {{ 'disabled' if _busy_job }}>
                   <i class="fas fa-microscope fa-xs"></i>
                 </button>
-                {% if e.source_kind in ('scraper', 'manual') and not e.has_ai_summary %}
-                <button class="btn btn-xs btn-outline-secondary create-summary-btn"
-                        data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
-                        title="Generate LLM summary from first MISP report"
+                {% set _report_summary = e.source_id in summarisable_source_ids and e.source_report_count
+                                         and not e.has_ai_summary %}
+                {% set _event_summary = e.source_id in event_summary_source_ids and not e.has_ai_event_summary %}
+                {% if _report_summary %}
+                <div class="btn-group summary-actions">
+                  <button class="btn btn-xs btn-outline-secondary create-summary-btn summary-icon-btn" data-mode="report"
+                          data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
+                          title="Generate LLM summary from first MISP report"
+                          {{ 'disabled' if _busy_job }}>
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                  </button>
+                  {% if _event_summary %}
+                  {# The table clips what sticks out of it, so the menu is placed in the viewport. #}
+                  <button type="button" class="btn btn-xs btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                          data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false"
+                          title="More ways to summarise this event" {{ 'disabled' if _busy_job }}>
+                    <span class="visually-hidden">More ways to summarise this event</span>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end" style="font-size:.8rem;max-width:22rem;">
+                    {% for mode, label in (('report', 'Generate LLM summary'),
+                                           ('both', 'Generate LLM summary of the first report, and an LLM summary of the event as a separate report'),
+                                           ('event', 'Generate summary of the event as a report')) %}
+                    <li>
+                      <button type="button" class="dropdown-item text-wrap create-summary-btn" data-mode="{{ mode }}"
+                              data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
+                              {{ 'disabled' if _busy_job }}>{{ label }}</button>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                </div>
+                {% endif %}
+                {% if _event_summary %}
+                {# Hidden behind the dropdown, and shown when a report summary takes the dropdown away. #}
+                <button class="btn btn-xs btn-outline-secondary create-summary-btn event-summary-btn{{ ' d-none' if _report_summary }}"
+                        data-mode="event" data-uuid="{{ e.uuid }}" data-source-id="{{ e.source_id }}"
+                        title="Generate an LLM summary of the event as a separate report"
                         {{ 'disabled' if _busy_job }}>
-                  <i class="fas fa-wand-magic-sparkles"></i>
+                  <i class="fas fa-robot"></i>
                 </button>
                 {% endif %}
               </div>

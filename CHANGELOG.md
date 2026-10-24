@@ -8,6 +8,11 @@
 - The stakeholder form has an icon next to "Products subscribed" that subscribes the stakeholder to every product, or clears the list.
 - AI settings for the AI-connector MISP module, with a "Test connection" button.
 - The Configuration page warns when `MISP_WEBAPP_KEY` is read-only or its role lacks a permission zsazsa uses.
+- MISP servers under Collection sources have an "Allow adding reports to events" switch. With it on, data collection offers the AI summary on that server's events.
+- The AI-connector MISP module can summarise events from such a server, from a robot icon or the summary dropdown.
+- The dashboard shows how many products wait for a review or are drafts.
+- On the manual entry form, the AI summary ticks the scope items it names. The form also has a MITRE ATT&CK picker.
+- The scheduled analyser can also make flash intel alerts from PIRs and GIRs, vulnerability advisories and the daily briefing. Switch them on under Settings > System > Analyser.
 
 ### Changed
 
@@ -26,6 +31,8 @@
 - The PIR and GIR distribution picker names a stakeholder's organisation instead of showing its UUID, and a GIR started from a stakeholder's page has that stakeholder as its owner and in its distribution, as a PIR already had.
 - Scope items of a PIR and a GIR no longer have a note: the add form has no Notes field, notes are no longer shown or exported, and a scope item is stored as `category|value`.
 - zsazsa needs Python 3.11 or later. Python 3.10 reached its end of life on 1 October 2026, and Pillow 13, which fixes the vulnerabilities below, no longer installs on it.
+- Flash intel alerts from focus points are now drafts.
+- An event gets at most one flash intel alert, whichever run made it.
 
 ### Fixed
 
@@ -34,6 +41,9 @@
 - Changing the review state of a vulnerability advisory deleted its summary, CVSS, CWE and context tags (#69). Its mail and MISP report now have the summary, CVSS and CWE.
 - The service template reads `/etc/environment`, so an outbound proxy set there reaches zsazsa (#72). docker/README.md says how to give Docker the proxy.
 - Saving the settings with single sign-on on and a `MISP_WEBAPP_KEY` without sync permission stored the session cookie name `MISP--`, after which zsazsa sent every request to MISP. The stored name is now kept.
+- Updates to the follow-up flag. Flags lost when the cache was rebuilt come back, and a follow-up tag added or removed in MISP shows after the next refresh.
+- The labelled lines of an AI summary ran together into one paragraph in MISP.
+- AI summaries never tagged MITRE ATT&CK techniques, because zsazsa looked them up in the mitre-malware galaxy.
 
 ### Security
 
@@ -47,6 +57,8 @@
 - Existing notification channels keep working, and the `NOTIFICATION_CHANNELS` format is unchanged apart from the new `teams` type.
 - The `AI_CONNECTOR_*` settings are new and need nothing: the module stays disabled until set up on the AI tab.
 - An advisory whose review state changed before this release lost its summary, CVSS, CWE and context tags. MISP keeps them as deleted attributes of its object: show the deleted attributes on the event in MISP and restore them.
+- The collection cache gets two new columns. They are added when zsazsa starts, so nothing needs doing.
+- The new `ANALYSER_*` settings need nothing. By default the scheduled analyser only makes flash intel alerts from focus points, as before.
 - Behind an outbound proxy, add `EnvironmentFile=-/etc/environment` to `/etc/systemd/system/zsazsa.service`, then `systemctl daemon-reload` and restart zsazsa.
 
 ## 1.0.9

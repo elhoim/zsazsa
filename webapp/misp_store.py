@@ -59,7 +59,7 @@ GALAXY_COUNTRY = "84668357-5a8c-4bdd-9f0f-6b50b2aee4c1"
 GALAXY_TARGET_INFORMATION = "709ed29c-aa00-11e9-82cd-67ac1a6ee3bc"
 GALAXY_SECTOR = "e1bb134c-ae4d-11e7-8aa9-f78a37325439"
 GALAXY_THREAT_ACTOR = "698774c7-8022-42c4-917f-8d6e4f06ada3"
-GALAXY_MITRE_ATTACK = "d752161c-78f6-11e7-a0ea-bfa79b407ce4"
+GALAXY_MITRE_ATTACK = "c4e851fa-775f-11e7-8163-b774922098cd"
 
 # Fallback tag prefixes used when the cluster object has no tag_name attribute
 _GALAXY_TAG_PREFIX = {
@@ -3474,14 +3474,14 @@ def add_product_feedback(event_uuid, author, rating, comment):
         logger.warning("tag %s with feedback failed: %s", event_uuid, exc)
 
 
-def list_pending_feedback_products(fias=None):
+def list_pending_feedback_products(fias=None, veas=None):
     """Published flash intel alerts and vulnerability advisories that asked for
     feedback by a deadline but have not received any yet.
 
     Products without a feedback deadline are never included. "Received" is judged
     from the feedback tag on the event, so this stays to a few MISP searches
-    rather than one lookup per product. ``fias`` is every alert, for a caller
-    that has them already.
+    rather than one lookup per product. ``fias`` and ``veas`` are every alert
+    and advisory, for a caller that has them already.
     """
     misp = _misp()
     have_feedback = set()
@@ -3494,7 +3494,8 @@ def list_pending_feedback_products(fias=None):
 
     today = datetime.now(timezone.utc).date()
     pending = []
-    for kind, items in (("flash-intel", list_fias() if fias is None else fias), ("vea", list_veas())):
+    for kind, items in (("flash-intel", list_fias() if fias is None else fias),
+                        ("vea", list_veas() if veas is None else veas)):
         for p in items:
             if not p.feedback_deadline or not p.published or p.uuid in have_feedback:
                 continue
@@ -3509,6 +3510,33 @@ def list_pending_feedback_products(fias=None):
             ))
     pending.sort(key=lambda p: p.deadline)
     return pending
+
+
+def products_to_review(fias=None, veas=None):
+    """Per kind of product, how many wait for a review and how many are drafts.
+
+    Kinds with neither are left out, and the rest follow the Products menu.
+    ``fias`` and ``veas`` are every alert and advisory, for a caller that has
+    them already.
+    """
+    in_review = {FIA_REVIEW_PENDING, VEA_REVIEW_PENDING, DER_REVIEW_PENDING,
+                 TLR_REVIEW_INTERNAL, TLR_REVIEW_STAKEHOLDER}
+    kinds = (
+        ("briefing", [b.review_state for b in list_briefings()]),
+        ("threat-landscape", [t.review_state for t in list_tlrs()]),
+        ("flash-intel", [f.review_state for f in (list_fias() if fias is None else fias)]),
+        ("vea", [v.review_state for v in (list_veas() if veas is None else veas)]),
+        # A profile has a status, Draft or Published, rather than a review state.
+        ("threat-actor-profile", [t.status.lower() for t in list_threat_actor_profiles()]),
+        ("detection-eng", [d.review_state for d in list_ders()]),
+    )
+    counts = []
+    for kind, states in kinds:
+        review = sum(state in in_review for state in states)
+        drafts = states.count("draft")
+        if review or drafts:
+            counts.append(SimpleNamespace(kind=kind, review=review, drafts=drafts, total=review + drafts))
+    return counts
 
 
 # ── Cross-entity queries ──────────────────────────────────────────────────────
@@ -4294,7 +4322,11 @@ def create_manual_collection_event(data: dict) -> str:
     if slug:
         _tag_local(misp, uuid, f'zsazsa:source="{slug}"')
 
-    for t in _build_scope_tags(data):
+    # A requirement keeps its techniques on its object, so _build_scope_tags
+    # leaves them out; a source event has them as galaxy tags.
+    techniques = data.get("mitre_attack_techniques") or []
+    technique_tags = _galaxy_tag_map(GALAXY_MITRE_ATTACK) if techniques else {}
+    for t in _build_scope_tags(data) + [technique_tags[v] for v in techniques if v in technique_tags]:
         try:
             misp.tag(uuid, t)
         except Exception:
@@ -4357,14 +4389,15 @@ def create_manual_collection_event(data: dict) -> str:
     return uuid
 
 
-def add_ai_summary_report(misp, event_id, title: str, summary: str) -> None:
-    """Add an AI summary to an event, as the report the collection page and the
-    briefing recognise one by."""
+def add_ai_summary_report(misp, event_id, title: str, summary: str, distribution: int = 5,
+                          prefix: str = AI_SUMMARY_PREFIX) -> None:
+    """Add an AI summary to an event as a report named by ``prefix``, which is
+    how the collection page and the briefing recognise one."""
     from pymisp import MISPEventReport
     report = MISPEventReport()
-    report.name = f"{AI_SUMMARY_PREFIX} {title[:80]}"
+    report.name = f"{prefix} {title[:80]}"
     report.content = summary
-    report.distribution = 5
+    report.distribution = distribution
     _check(misp.add_event_report(event_id, report), "add AI summary report")
 
 
@@ -5045,6 +5078,12 @@ def list_fias(review_state=None):
         result = [f for f in result if f.review_state == review_state]
     result.sort(key=lambda f: f.fia_id, reverse=True)
     return result
+
+
+def flash_intel_source_uuids() -> set:
+    """The events a flash intel alert was made from, every alert counted,
+    rejected ones too, whether the analyser or an analyst made it."""
+    return {uuid for fia in list_fias() for uuid in fia.source_event_uuids}
 
 
 def get_fia(uuid):

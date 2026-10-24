@@ -16,8 +16,8 @@ from core.net_safety import resolve_public_url
 from core.rulezet_lookup import (get_rule, search_rules_by_attack, search_rules_by_cve,
                                  validate_rule)
 from core.vuln_lookup import CVE_RE, fetch_cve_info
-from webapp import audit, collection_cache, job_store, misp_session, misp_store
-from webapp.collection_cache import AI_SUMMARY_PREFIX
+from webapp import analyser_pipeline, audit, collection_cache, job_store, misp_session, misp_store
+from webapp.collection_cache import is_ai_summary_report
 from webapp.rate_limit import rate_limited
 from webapp.utils import json_body as _json_object, scraper_enabled
 
@@ -66,7 +66,7 @@ def _get_event_content_and_scope(event_uuid: str, source_id: str = ""):
     reports = getattr(event, "event_reports", []) or []
     content = None
     for r in reports:
-        if not (getattr(r, "name", "") or "").startswith(AI_SUMMARY_PREFIX):
+        if not is_ai_summary_report(getattr(r, "name", "")):
             c = getattr(r, "content", None)
             if c:
                 content = c
@@ -902,7 +902,7 @@ def _report_content(source_events, raw_only=False):
     parts = []
     for ev in source_events:
         for r in ev.get('reports', []):
-            if raw_only and (r.get('name') or '').startswith(AI_SUMMARY_PREFIX):
+            if raw_only and is_ai_summary_report(r.get('name')):
                 continue
             c = (r.get('content') or '').strip()
             if c: parts.append(c)
@@ -1250,7 +1250,9 @@ def _run_summarise_content_job(job_id: str, content: str, title: str, user: str)
             return
         audit.record("generate", "ai_summary", details=title or f"{len(content)} chars",
                      user=user)
-        result = {"summary": summary}
+        # The form ticks the scope items the summary's "MISP context" names.
+        result = {"summary": summary,
+                  "scope": analyser_pipeline.parse_misp_context(summary, analyser_pipeline.galaxy_names_with_commas())}
         event = (job_store.get_job(job_id) or {}).get("event")
         if event:
             _add_summary_to_event(event, summary)

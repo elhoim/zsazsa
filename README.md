@@ -48,7 +48,7 @@ zsazsa keeps its data in MISP, using events, object templates, attributes and ev
 
 ### Dashboard
 
-The dashboard gives a quick **operational overview**, including pipeline state, active requirements, stakeholder info and recent processing results.
+The dashboard gives a quick **operational overview**, including pipeline state, active requirements, stakeholder info and recent processing results. **Products to review** shows, per product type, how many wait for a review or are drafts.
 
 ![docs/1-dashboard.png](docs/1-dashboard.png)
 
@@ -122,7 +122,7 @@ An analyst can **enrich an event** with scope: geographic reach, targeted sector
 
 ![docs/6-addscope.png](docs/6-addscope.png)
 
-If nothing relevant came in through the configured sources, an analyst can also add an article by hand,
+If nothing relevant came in through the configured sources, an analyst can also add an article by hand. Its AI summary ticks the scope items it names, for the analyst to check,
 
 ![docs/6-manualentry.png](docs/6-manualentry.png)
 
@@ -342,7 +342,7 @@ This option is **requirement-driven**. It only acts on events that match somethi
 
 This option is **CVE-driven**.
 
-1. For each event it looks for a CVE identifier, in the event attributes or the report text.
+1. For each event it looks for a CVE in its vulnerability attributes, and otherwise in its title.
 2. An event with at least one CVE gets a **vulnerability advisory draft**. The CVE is enriched from a vulnerability database (CVSS score, affected products and versions, description) and the advisory sections are drafted by the AI.
 3. An event with no CVE is skipped and logged as **"no CVE found"**.
 
@@ -355,6 +355,16 @@ This option is **CVE-driven**.
 | Vulnerability advisory | Today's scraped events that mention a CVE | Events logged as "no CVE found" | One vulnerability advisory draft per CVE event |
 
 In every case the analyser stops at drafts. Publishing and sending to stakeholders is always a separate step you take by hand.
+
+### The scheduled analyser
+
+`run_analyser.py` runs from cron or in the analyser container. By default it only makes flash intel alerts from focus points. Under Settings > System > Analyser you can also switch on the three options of **Start analyser**.
+
+**Alerts from focus points.** Each run reads the `incomplete` scraper events since the previous run, at most `POLL_WINDOW_HOURS` back. The AI checks each article against the focus points. A match becomes a draft flash intel alert at TLP amber, and the source event moves to `ongoing`. For a stakeholder subscribed in **automated** mode, the alert is published and sent without review.
+
+**The Start analyser options** work as described above, but also read yesterday's events, so late events are not missed. The daily briefing is made once a day, from `ANALYSER_DAILY_BRIEFING_HOUR` (UTC), and runs last because it rejects irrelevant events. Each option first writes the missing AI summaries, which adds a model call per new event.
+
+An event never gets more than one flash intel alert.
 
 ## Importing newsletters
 
@@ -453,7 +463,7 @@ The System tab holds six cards.
 
 **MISP event distribution** sets `MISP_EVENT_DISTRIBUTION`, the distribution level given to every event zsazsa creates in MISP.
 
-**Analyser** contains `POLL_WINDOW_HOURS` (how far back the analyser looks for new events on each run), `EVENT_LOG_RETENTION_DAYS` (how long rows in the `event_log` table are kept) and `PIPELINE_RUN_LOG_RETENTION_DAYS` (how long pipeline run history is kept). **Logging** sets `LOG_LEVEL`. **Web server** covers `HOSTNAME` and `PORT`, plus `SSL_ENABLED`, `SSL_CERT` and `SSL_KEY` for running the built-in server with TLS. After changing the port or SSL settings, restart the application for the change to take effect. zsazsa listens on `0.0.0.0` unless `ZSAZSA_BIND` in its environment names another address, and `ZSAZSA_PORT` there takes the place of `PORT`; the Docker setup sets both. `HOSTNAME` does not change the listener: it is kept for reference and for building links.
+**Analyser** contains `POLL_WINDOW_HOURS` (how far back the analyser looks for new events on each run), what the scheduled analyser makes (see [The scheduled analyser](#the-scheduled-analyser)), `EVENT_LOG_RETENTION_DAYS` (how long rows in the `event_log` table are kept) and `PIPELINE_RUN_LOG_RETENTION_DAYS` (how long pipeline run history is kept). **Logging** sets `LOG_LEVEL`. **Web server** covers `HOSTNAME` and `PORT`, plus `SSL_ENABLED`, `SSL_CERT` and `SSL_KEY` for running the built-in server with TLS. After changing the port or SSL settings, restart the application for the change to take effect. zsazsa listens on `0.0.0.0` unless `ZSAZSA_BIND` in its environment names another address, and `ZSAZSA_PORT` there takes the place of `PORT`; the Docker setup sets both. `HOSTNAME` does not change the listener: it is kept for reference and for building links.
 
 **Single sign-on** is described in its own section below.
 
@@ -463,6 +473,11 @@ The System tab holds six cards.
 |---|---|
 | `MISP_EVENT_DISTRIBUTION` | Distribution level for events zsazsa creates: 0 your organisation, 1 this community, 2 connected communities, 3 all communities |
 | `POLL_WINDOW_HOURS` | How far back the analyser looks for new events on each run |
+| `ANALYSER_FLASH_INTEL` | Make flash intel alerts from focus points (on by default) |
+| `ANALYSER_FLASH_INTEL_REQUIREMENTS` | Make flash intel alerts from PIRs and GIRs |
+| `ANALYSER_VULNERABILITY_ADVISORIES` | Make vulnerability advisories |
+| `ANALYSER_DAILY_BRIEFING` | Make the daily briefing |
+| `ANALYSER_DAILY_BRIEFING_HOUR` | Hour (UTC) from which the daily briefing is made |
 | `EVENT_LOG_RETENTION_DAYS` | How long rows in the `event_log` table are kept |
 | `PIPELINE_RUN_LOG_RETENTION_DAYS` | How long pipeline run history is kept |
 | `LOG_LEVEL` | Logging verbosity |
@@ -533,7 +548,7 @@ The AI tab starts with the LLM providers card, one section per provider. **OpenA
 
 Each provider has its own enable switch, and one provider is marked as the default with the "Default provider" button. A provider cannot be disabled while features still point at it.
 
-**AI-connector MISP module** is the [ai-connector](https://github.com/cudeso/ai-connector) misp-modules server, with the settings MISP has for it under `Plugin.AI_*`. On misp-docker it is at `http://ai-connector`, port 6667. Give an Ollama model with its tag, for example `llama3.1:latest`. It runs its own prompts, so no feature can choose it; its "Summarise MISP event" is a fixed row in the feature table. "Test connection" checks the module and the model, as MISP's "Test LLM" does.
+**AI-connector MISP module** is the [ai-connector](https://github.com/cudeso/ai-connector) misp-modules server, with the settings MISP has for it under `Plugin.AI_*`. On misp-docker it is at `http://ai-connector`, port 6667. Give an Ollama model with its tag, for example `llama3.1:latest`. It runs its own prompts, so no feature can choose it; its "Summarise MISP event" is a fixed row in the feature table. "Test connection" checks the module and the model, as MISP's "Test LLM" does. In data collection it can summarise events from a MISP server that allows adding reports. The summary is saved as an `[AI-Event-Summary]` report.
 
 Below the providers, a table lists each AI-assisted feature (for example summarising a report or generating a Flash Intel Alert draft) with the provider it uses, an optional per-feature model override, a sampling temperature, and the prompt file it uses. An empty model field means the feature uses the default model of its provider. An empty temperature leaves sampling to the model, which for a locally hosted model can mean a value as high as 1.0; since almost every feature here is parsed back into structured data, a low temperature between 0 and 0.2 keeps that output stable. Not every model takes every setting: an OpenAI reasoning model only accepts its default temperature while it reasons, and older models do not know `reasoning_effort`. A model that refuses one is asked again without it, once, and zsazsa remembers that for the model. This feature-level configuration is stored separately, in `data/ai_features.json`, rather than in `config/__init__.py`, and is therefore untouched by a Settings save and not covered by the config backup.
 
@@ -695,7 +710,7 @@ The scraper's own `subscribe` service must be running against this Redis. Publis
 
 #### Additional MISP servers
 
-The "Other MISP servers" card lists any extra MISP instances configured in `MISP_SERVERS`, such as community MISP servers. Use "Add MISP server" to create a new entry, then fill in a label, an optional ID (used as a URL slug, generated from the label if left blank), the server URL, API key and TLS verification setting. Only published events are fetched from these servers. Filtering is controlled with three tag fields, tags that an event must have any of, tags it must have all of, and tags that exclude it, plus an optional organisation filter that can either restrict results to a set of organisation UUIDs or exclude them. "Events from last (days)" sets how far back to look based on the event date, and "Max events" caps how many events are pulled. As with the scraper, each server can be tested, given a pull estimate, and have its query previewed before saving. Each server is saved individually with its own "Save server" button, can be enabled or disabled with the power icon, and can be deleted. Disabling or deleting a server that is referenced by a PIR or GIR as a collection source will warn you first, since the reference itself is not removed.
+The "Other MISP servers" card lists any extra MISP instances configured in `MISP_SERVERS`, such as community MISP servers. Use "Add MISP server" to create a new entry, then fill in a label, an optional ID (used as a URL slug, generated from the label if left blank), the server URL, API key and TLS verification setting. Only published events are fetched from these servers. Filtering is controlled with three tag fields, tags that an event must have any of, tags it must have all of, and tags that exclude it, plus an optional organisation filter that can either restrict results to a set of organisation UUIDs or exclude them. "Events from last (days)" sets how far back to look based on the event date, and "Max events" caps how many events are pulled. As with the scraper, each server can be tested, given a pull estimate, and have its query previewed before saving. Each server is saved individually with its own "Save server" button, can be enabled or disabled with the power icon, and can be deleted. With "Allow adding reports to events" on, data collection offers the AI summary on that server's events. zsazsa adds it as a report for your organisation only and publishes the event again without an e-mail. The API key must be able to modify and publish the event, which for another organisation's event means a site admin key. Disabling or deleting a server that is referenced by a PIR or GIR as a collection source will warn you first, since the reference itself is not removed.
 
 | Field | Description |
 |---|---|

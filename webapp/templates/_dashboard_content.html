@@ -1,6 +1,7 @@
 {# Data-dependent dashboard sections, loaded asynchronously by dashboard.html.
    Everything here needs MISP/DB queries; keeping it out of the initial page
    render lets the shell (action bar) paint immediately. #}
+{% import "_charts.html" as charts %}
 
 {# Onboarding helper: appears until zsazsa has sources and focus points, and
    both a stakeholder and a PIR exist. Only a site admin can open the wizard. #}
@@ -84,6 +85,55 @@
 </a>
 {% endif %}
 
+{% if to_review %}
+{# What the analyser and the analysts left for a review, per kind of product:
+   its label, icon, list and the state its list filters a count on. A threat
+   landscape list has no state filter. #}
+{% set review_kinds = {
+  'briefing': ('Daily briefings', 'fa-newspaper', 'daily_briefing.list_briefings', {'drafts': 'draft'}),
+  'threat-landscape': ('Threat landscapes', 'fa-globe', 'threat_landscape.review', {}),
+  'flash-intel': ('Flash intel alerts', 'fa-bolt', 'flash_intel.review', {'review': 'pending-review', 'drafts': 'draft'}),
+  'vea': ('Vuln advisories', 'fa-bug', 'vea.review', {'review': 'pending-review', 'drafts': 'draft'}),
+  'threat-actor-profile': ('Threat actor profiles', 'fa-user-secret', 'threat_actor_profile.review', {'drafts': 'Draft'}),
+  'detection-eng': ('Detection eng. requests', 'fa-crosshairs', 'detection_eng.review', {'review': 'pending-review', 'drafts': 'draft'}),
+} %}
+{% set review_color = charts.review_colors['pending-review'] %}
+{% set draft_color = charts.review_colors['draft'] %}
+{% set most = to_review | map(attribute='total') | max %}
+<div class="card content-card chart-card mb-4" id="products-to-review" style="--icon-color:var(--accent-blue);">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span class="d-flex align-items-center gap-2"><span class="stat-icon icon-sm"><i class="fas fa-clipboard-check"></i></span>Products to review</span>
+    <span class="chart-legend">
+      <span><span class="chart-swatch" style="background:{{ review_color }};"></span>To review <strong>{{ to_review | sum(attribute='review') }}</strong></span>
+      <span><span class="chart-swatch" style="background:{{ draft_color }};"></span>Draft <strong>{{ to_review | sum(attribute='drafts') }}</strong></span>
+    </span>
+  </div>
+  <div class="card-body py-2" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(22rem,100%),1fr));column-gap:1.5rem;">
+    {% for row in to_review %}
+    {% set label, icon, endpoint, states = review_kinds[row.kind] %}
+    {% set counts = [] %}
+    {% if row.review %}{% set counts = counts + [('review', row.review ~ ' to review')] %}{% endif %}
+    {% if row.drafts %}{% set counts = counts + [('drafts', row.drafts ~ ' draft' ~ ('s' if row.drafts != 1 else ''))] %}{% endif %}
+    <div class="chart-row">
+      <span class="rank"><i class="fas {{ icon }}"></i></span>
+      <span class="d-block" style="min-width:0;">
+        <span class="name"><a href="{{ url_for(endpoint) }}" class="text-reset">{{ label }}</a>
+          <span class="text-muted">·
+          {%- for part, text in counts %} {% if states.get(part) -%}
+            <a href="{{ url_for(endpoint, state=states[part]) }}" class="text-reset">{{ text }}</a>
+          {%- else %}{{ text }}{% endif %}{{ ',' if not loop.last }}{% endfor %}</span></span>
+        <span class="chart-bar" style="width:{{ (row.total / most * 100) | round(1) }}%;">
+          {% if row.review %}<span style="flex:{{ row.review }};background:{{ review_color }};" title="{{ row.review }} to review"></span>{% endif %}
+          {% if row.drafts %}<span style="flex:{{ row.drafts }};background:{{ draft_color }};" title="{{ row.drafts }} draft{{ 's' if row.drafts != 1 }}"></span>{% endif %}
+        </span>
+      </span>
+      <span class="chart-pill">{{ row.total }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if pending_feedback %}
 <!-- Products awaiting feedback -->
 <div class="card content-card mb-4">
@@ -158,8 +208,6 @@
     </div>
   </div>
 </div>
-
-{% import "_charts.html" as charts %}
 
 <div class="row g-4">
 
