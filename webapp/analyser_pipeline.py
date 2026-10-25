@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 import config
 from analyser import llm, tagger
 from analyser.reader import save_last_action
+from core import asset_inventory
 from core.db import log_event, log_pipeline_run_end, log_pipeline_run_start
 from core.vuln_lookup import fetch_cve_info
 from pymisp import MISPEventReport
@@ -185,14 +186,17 @@ def _refresh_scraper_cache() -> None:
     collection_cache.refresh_source({"id": "scraper", "kind": "scraper"})
 
 
-def _incomplete_scraper_events(days=1):
-    """The scraper's incomplete events of the last ``days`` days, today included."""
+def _incomplete_scraper_events(days=1, since=None):
+    """The scraper's events of the last ``days`` days, today included, that are
+    still incomplete or ongoing, and with ``since`` only those changed since
+    that Unix time."""
     # These candidates come from the scraper only. Without one the pipeline runs
     # and reports no candidates, rather than failing the whole action.
     if not scraper_enabled():
         return None, []
     misp = misp_store._scraper_misp()
     first_day = datetime.now(timezone.utc).date() - timedelta(days=days - 1)
+    changed = {"timestamp": since} if since else {}
     events = misp.search(
         tags=[config.SCRAPER_MARKER_TAG],
         date_from=first_day.isoformat(),
@@ -200,13 +204,13 @@ def _incomplete_scraper_events(days=1):
         page=1,
         pythonify=True,
         order=misp_store.NEWEST_FIRST,
+        **changed,
     )
     if isinstance(events, dict):
-        # An error answer and an empty one both end the run reporting no
-        # eligible events, so the reason has to reach the log at least.
-        logger.warning("scraper search for today's incomplete events failed: %s",
-                       events.get("errors") or events)
-        return misp, []
+        # Raised rather than read as no events, as the analyser's reader does:
+        # the schedule reads from where its last completed run started, so a
+        # run that completed on an error answer would skip these events for good.
+        raise RuntimeError(f"MISP search failed: {events.get('errors') or events}")
     if not events:
         return misp, []
 
@@ -373,14 +377,14 @@ def _extract_admiralty(event, prefix: str) -> str:
     return ""
 
 
-def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tuple:
+def _common_candidate_events(progress=None, title_exclusions=None, days=1, since=None) -> tuple:
     _emit(progress, "refresh-cache", "in_progress", "Refreshing scraper cache...")
     _refresh_scraper_cache()
     _emit(progress, "refresh-cache", "completed", "Scraper cache refreshed.")
 
     period = "today" if days == 1 else f"the last {days} days"
     _emit(progress, "collect-events", "in_progress", f"Collecting the incomplete scraper events of {period}...")
-    misp, events = _incomplete_scraper_events(days)
+    misp, events = _incomplete_scraper_events(days, since)
     _emit(progress, "collect-events", "completed", f"Loaded {len(events)} incomplete event(s) of {period}.")
 
     hard_rejected = 0
@@ -425,7 +429,7 @@ def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tu
     _emit(progress, "filter-events", "completed", f"Filtering complete: {filter_detail}.")
 
     summaries = {}
-    summary_created = 0
+    summary_created = summary_failed = 0
     # Reading the galaxies costs several MISP calls, and a run with nothing left
     # to summarise has no use for them.
     galaxy_lookup = _build_galaxy_lookup() if kept else {}
@@ -444,7 +448,15 @@ def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tu
             written += 1
             _emit(progress, "generate-summaries", "in_progress",
                   f"AI summary {written} of {missing}: {(event.info or event.uuid)[:80]}")
-        summary, created = _ensure_ai_summary(misp, event, reports, galaxy_lookup)
+        try:
+            summary, created = _ensure_ai_summary(misp, event, reports, galaxy_lookup)
+        except Exception as exc:
+            # One event the model or MISP fails on should not end the run for
+            # the others. It goes on with its article, and the next scheduled
+            # run reads it again for the summary.
+            logger.warning("AI summary failed for %s: %s", event.uuid, exc)
+            summary, created = "", False
+            summary_failed += 1
         if created:
             summary_created += 1
         summaries[event.uuid] = summary
@@ -456,6 +468,8 @@ def _common_candidate_events(progress=None, title_exclusions=None, days=1) -> tu
         "hard_rejected": hard_rejected,
         "excluded_by_title": excluded_by_title,
         "summary_created": summary_created,
+        "summary_failed": summary_failed,
+        "since": since,
         "event_decisions": event_decisions,
     }, reports_cache
 
@@ -476,10 +490,30 @@ def _duplicate_story_indexes(overlaps) -> set:
     return to_drop
 
 
-def run_daily_briefing_action(progress=None, days=1) -> dict:
+def requirement_matches(events) -> dict:
+    """{uuid: matches, best first} for the events that match an active PIR or GIR."""
+    match_events = []
+    for event in events:
+        galaxies = []
+        for galaxy in getattr(event, "galaxies", []) or []:
+            for cluster in getattr(galaxy, "clusters", []) or []:
+                value = getattr(cluster, "value", "") or ""
+                if value:
+                    galaxies.append(value)
+        match_events.append({
+            "uuid": event.uuid,
+            "info": event.info or "",
+            "tags": [getattr(t, "name", "") for t in (getattr(event, "tags", []) or [])],
+            "galaxy_names": galaxies,
+        })
+    pirs, girs = req_matching.get_requirements()
+    return req_matching.match_events(match_events, pirs, girs)
+
+
+def run_daily_briefing_action(progress=None, days=1, since=None) -> dict:
     exclusions = daily_briefing_title_exclusions()
     misp, events, summaries, stats, reports_cache = _common_candidate_events(
-        progress=progress, title_exclusions=exclusions or None, days=days,
+        progress=progress, title_exclusions=exclusions or None, days=days, since=since,
     )
     decisions = list(stats.get("event_decisions", []))
 
@@ -490,19 +524,34 @@ def run_daily_briefing_action(progress=None, days=1) -> dict:
 
     rejected_by_relevance = 0
     _emit(progress, "review-relevance", "in_progress", "Reviewing daily briefing relevance of candidate stories...")
+    # An event that matches an active PIR or GIR is in the briefing whatever the
+    # review would say: the requirement already says it matters, and a rejection
+    # would take it out of the alert run as well.
+    matches = requirement_matches(events) if events else {}
+    matched_requirement = {uuid: found[0].get("id", "") for uuid, found in matches.items()}
     kept = []
     for position, event in enumerate(events, start=1):
+        title = (event.info or event.uuid)[:80]
+        if event.uuid in matched_requirement:
+            _emit(progress, "review-relevance", "in_progress",
+                  f"Relevance {position} of {len(events)}: {title} matches {matched_requirement[event.uuid]}")
+            kept.append(event)
+            continue
         # One model call per event, as for the summaries.
-        _emit(progress, "review-relevance", "in_progress",
-              f"Relevance {position} of {len(events)}: {(event.info or event.uuid)[:80]}")
+        _emit(progress, "review-relevance", "in_progress", f"Relevance {position} of {len(events)}: {title}")
         reports = reports_cache.get(event.uuid, [])
         first_report = _first_non_empty_report_content(reports)
         report_title = (getattr(reports[0], "name", "") or "") if reports else ""
-        decision = llm.review_briefing_relevance(
-            event_title=event.info or "",
-            report_title=report_title,
-            content=first_report,
-        )
+        try:
+            decision = llm.review_briefing_relevance(
+                event_title=event.info or "",
+                report_title=report_title,
+                content=first_report,
+            )
+        except Exception as exc:
+            # Kept, as an answer that cannot be read is: the analyst judges it in the draft.
+            logger.warning("Briefing relevance check failed for %s: %s", event.uuid, exc)
+            decision = {"include": True}
         if not decision.get("include", True):
             rejected_by_relevance += 1
             reason = (decision.get("reason") or "").strip()
@@ -601,7 +650,9 @@ def run_daily_briefing_action(progress=None, days=1) -> dict:
         _emit(progress, "check-overlap", "completed", "Not enough stories for overlap checking.")
 
     for s in stories:
-        decisions.append({"uuid": s.get("source_event_uuid", ""), "title": s.get("title", ""), "outcome": "included", "reason": ""})
+        matched = matched_requirement.get(s.get("source_event_uuid", ""))
+        decisions.append({"uuid": s.get("source_event_uuid", ""), "title": s.get("title", ""), "outcome": "included",
+                          "reason": f"Matches {matched}" if matched else ""})
 
     if not stories:
         _emit(progress, "write-summary", "completed", "No stories to summarise.")
@@ -680,32 +731,24 @@ def run_daily_briefing_action(progress=None, days=1) -> dict:
     }
 
 
-def run_flash_intel_action(progress=None, days=1) -> dict:
-    _misp, events, summaries, stats, _ = _common_candidate_events(progress=progress, days=days)
+def run_flash_intel_action(progress=None, days=1, since=None) -> dict:
+    _misp, events, summaries, stats, _ = _common_candidate_events(progress=progress, days=days, since=since)
     # One alert per event, whichever run made it and whatever became of it.
     alerted = misp_store.flash_intel_source_uuids()
     events = [e for e in events if e.uuid not in alerted]
 
     _emit(progress, "match-requirements", "in_progress", "Matching eligible events against active PIR/GIR scope...")
-    match_events = []
-    for event in events:
-        galaxies = []
-        for galaxy in getattr(event, "galaxies", []) or []:
-            for cluster in getattr(galaxy, "clusters", []) or []:
-                value = getattr(cluster, "value", "") or ""
-                if value:
-                    galaxies.append(value)
-        match_events.append({
-            "uuid": event.uuid,
-            "info": event.info or "",
-            "tags": [getattr(t, "name", "") for t in (getattr(event, "tags", []) or [])],
-            "galaxy_names": galaxies,
-        })
-
-    pirs, girs = req_matching.get_requirements()
-    match_map = req_matching.match_events(match_events, pirs, girs)
+    match_map = requirement_matches(events)
     matched_count = sum(1 for event in events if match_map.get(event.uuid))
     _emit(progress, "match-requirements", "completed", f"Requirement matching complete: {matched_count} event(s) matched.")
+
+    # The audience is the requirement's: its owner and the stakeholders it is
+    # distributed to. One whose stakeholders have no role takes everyone the
+    # alert can reach, as an alert from the focus points does.
+    pirs, girs = req_matching.get_requirements()
+    requirements = {r.uuid: r for r in pirs + girs}
+    stakeholders = misp_store.list_stakeholders() if matched_count else []
+    reachable = misp_store.subscriber_audience("Flash intel alert", "amber") if matched_count else ""
 
     created = 0
     _emit(progress, "create-drafts", "in_progress", "Creating flash intel draft(s) for matched events...")
@@ -716,10 +759,12 @@ def run_flash_intel_action(progress=None, days=1) -> dict:
             continue
         top = matches[0]
         linked_pir_uuid = top.get("uuid", "") if top.get("type") == "pir" else ""
+        requirement = requirements.get(top.get("uuid"))
+        audience = misp_store.requirement_audience(requirement, stakeholders) if requirement else ""
 
         data = {
             "title": event.info or "Untitled",
-            "audience": "",
+            "audience": audience or reachable,
             "tlp": "amber",
             "summary": (summaries.get(event.uuid) or "").strip(),
             "action_required": "Review and decide whether publication is required.",
@@ -766,8 +811,42 @@ def run_flash_intel_action(progress=None, days=1) -> dict:
     }
 
 
-def run_vea_action(progress=None, days=1) -> dict:
-    _misp, events, summaries, stats, reports_cache = _common_candidate_events(progress=progress, days=days)
+_NOT_CHECKED = "Not checked against the asset inventory: the CVE record names no product."
+
+
+def _cve_in_inventory(cves, progress):
+    """The CVE an event's advisory is about with the asset inventory on, as
+    (cve, its record, what "Our exposure" says), or None for no advisory.
+
+    The first CVE in a product of the inventory. Failing that, the first whose
+    record names no product, as one still reserved does or one whose lookup
+    failed: that cannot be checked, so the draft says so and the analyst
+    decides. An event listing a month of patches stops after ten, to spare the
+    lookups.
+    """
+    not_checked = None
+    for cve in cves[:10]:
+        _emit(progress, "create-drafts", "in_progress", f"Checking {cve} against the asset inventory...")
+        enrichment = fetch_cve_info(cve)
+        affected = enrichment.get("affected") or []
+        for vendor, product in affected:
+            asset = asset_inventory.find(vendor, product)
+            if asset:
+                return cve, enrichment, f"In the asset inventory: {asset.supplier} {asset.product} {asset.version}".strip()
+        if not affected and not_checked is None:
+            not_checked = (cve, enrichment, _NOT_CHECKED)
+    return not_checked
+
+
+def run_vea_action(progress=None, days=1, since=None) -> dict:
+    # With the asset inventory on, a CVE only makes an advisory when it is in a
+    # product we run. Reading it first fails the run on a bad file before the
+    # summaries take their model calls.
+    checking_assets = asset_inventory.enabled()
+    if checking_assets:
+        asset_inventory.assets()
+    _misp, events, summaries, stats, reports_cache = _common_candidate_events(
+        progress=progress, days=days, since=since)
     events = [e for e in events if not _event_has_product_tag(e, "vea")]
 
     _emit(progress, "detect-cves", "in_progress", "Detecting CVE matches in eligible events...")
@@ -779,8 +858,10 @@ def run_vea_action(progress=None, days=1) -> dict:
         if cves:
             cve_match_count += 1
     _emit(progress, "detect-cves", "completed", f"CVE detection complete: {cve_match_count} event(s) with CVE match.")
+    # Everyone an advisory can reach, for the analyst to narrow down.
+    audience = misp_store.subscriber_audience("Vulnerability advisory", "amber") if cve_match_count else ""
 
-    created = 0
+    advised = []
     _emit(progress, "create-drafts", "in_progress", "Creating vulnerability advisory draft(s) for CVE-matched events...")
     for event in events:
         cves = cve_map.get(event.uuid, [])
@@ -788,9 +869,17 @@ def run_vea_action(progress=None, days=1) -> dict:
             _log(event, "not_relevant", "no CVE found")
             continue
 
-        primary_cve = cves[0]
-        _emit(progress, "create-drafts", "in_progress", f"Enriching {primary_cve} from vulnerability database...")
-        enrichment = fetch_cve_info(primary_cve)
+        exposure = ""
+        if checking_assets:
+            found = _cve_in_inventory(cves, progress)
+            if found is None:
+                _log(event, "not_relevant", f"not in the asset inventory: {', '.join(cves[:10])}")
+                continue
+            primary_cve, enrichment, exposure = found
+        else:
+            primary_cve = cves[0]
+            _emit(progress, "create-drafts", "in_progress", f"Enriching {primary_cve} from vulnerability database...")
+            enrichment = fetch_cve_info(primary_cve)
 
         product_lines = []
         if enrichment.get("products"):
@@ -826,11 +915,11 @@ def run_vea_action(progress=None, days=1) -> dict:
             "title": event.info or "",
             "tlp": "amber",
             "author": "analyser",
-            "audience": "",
+            "audience": audience,
             "affected_product": ", ".join(enrichment.get("products") or []) or drafted.get("affected_product", ""),
             "affected_versions": ", ".join(enrichment.get("versions") or []) or drafted.get("affected_versions", ""),
             "fixed_version": "",
-            "exposure": "",
+            "exposure": exposure,
             "observed_exploitation": drafted.get("observed_exploitation", ""),
             "exploit_availability": enrichment.get("exploit_availability") or drafted.get("exploit_availability", ""),
             "exploitation_complexity": drafted.get("exploitation_complexity", ""),
@@ -854,14 +943,16 @@ def run_vea_action(progress=None, days=1) -> dict:
             "linked_pir_uuid": "",
         }
         misp_store.create_vea(data)
-        created += 1
+        advised.append(event.uuid)
         _log(event, "product_created", f"vea; CVEs: {', '.join(cves)}")
+    created = len(advised)
     _emit(progress, "create-drafts", "completed", f"Created {created} vulnerability advisory draft(s).")
 
     return {
         "ok": True,
         "action": "vea",
         "created": created,
+        "source_event_uuids": advised,
         "message": f"Created {created} vulnerability advisory draft(s) from CVE-matched events.",
         **stats,
     }
@@ -902,12 +993,13 @@ def action_steps(action: str) -> list[dict]:
     return common
 
 
-def run_action(job_id: str, user: str, triggered_by: str = "dashboard", days: int = 1) -> dict | None:
+def run_action(job_id: str, user: str, triggered_by: str = "dashboard", days: int = 1,
+               since: int | None = None) -> dict | None:
     """Run the analyser action of a job made with action_steps(), and return its
     result, or None when it did not complete. ``user`` goes on the audit
     entries: the analyst, read from the request before this thread began, or
     "analyser" for the schedule. ``days`` is how many days of scraper events it
-    reads, today included."""
+    reads, today included, and ``since`` keeps those changed since then."""
     job = job_store.get_job(job_id)
     if not job:
         return None
@@ -932,7 +1024,7 @@ def run_action(job_id: str, user: str, triggered_by: str = "dashboard", days: in
         job_store.set_step(job_id, step=step, state=state, message=message)
 
     try:
-        result = handler(progress=_progress, days=days)
+        result = handler(progress=_progress, days=days, since=since)
         # Freshness only. Not save_last_run: that is the analyser's watermark
         # for which scraper events it has already seen, and these actions read a
         # different set (the day's incomplete events), so moving it forward here

@@ -17,8 +17,10 @@ CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 def fetch_cve_info(cve_id: str) -> dict:
     """Fetch and parse CVE details from vulnerability.circl.lu.
 
-    Returns a dict with title, description, products, versions, cwes, cvss_score,
-    cvss_severity, cvss_vector, exploit_availability, cisa_kev, and references.
+    Returns a dict with title, description, products, affected, versions, cwes,
+    cvss_score, cvss_severity, cvss_vector, exploit_availability, cisa_kev, and
+    references. ``affected`` is the (vendor, product) pairs that make up
+    ``products``, for matching against an asset inventory.
     Returns an empty dict on any failure so callers can treat it as optional enrichment.
     """
     cve_id = (cve_id or "").strip()
@@ -44,14 +46,17 @@ def _parse(data: dict) -> dict:
     descriptions = cna.get("descriptions") or []
     desc = next((d["value"] for d in descriptions if d.get("lang", "").lower().startswith("en")), "")
 
-    products, versions = [], []
+    products, affected, versions = [], [], []
     for a in cna.get("affected") or []:
         vendor = (a.get("vendor") or "").strip()
+        if vendor.lower() in ("n/a", "na"):
+            vendor = ""
         product = (a.get("product") or "").strip()
         if product and product.lower() not in ("n/a", "na"):
             label = f"{vendor} {product}".strip() if vendor else product
             if label not in products:
                 products.append(label)
+                affected.append((vendor, product))
         for v in a.get("versions") or []:
             ver = (v.get("version") or "").strip()
             less_than = (v.get("lessThan") or v.get("lessThanOrEqual") or "").strip()
@@ -96,6 +101,7 @@ def _parse(data: dict) -> dict:
         "title": title,
         "description": desc[:600],
         "products": products,
+        "affected": affected,
         "versions": versions[:8],
         "cwes": cwes[:5],
         "cvss_score": cvss_score,

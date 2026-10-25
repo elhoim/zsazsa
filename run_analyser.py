@@ -9,7 +9,7 @@ import config
 from core.logging_setup import setup_logging
 from analyser.products.flash_intel import process as process_flash_intel
 from analyser.reader import get_new_scraper_events, load_last_briefing, save_last_briefing, save_last_run
-from core.db import init_db, log_event, log_pipeline_run_start, log_pipeline_run_end
+from core.db import get_latest_pipeline_run, init_db, log_event, log_pipeline_run_start, log_pipeline_run_end
 from core.misp_client import get_misp, get_misp_webapp
 from webapp import analyser_pipeline, audit, feed_cache, job_store, misp_store
 from webapp.utils import scraper_enabled
@@ -26,12 +26,8 @@ def load_focus_points() -> dict:
 
 
 def scheduled_actions(now: datetime) -> list[str]:
-    """The dashboard's analyser actions this run makes, in the order they go.
-
-    Settings > System switches each one on. The daily briefing comes once a
-    day, from its hour on, and last: it rejects the events it finds irrelevant,
-    which takes them out of the other two.
-    """
+    """The dashboard's analyser actions this run makes, switched on under
+    Settings > System. The daily briefing comes once a day, from its hour on."""
     actions = []
     if getattr(config, "ANALYSER_FLASH_INTEL_REQUIREMENTS", False):
         actions.append("flash-intel")
@@ -44,50 +40,97 @@ def scheduled_actions(now: datetime) -> list[str]:
     return actions
 
 
-def run_scheduled_actions() -> None:
+def _last_scheduled_run(action: str) -> int | None:
+    """Where the next scheduled run of an action reads from: when the last one
+    that went through started, or where that one read from when a summary
+    failed in it, so the event is read and summarised again."""
+    run = get_latest_pipeline_run(action, triggered_by="schedule", status="completed")
+    if run is None:
+        return None
+    result = run["result"] or {}
+    if result.get("summary_failed"):
+        return result.get("since")
+    return int(datetime.fromisoformat(run["started_at"]).replace(tzinfo=timezone.utc).timestamp())
+
+
+def run_scheduled_actions(actions: list[str], now: datetime) -> dict:
+    """Run these actions, and return the result of each that went through."""
     logger = logging.getLogger(__name__)
-    now = datetime.now(timezone.utc)
-    for action in scheduled_actions(now):
+    results = {}
+    for action in actions:
         label = analyser_pipeline.ACTION_LABELS[action]
         job = job_store.create_job(action, label=f"Scheduled {label.lower()}",
                                    steps=analyser_pipeline.action_steps(action))
         # Yesterday's events too: one that came in after the last run of the
-        # day, or after the day's briefing, would otherwise never be read.
-        result = analyser_pipeline.run_action(job["id"], "analyser", triggered_by="schedule", days=2)
+        # day, or after the day's briefing, would otherwise never be read. The
+        # briefing takes the two days whole, once a day. The others run every
+        # hour and only read what came in or changed since they last did, or an
+        # event would be checked, and logged, some 48 times over.
+        since = None if action == "daily-briefing" else _last_scheduled_run(action)
+        result = analyser_pipeline.run_action(job["id"], "analyser", triggered_by="schedule", days=2,
+                                              since=since)
         if result is None:
             continue
+        results[action] = result
         logger.info("Scheduled %s: %s", label.lower(), result.get("message", ""))
         if action == "daily-briefing":
             save_last_briefing(now.date().isoformat())
+    return results
 
 
 def main() -> None:
     setup_logging()
     logger = logging.getLogger(__name__)
-    run_start = int(time.time())
     logger.info("Analyser started")
 
     init_db()
     # The scheduled actions write to the audit log, and the runs prune it.
     audit.init()
     run_id = log_pipeline_run_start("analyser", triggered_by="cli")
+    now = datetime.now(timezone.utc)
+    due = scheduled_actions(now) if scraper_enabled() else []
 
     try:
+        # The alerts from requirements and the advisories see the new events
+        # first: the check against the focus points below can reject an event
+        # that matches no focus point, which would take it out of both. The
+        # briefing, which rejects too, goes last.
+        results = run_scheduled_actions([a for a in due if a != "daily-briefing"], now)
+        advised = set((results.get("vea") or {}).get("source_event_uuids") or [])
         focus_points = load_focus_points()
         # Only the event analysis needs the scraper. An installation that
         # collects from other MISP servers has none, and the run goes ahead with
         # no events so the feed caches below still get their scheduled refresh.
         misp = misp_webapp = None
         events = []
-        alerted = set()
+        alerted, matched = set(), set()
+        # With the daily briefing on, it judges every event of the day itself,
+        # so nothing is rejected here for missing the focus points. Without it,
+        # an event a PIR or GIR matches is still left open: a briefing started
+        # from the dashboard always includes those.
+        for_briefing = getattr(config, "ANALYSER_DAILY_BRIEFING", False)
         if not scraper_enabled():
             logger.info("No MISP scraper configured; refreshing feed caches only")
         elif getattr(config, "ANALYSER_FLASH_INTEL", True):
             misp = get_misp()
             misp_webapp = get_misp_webapp()
+            # The watermark is taken as the events are read, after the alerts
+            # from requirements and the advisories: the summaries they wrote
+            # changed those events, and they would otherwise all be read, and
+            # sent to the model, again on the next run.
+            read_at = int(time.time())
             events = get_new_scraper_events(misp)
             # One alert per event, whichever run made it and whatever became of it.
             alerted = misp_store.flash_intel_source_uuids()
+            # An advisory just made moved its event on to ongoing, which the read
+            # above leaves out, but a CVE in a product we run can be worth an
+            # alert as well. Fetched again, so its tags are the ones it has now.
+            for uuid in advised - alerted - {e.uuid for e in events}:
+                event = misp.get_event(uuid, pythonify=True)
+                if not isinstance(event, dict):
+                    events.append(event)
+            if events and not for_briefing:
+                matched = set(analyser_pipeline.requirement_matches(events))
     except Exception as e:
         logger.error("Startup failed: %s", e)
         log_pipeline_run_end(run_id, "failed")
@@ -109,8 +152,16 @@ def main() -> None:
             if event.uuid in alerted:
                 logger.info("Event %s already has a flash intel alert", event.uuid)
                 continue
+            if for_briefing:
+                keep_open_for = "the daily briefing"
+            elif event.uuid in advised:
+                keep_open_for = "its advisory"
+            elif event.uuid in matched:
+                keep_open_for = "its PIR/GIR match"
+            else:
+                keep_open_for = ""
             try:
-                result = process_flash_intel(misp, misp_webapp, event, focus_points)
+                result = process_flash_intel(misp, misp_webapp, event, focus_points, keep_open_for=keep_open_for)
                 outcome = result["outcome"]
                 counts[outcome] = counts.get(outcome, 0) + 1
 
@@ -141,10 +192,9 @@ def main() -> None:
         # after a run that read no scraper: the watermark is a queue pointer, so
         # moving it over a window nothing was read from skips it for good.
         if misp is not None:
-            save_last_run(run_start)
+            save_last_run(read_at)
 
-        if scraper_enabled():
-            run_scheduled_actions()
+        run_scheduled_actions([a for a in due if a == "daily-briefing"], now)
 
         # Cached indicator feeds are re-run here rather than on a timer of their
         # own: this run is already the scheduled MISP work of the application.

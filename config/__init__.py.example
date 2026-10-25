@@ -135,6 +135,13 @@ THREAT_ACTOR_TYPES = [
 # any of these substrings (case-insensitive).
 DAILY_BRIEFING_TITLE_EXCLUSIONS = []
 
+# Vulnerability advisories: with the asset inventory on, the analyser only makes
+# an advisory for a CVE in a product listed in this CSV file of
+# "Supplier","Product","Version" rows, read again every so many minutes.
+ASSET_INVENTORY_ENABLED = False
+ASSET_INVENTORY_FILE = 'data/assets.csv'
+ASSET_INVENTORY_REFRESH_MINUTES = 60
+
 # Organisation-wide focus points used for AI-assisted briefing and relevance logic.
 FOCUS_POINTS_GEOGRAPHIES = []
 FOCUS_POINTS_SECTORS = []

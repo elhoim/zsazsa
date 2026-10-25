@@ -5576,6 +5576,25 @@ def stakeholders_on_automated_mode(product_type: str, tlp: str) -> list:
             if (s.product_modes or {}).get(product_type) == "automated"]
 
 
+def _roles_as_audience(stakeholders) -> str:
+    return ", ".join(_audience_roles(", ".join(s.role for s in stakeholders if s.role)))
+
+
+def requirement_audience(requirement, stakeholders) -> str:
+    """The audience of a product a PIR or GIR asked for: the roles of its owner
+    and of the stakeholders it is distributed to."""
+    return _roles_as_audience(
+        s for s in stakeholders
+        if s.uuid == requirement.owner_uuid
+        or _matches_distribution_entry(requirement.distribution, s.uuid, s.name, s.email))
+
+
+def subscriber_audience(product_type: str, tlp: str) -> str:
+    """The audience that reaches every stakeholder a product can go to: the
+    roles of its subscribers cleared for its TLP."""
+    return _roles_as_audience(stakeholders_cleared_for(product_type, tlp))
+
+
 def _audience_roles(audience_str: str) -> list:
     """The roles of an audience under the names the forms offer, each once, in
     order. A product saved by an older version may have "soc" or "IR"."""

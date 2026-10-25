@@ -207,10 +207,13 @@ def _prune_logs() -> None:
                 "DELETE FROM pipeline_run_log WHERE started_at < datetime('now', ?)",
                 (f"-{run_days} days",),
             )
-            # 0 keeps the audit log for good. Its timestamps are written as
-            # 2026-10-24T14:33:49, so the cutoff is too: datetime() puts a space
-            # where the T is, which as text sorts before every entry of that day.
-            if audit_days:
+        # A transaction of its own: the web app creates the audit log, and a
+        # database without one should still have the two above pruned. 0 keeps
+        # it for good. Its timestamps are written as 2026-10-24T14:33:49, so the
+        # cutoff is too: datetime() puts a space where the T is, which as text
+        # sorts before every entry of that day.
+        if audit_days:
+            with _connect() as conn:
                 conn.execute(
                     "DELETE FROM audit_log WHERE timestamp < strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)",
                     (f"-{audit_days} days",),
@@ -235,15 +238,23 @@ def _run_row(row) -> dict:
     return r
 
 
-def get_latest_pipeline_run(action: str) -> dict | None:
-    """Return the most recent run of the given action, with its parsed result."""
+def get_latest_pipeline_run(action: str, triggered_by: str = "", status: str = "") -> dict | None:
+    """Return the most recent run of the given action, with its parsed result,
+    of only those started that way or ended in that status when asked."""
+    where, args = ["action = ?"], [action]
+    if triggered_by:
+        where.append("triggered_by = ?")
+        args.append(triggered_by)
+    if status:
+        where.append("status = ?")
+        args.append(status)
     try:
         with _connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT id, started_at, finished_at, action, triggered_by, status, result_json"
-                " FROM pipeline_run_log WHERE action = ? ORDER BY id DESC LIMIT 1",
-                (action,),
+                f" FROM pipeline_run_log WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT 1",
+                args,
             ).fetchone()
         if not row:
             return None

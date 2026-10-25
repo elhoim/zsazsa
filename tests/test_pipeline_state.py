@@ -174,6 +174,15 @@ class LogRetention(unittest.TestCase):
         whole day of entries past their retention."""
         self.assertEqual(self.entries_after_pruning(365), ["today", "a day inside"])
 
+    def test_a_database_without_an_audit_log_still_has_the_rest_pruned(self):
+        with db.row_connection() as conn:
+            conn.execute("DROP TABLE audit_log")
+            conn.execute("INSERT INTO pipeline_run_log (action, started_at) VALUES ('vea', '2020-01-01T00:00:00')")
+        with self.assertLogs("core.db", level="WARNING"):
+            db._prune_logs()
+        with db.row_connection() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM pipeline_run_log").fetchone()[0], 0)
+
     def test_0_keeps_the_audit_log_for_good(self):
         self.assertEqual(self.entries_after_pruning(0), ["today", "a day inside", "an hour past", "long gone"])
 

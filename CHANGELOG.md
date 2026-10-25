@@ -13,6 +13,7 @@
 - The dashboard shows how many products wait for a review or are drafts.
 - On the manual entry form, the AI summary ticks the scope items it names. The form also has a MITRE ATT&CK picker.
 - The scheduled analyser can also make flash intel alerts from PIRs and GIRs, vulnerability advisories and the daily briefing. Switch them on under Settings > System > Analyser.
+- An asset database for vulnerability advisories, under Settings > Products. The analyser only makes an advisory for a CVE in a product listed in a CSV file of your assets.
 - The audit log under Reporting > Logs is pruned after `AUDIT_LOG_RETENTION_DAYS`, 365 by default. 0 keeps it for good, which the Logs page then says.
 
 ### Changed
@@ -24,6 +25,7 @@
 - The data collection table shows the ten words most titles share. A click on one searches for it.
 - On the data collection page, the actions of an event wait while an AI summary is being written for it, and come back when the summary ends.
 - While the analyser writes AI summaries for a daily briefing, flash intel alerts or advisories, the job says which one it is on.
+- An event that matches an active PIR or GIR is always in the daily briefing, also when it got a flash intel alert. It no longer goes through the AI's check of whether a story is useful to defenders, which could reject it.
 - In Background jobs, Abandoned and All remove a stalled job that no worker is on, such as a run cut off by a restart. Before, it stayed listed for four hours.
 - An RFI shows the answers given at triage in an Intake card, and they can be corrected on its edit form.
 - The intake checklist of a PIR can be corrected on its edit form.
@@ -36,6 +38,10 @@
 - zsazsa needs Python 3.11 or later. Python 3.10 reached its end of life on 1 October 2026, and Pillow 13, which fixes the vulnerabilities below, no longer installs on it.
 - Flash intel alerts from focus points are now drafts.
 - An event gets at most one flash intel alert, whichever run made it.
+- The flash intel alerts and vulnerability advisories the analyser drafts have an audience, so they can be published once reviewed. An alert from a PIR or GIR is for the requirement's owner and the stakeholders it is distributed to, any other draft for everyone who can receive it.
+- An AI summary that fails on one event no longer ends an analyser run. The event goes on without one, and a later run tries again. A briefing story whose relevance check fails is kept for the analyst to judge.
+- An analyser option whose search of the scraper MISP gets an error answer now fails and says why, instead of reporting no events.
+- With the scheduled daily briefing on, the hourly check against the focus points no longer rejects an event that matches no focus point. The event gets no alert and stays open, and the briefing judges it. With the briefing off, it is rejected as before, unless it matches an active PIR or GIR.
 
 ### Fixed
 
@@ -63,6 +69,7 @@
 - The collection cache gets two new columns. They are added when zsazsa starts, so nothing needs doing.
 - The new `ANALYSER_*` settings need nothing. By default the scheduled analyser only makes flash intel alerts from focus points, as before.
 - The first run after the upgrade removes audit log entries older than a year, and with them the delivery badge of products sent before then. The scheduled analyser runs on the new code without a restart, so to keep them, add `AUDIT_LOG_RETENTION_DAYS = 0`, or the number of days you want, to `config/__init__.py` before updating.
+- The `ASSET_INVENTORY_*` settings are new and need nothing: the asset database is off until switched on.
 - `PIPELINE_RUN_LOG_RETENTION_DAYS` now defaults to 90 days. A value already saved under Settings stays as it is.
 - Behind an outbound proxy, add `EnvironmentFile=-/etc/environment` to `/etc/systemd/system/zsazsa.service`, then `systemctl daemon-reload` and restart zsazsa.
 

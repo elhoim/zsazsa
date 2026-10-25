@@ -314,18 +314,18 @@ The dashboard has a **Start analyser** button with three options: **Daily threat
 ### Executed for all three options
 
 1. Refreshes the data collection cache.
-2. Asks the scraper MISP for events created **today** (UTC) that have the scraper tag (`SCRAPER_MARKER_TAG`), up to `MISP_SCRAPER_LIMIT` events.
+2. Asks the scraper MISP for events dated **today** (UTC) that have the scraper tag (`SCRAPER_MARKER_TAG`), up to `MISP_SCRAPER_LIMIT` events.
 3. Keeps only events that still need work, with workflow state `incomplete` or `ongoing`. Events marked `complete` or `rejected` are left alone.
 4. Drops events it cannot use: the article could not be fetched (HTTP error) or the report is empty. These are `rejected`.
-5. For each remaining event it makes sure there is an AI summary report, and creates one if it is missing.
+5. For each remaining event it makes sure there is an AI summary report, and creates one if it is missing. When the model or MISP fails on one event, that event goes on without a summary and the run continues with the others. The next scheduled run reads it again for its summary.
 
 ### Daily threat briefing
 
-This option is about **situational awareness**, not requirements.
+This option is about **situational awareness**, though what your requirements track is always in it.
 
 1. It applies the title exclusion list (`DAILY_BRIEFING_TITLE_EXCLUSIONS`) and skips events already used in an earlier briefing.
-2. For each event it asks the AI whether the story is relevant to your organisation, judged against the focus points (geographies, sectors, technologies, threat types and threat actors) set in Settings. Events that are not relevant are rejected, with the reason written back onto the event.
-3. For the events it keeps, it drafts a short write-up, extracts sectors, geographies, techniques, threat actors and vendors, and removes near-duplicate stories.
+2. For each event it asks the AI whether the story is useful to defenders: concrete threat information such as an incident, a campaign, an exploited CVE or attacker techniques, rather than marketing, company news or general trends. The AI is not given your focus points or requirements for this. Events that are not useful are rejected, with the reason written back onto the event. An event that matches an active PIR or GIR, which zsazsa decides from its tags and galaxies, is not asked about: it is always in the briefing, also when it got a flash intel alert.
+3. For the events it keeps, it drafts a short write-up with your focus points in mind, extracts sectors, geographies, techniques, threat actors and vendors, and removes near-duplicate stories.
 4. From the stories that survive, it writes the **briefing summary**: a few sentences covering the day as a whole, grouping the stories that share a sector, geography, actor or technique.
 5. The result is one **daily briefing draft** holding the day's stories, ready to review and publish.
 
@@ -345,24 +345,25 @@ This option is **CVE-driven**.
 1. For each event it looks for a CVE in its vulnerability attributes, and otherwise in its title.
 2. An event with at least one CVE gets a **vulnerability advisory draft**. The CVE is enriched from a vulnerability database (CVSS score, affected products and versions, description) and the advisory sections are drafted by the AI.
 3. An event with no CVE is skipped and logged as **"no CVE found"**.
+4. With the **asset database** on (Settings > Products), only a CVE in a product of your inventory makes a draft. See [Products](#products).
 
 ### The three options side by side
 
 | Option | What it acts on | What it skips, and why | Output |
 |---|---|---|---|
-| Daily threat briefing | Today's scraped events the AI judges relevant to your focus points | Off-topic stories, excluded titles, events already briefed | One daily briefing draft with the day's stories |
+| Daily threat briefing | Today's scraped events the AI judges useful to defenders, and those that match an active PIR or GIR | Off-topic stories, excluded titles, events already briefed | One daily briefing draft with the day's stories |
 | Flash intel alert | Today's scraped events that match an active PIR or GIR | Events logged as "no PIR/GIR match" | One flash intel draft per matched event |
 | Vulnerability advisory | Today's scraped events that mention a CVE | Events logged as "no CVE found" | One vulnerability advisory draft per CVE event |
 
-In every case the analyser stops at drafts. Publishing and sending to stakeholders is always a separate step you take by hand.
+In every case the analyser stops at drafts. Publishing and sending to stakeholders is always a separate step you take by hand. The drafts come with an audience, which an alert or advisory needs before it can be published: a flash intel alert from a PIR or GIR is for the roles of the requirement's owner and of the stakeholders it is distributed to, and any other alert or advisory for the roles of everyone who can receive it, its subscribers cleared for its TLP. Narrow it down before publishing where that is too wide.
 
 ### The scheduled analyser
 
 `run_analyser.py` runs from cron or in the analyser container. By default it only makes flash intel alerts from focus points. Under Settings > System > Analyser you can also switch on the three options of **Start analyser**.
 
-**Alerts from focus points.** Each run reads the `incomplete` scraper events since the previous run, at most `POLL_WINDOW_HOURS` back. The AI checks each article against the focus points. A match becomes a draft flash intel alert at TLP amber, and the source event moves to `ongoing`. For a stakeholder subscribed in **automated** mode, the alert is published and sent without review.
+**Alerts from focus points.** Each run reads the `incomplete` scraper events since the previous run, at most `POLL_WINDOW_HOURS` back. The AI checks each article against the focus points. A match becomes a draft flash intel alert at TLP amber, and the source event moves to `ongoing`. What happens to an event that matches no focus point depends on the daily briefing. With the scheduled briefing on, the event stays `incomplete`, and the briefing judges it in the evening with its own question: is it useful to defenders? So the briefing covers the whole day, while the alerts stay strict. With the briefing off, the event is rejected, unless it matches an active PIR or GIR, so a briefing started from the dashboard still has it. That match is read from the event's tags and galaxies, which the AI summary adds: switch on the alerts from PIRs and GIRs or the advisories as well, and the summaries are written before this check. With the scheduled briefing on, the data collection queue and the dashboard's pending count therefore hold more open events during the day, until the briefing has run. For a stakeholder subscribed in **automated** mode, the alert is published and sent without review.
 
-**The Start analyser options** work as described above, but also read yesterday's events, so late events are not missed. The daily briefing is made once a day, from `ANALYSER_DAILY_BRIEFING_HOUR` (UTC), and runs last because it rejects irrelevant events. Each option first writes the missing AI summaries, which adds a model call per new event.
+**The Start analyser options** work as described above, but also read yesterday's events, so late events are not missed. The alerts from PIRs and GIRs and the advisories, which run every hour, only read the events that came in or changed since their previous scheduled run, so an event is not checked and logged again every hour. The daily briefing is made once a day, from `ANALYSER_DAILY_BRIEFING_HOUR` (UTC). In a run, the alerts from PIRs and GIRs and the advisories go first, then the alerts from focus points, and the briefing last: the check against the focus points can reject an event that matches no focus point, and the briefing rejects the events it finds not useful, which would take them out of the others. An event that got an alert from a PIR or GIR earlier in the run is not checked against the focus points, since it has its alert. One that got an advisory is, so a CVE in a product you run can also get an alert. Each option first writes the missing AI summaries, which adds a model call per new event.
 
 An event never gets more than one flash intel alert.
 
@@ -444,6 +445,8 @@ zsazsa checks a MISP server's certificate against the CA list that ships with Py
 
 The Products tab covers how products and requirements are categorised and summarised. `PRODUCT_TYPES` defines the catalogue of CTI product types offered when creating a product. `DAILY_BRIEFING_TITLE_EXCLUSIONS` lists story titles or phrases that the daily briefing analyser should ignore when proposing stories. The five `FOCUS_POINTS_*` lists (geographies, sectors, technologies, threat types and threat actors) define the organisation-wide focus points used when previewing relevance against scraper events and when generating AI summaries. `THREAT_ACTOR_TYPES` is a small table of threat actor type names and descriptions, based on the ENISA taxonomy, used when classifying threat actors in products and requirements.
 
+The **Vulnerability advisory** card holds the **asset database**. With it on, the analyser only makes a vulnerability advisory for a CVE in a product you run: it looks for the CVE's supplier and product, as the vulnerability database lists them, in your inventory. An event without a match is logged as "not in the asset inventory", and a matched advisory names the asset under "Our exposure". A CVE whose record names no product, because it is still reserved or its lookup failed, cannot be checked: it makes a draft whose "Our exposure" says so, for the analyst to decide, unless another CVE of the event is in the inventory. Names are compared loosely: case, punctuation and company forms such as "Inc." do not count, "PAN-OS" is "PANOS", and a supplier matches its initials, so "HPE" is Hewlett Packard Enterprise. The version is shown but not compared. An advisory made by hand is not checked. The inventory is a CSV file for now, one asset per line as `"Supplier","Product","Version"`, read again every `ASSET_INVENTORY_REFRESH_MINUTES`; with Docker, put it under `volumes/data`. The card says how many assets the file holds, or why it cannot be read, and a file that cannot be read fails the advisory run.
+
 | Setting | Description |
 |---|---|
 | `PRODUCT_TYPES` | Catalogue of CTI product types offered when creating a product |
@@ -454,6 +457,9 @@ The Products tab covers how products and requirements are categorised and summar
 | `FOCUS_POINTS_THREAT_TYPES` | Organisation-wide threat type focus points |
 | `FOCUS_POINTS_THREAT_ACTORS` | Organisation-wide threat actor focus points |
 | `THREAT_ACTOR_TYPES` | Threat actor type names and descriptions (ENISA taxonomy) |
+| `ASSET_INVENTORY_ENABLED` | Only make a vulnerability advisory for a CVE in a product of the asset inventory |
+| `ASSET_INVENTORY_FILE` | The asset inventory, a CSV file of `"Supplier","Product","Version"` rows |
+| `ASSET_INVENTORY_REFRESH_MINUTES` | How often the asset inventory is read again |
 
 Renaming a product type does not rename it in the stakeholder subscriptions already stored in MISP. The System tab has a migration for the one rename that shipped with zsazsa ("Vulnerability exploitation advisory" to "Vulnerability advisory").
 

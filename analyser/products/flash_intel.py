@@ -45,7 +45,13 @@ def _event_date(event) -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def process(misp, misp_webapp, event, focus_points: dict) -> dict:
+def process(misp, misp_webapp, event, focus_points: dict, keep_open_for: str = "") -> dict:
+    """Make a flash intel alert from an event whose article matches a focus point.
+
+    An event that matches none is rejected, unless ``keep_open_for`` says what
+    it is left open for: the daily briefing only reads the events nobody
+    rejected.
+    """
     source_feed = tagger.get_source_feed(event)
 
     http_error = _get_http_error(event)
@@ -70,6 +76,9 @@ def process(misp, misp_webapp, event, focus_points: dict) -> dict:
             # The prompt asks for the focus points a relevant article matches.
             reason = f"Relevant, but no focus point matched. {reason}".strip()
         logger.info("Event %s not relevant: %s", event.uuid, reason)
+        if keep_open_for:
+            return {"outcome": "not_relevant", "source_feed": source_feed,
+                    "detail": f"{reason} Kept open for {keep_open_for}.".strip()}
         tagger.set_workflow_state(misp, event, "rejected")
         return {"outcome": "not_relevant", "source_feed": source_feed, "detail": reason}
 
@@ -244,6 +253,11 @@ def _add_flash_intel_object(misp_webapp, product_event, fia_id, source_event, co
     add("author", "analyser")
     if matched:
         add("affected-assets", ", ".join(matched))
+    try:
+        # Everyone the alert can reach, for the analyst to narrow down.
+        add("audience", misp_store.subscriber_audience(_FLASH_INTEL_PRODUCT_NAME, _AUTO_TLP))
+    except Exception as exc:
+        logger.warning("Could not read the stakeholders for the audience of %s: %s", fia_id, exc)
     reply = misp_webapp.add_object(product_event, obj)
     if isinstance(reply, dict) and reply.get("errors"):
         logger.error("Could not add the flash intel object to %s: %s", fia_id, reply["errors"])

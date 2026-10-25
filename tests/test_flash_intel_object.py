@@ -21,11 +21,14 @@ from analyser.products import flash_intel
 
 
 class Object(unittest.TestCase):
+    reachable = "SOC, CTI"
+
     def add(self, reply):
         misp_webapp = mock.create_autospec(PyMISP, instance=True)
         misp_webapp.add_object.return_value = reply
         source = mock.MagicMock(uuid="s" * 36, info="An article", tags=[])
-        with mock.patch.object(flash_intel.tagger, "get_source_feed", return_value="feed"):
+        with mock.patch.object(flash_intel.tagger, "get_source_feed", return_value="feed"), \
+             mock.patch("webapp.misp_store.subscriber_audience", return_value=self.reachable) as self.audience:
             saved = flash_intel._add_flash_intel_object(
                 misp_webapp, MISPEvent(), "FIA-00007", source, "## Summary\nOne line.", ["energy"])
         return saved, misp_webapp.add_object.call_args[0][1]
@@ -35,6 +38,12 @@ class Object(unittest.TestCase):
         self.assertEqual(obj.to_dict()["meta-category"], "intelligence")
         relations = {a.object_relation for a in obj.attributes}
         self.assertLessEqual({"fia-id", "review-state", "summary", "source-event-uuid"}, relations)
+
+    def test_its_audience_is_everyone_it_can_reach(self):
+        """A draft without one cannot be published, and an analyser draft had none."""
+        _saved, obj = self.add({"Object": {}})
+        self.audience.assert_called_once_with("Flash intel alert", "amber")
+        self.assertEqual({a.object_relation: a.value for a in obj.attributes}["audience"], "SOC, CTI")
 
     def test_it_is_a_draft_that_names_its_source(self):
         """A draft, as everything else the analyser makes is, and its source is
@@ -58,7 +67,7 @@ class Object(unittest.TestCase):
 class Process(unittest.TestCase):
     RELEVANT = {"relevant": True, "matched_focus_points": ["energy"], "source_type": "news-report"}
 
-    def run_process(self, object_saved=True, relevance=RELEVANT):
+    def run_process(self, object_saved=True, relevance=RELEVANT, keep_open_for=""):
         misp = mock.create_autospec(PyMISP, instance=True)
         misp_webapp = mock.create_autospec(PyMISP, instance=True)
         created = MISPEvent()
@@ -73,7 +82,7 @@ class Process(unittest.TestCase):
              mock.patch.object(flash_intel, "_add_flash_intel_object", return_value=object_saved), \
              mock.patch.object(flash_intel, "_automated_subscribers", return_value=[]), \
              mock.patch.object(flash_intel, "tagger") as tagger:
-            result = flash_intel.process(misp, misp_webapp, event, {})
+            result = flash_intel.process(misp, misp_webapp, event, {}, keep_open_for=keep_open_for)
         self.generate, self.misp_webapp = generate, misp_webapp
         return result, tagger, event, report
 
@@ -85,6 +94,18 @@ class Process(unittest.TestCase):
     def test_the_source_event_is_marked_as_the_source_of_an_alert(self):
         _result, tagger, event, _report = self.run_process(True)
         self.assertIn(mock.call(mock.ANY, event, 'zsazsa:product="flash-intel"'), tagger.add_tag.call_args_list)
+
+    def test_an_event_kept_open_is_not_rejected_for_the_focus_points(self):
+        """The daily briefing only reads the events nobody rejected."""
+        result, tagger, event, _report = self.run_process(
+            relevance={"relevant": False, "reason": "Off topic", "matched_focus_points": []},
+            keep_open_for="the daily briefing")
+        self.assertEqual((result["outcome"], result["detail"]),
+                         ("not_relevant", "Off topic Kept open for the daily briefing."))
+        tagger.set_workflow_state.assert_not_called()
+        result, tagger, event, _report = self.run_process(
+            relevance={"relevant": False, "reason": "Off topic", "matched_focus_points": []})
+        tagger.set_workflow_state.assert_called_once_with(mock.ANY, event, "rejected")
 
     def test_its_event_has_the_draft_workflow_state(self):
         self.run_process(True)

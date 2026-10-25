@@ -13,7 +13,7 @@ import requests
 import config as _config
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, send_file, url_for
 from markupsafe import escape
-from core import ai_connector, flowintel_client
+from core import ai_connector, asset_inventory, flowintel_client
 from core.atomic_write import write_atomically
 from webapp import audit, misp_session, misp_store, newsletter_parsers
 from webapp.collection_cache import _split_tags, filter_events_by_org, partner_tag_filter
@@ -258,6 +258,9 @@ def _read() -> dict:
         "FOCUS_POINTS_THREAT_TYPES": focus_points_threat_types,
         "FOCUS_POINTS_THREAT_ACTORS": focus_points_threat_actors,
         "THREAT_ACTOR_TYPES": threat_actor_types,
+        "ASSET_INVENTORY_ENABLED": getattr(_config, "ASSET_INVENTORY_ENABLED", False),
+        "ASSET_INVENTORY_FILE": getattr(_config, "ASSET_INVENTORY_FILE", "data/assets.csv"),
+        "ASSET_INVENTORY_REFRESH_MINUTES": getattr(_config, "ASSET_INVENTORY_REFRESH_MINUTES", 60),
         "COLLECTION_TAG_STRIP_PREFIXES": tag_strip_prefixes,
         "COLLECTION_TAG_HIDE_PREFIXES": tag_hide_prefixes,
         "TAG_STAKEHOLDER": _config.TAG_STAKEHOLDER,
@@ -638,6 +641,13 @@ THREAT_ACTOR_TYPES = {tat_repr}
 # any of these substrings (case-insensitive).
 DAILY_BRIEFING_TITLE_EXCLUSIONS = {briefing_title_exclusions_repr}
 
+# Vulnerability advisories: with the asset inventory on, the analyser only makes
+# an advisory for a CVE in a product listed in this CSV file of
+# "Supplier","Product","Version" rows, read again every so many minutes.
+ASSET_INVENTORY_ENABLED = {bool(values.get('ASSET_INVENTORY_ENABLED'))}
+ASSET_INVENTORY_FILE = {values.get('ASSET_INVENTORY_FILE') or 'data/assets.csv'!r}
+ASSET_INVENTORY_REFRESH_MINUTES = {int(values.get('ASSET_INVENTORY_REFRESH_MINUTES') or 60)}
+
 # Organisation-wide focus points used for AI-assisted briefing and relevance logic.
 FOCUS_POINTS_GEOGRAPHIES = {fp_geographies_repr}
 FOCUS_POINTS_SECTORS = {fp_sectors_repr}
@@ -865,6 +875,9 @@ def index():
             "FOCUS_POINTS_THREAT_TYPES": fp_threat_types,
             "FOCUS_POINTS_THREAT_ACTORS": fp_threat_actors,
             "THREAT_ACTOR_TYPES": threat_actor_types,
+            "ASSET_INVENTORY_ENABLED": _form_bool("ASSET_INVENTORY_ENABLED"),
+            "ASSET_INVENTORY_FILE": _form_str("ASSET_INVENTORY_FILE") or "data/assets.csv",
+            "ASSET_INVENTORY_REFRESH_MINUTES": max(1, _form_int("ASSET_INVENTORY_REFRESH_MINUTES", 60)),
             "COLLECTION_TAG_STRIP_PREFIXES": tag_strip_prefixes,
             "COLLECTION_TAG_HIDE_PREFIXES": tag_hide_prefixes,
             "TAG_STAKEHOLDER": _form_tag("TAG_STAKEHOLDER"),
@@ -952,8 +965,13 @@ def index():
         active_tab = "tab-connections"
     key_shortcomings = (misp_store.webapp_key_shortcomings()
                         if cfg["MISP_WEBAPP_URL"] and cfg["MISP_WEBAPP_KEY"] else None)
+    # Read here rather than from the cache, so a file just put in place shows.
+    try:
+        asset_count, asset_error = len(asset_inventory.read(cfg["ASSET_INVENTORY_FILE"])), ""
+    except asset_inventory.InventoryError as exc:
+        asset_count, asset_error = 0, str(exc)
     return render_template("config_page.html", cfg=cfg, active_tab=active_tab, migrations=MIGRATIONS,
-                           key_shortcomings=key_shortcomings)
+                           key_shortcomings=key_shortcomings, asset_count=asset_count, asset_error=asset_error)
 
 
 @bp.route("/config/run-migration", methods=["POST"])
